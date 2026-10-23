@@ -1,0 +1,113 @@
+# Implementation Plan: Model Inventory with Library and Weight-File Alerts
+
+**Branch**: `001-inventory-alerts` | **Date**: 2026-10-23 | **Spec**: [spec.md](spec.md)
+
+**Input**: Feature specification from `/specs/001-inventory-alerts/spec.md`
+
+## Summary
+
+A command-line service that registers a trained model as a pinned inventory (CycloneDX 1.7 JSON: weight
+files by SHA-256, packages by purl, base model by `pkg:huggingface` purl at a commit, datasets by DOI),
+then checks it daily or on request. Packages are matched against OSV.dev advisories, with OSV's match
+re-checked locally by PEP 440 range evaluation; weight files are classified by format and pickle files
+scanned statically with `picklescan`, plus the Hugging Face scan verdict for hub-hosted files. Alerts
+need a confirmed match and carry stored evidence; everything uncertain is a watch event. A newer model
+version closes the alerts whose cause it removed. Technical decisions: [research.md](research.md).
+
+## Technical Context
+
+**Language/Version**: Python 3.12, type hints throughout
+
+**Primary Dependencies**: `packaging` 26.3 (PEP 440 versions, name normalisation), `jsonschema` 4.26.0
+(CycloneDX schema validation), `picklescan` 1.0.5 (static pickle scan); standard library for HTTP
+(`urllib`), TOML (`tomllib`) and storage (`sqlite3`)
+
+**Storage**: SQLite file plus a content-addressed store of raw source responses (research R6)
+
+**Testing**: pytest with recorded source responses in `tests/fixtures/`; the default run makes no network
+calls; live tests are marked `live` and excluded by default
+
+**Target Platform**: Linux, macOS and Windows hosts with Python 3.12; scheduled by the host
+
+**Project Type**: command-line tool (library plus CLI)
+
+**Performance Goals**: a check of one model with 100 locked packages finishes in under 60 seconds on an
+ordinary connection; registering the worked example (about 0.6 GB of weights) in under 5 minutes, hashing
+included (SC-001)
+
+**Constraints**: no network in tests; generic User-Agent and no personal data to sources; within
+published rate limits; never writes to a model or its repository
+
+**Scale/Scope**: one organisation; tens to hundreds of models; daily checks
+
+## Constitution Check
+
+*GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
+
+| Principle | How this plan meets it | Before research | After design |
+| :-- | :-- | :-- | :-- |
+| I. Evidence on Every Alert | Every alert and watch event stores source, URL, retrieval time, matched identifier and the SHA-256 of the stored raw response (data model: Evidence) | Pass | Pass |
+| II. Pinned Inventory, Open Standards | CycloneDX 1.7, validated against the official schema; purls for packages and base models; DOIs; custom values only as documented `model-dependabot:` properties ([inventory profile](contracts/inventory-profile.md)) | Pass | Pass |
+| III. Advise, Never Act | No command writes to a model or its repository; only a newer registered version closes an alert as fixed ([CLI contract](contracts/cli.md)) | Pass | Pass |
+| IV. Precision First | Package alerts need OSV's match and the local range evaluation to agree; pickle format alone is a watch event; hub verdicts other than an explicit "unsafe" are watch events; failed sources change nothing | Pass | Pass |
+| V. Test-First with Offline Feed Tests | Every adapter tested against recorded responses; dangerous-pickle fixtures are scanned, never loaded; tests written to fail first in `tasks.md` | Pass | Pass |
+| Neutral open source; privacy; polite to sources | No institution names; no platform referenced in code; generic User-Agent; cached responses and back-off | Pass | Pass |
+
+No violations; Complexity Tracking is empty.
+
+## Project Structure
+
+### Documentation (this feature)
+
+```text
+specs/001-inventory-alerts/
+├── plan.md              # This file
+├── research.md          # Phase 0: decisions R1-R10
+├── data-model.md        # Phase 1: entities, rules, alert states
+├── quickstart.md        # Phase 1: validation guide
+├── contracts/
+│   ├── cli.md               # commands, exit codes, JSON shapes
+│   ├── manifest.md          # TOML registration input
+│   └── inventory-profile.md # CycloneDX 1.7 mapping
+├── checklists/requirements.md
+└── tasks.md             # Phase 2 (/speckit-tasks)
+```
+
+### Source Code (repository root)
+
+```text
+pyproject.toml                      # package, console script, dependencies, pytest config
+src/model_dependabot/
+├── cli.py                          # argument parsing, output (text and JSON), exit codes
+├── manifest.py                     # TOML manifest reading and validation
+├── lockfile.py                     # hash-locked requirements parsing
+├── inventory/
+│   ├── build.py                    # manifest -> inventory entries (hashing, gaps)
+│   ├── cyclonedx.py                # entries <-> CycloneDX 1.7 JSON, schema validation
+│   └── schema/                     # vendored bom-1.7, spdx, jsf schemas with SHA-256 list
+├── sources/
+│   ├── fetcher.py                  # Fetcher interface, urllib implementation, cache, back-off
+│   ├── osv.py                      # querybatch and vulns/{id}
+│   ├── hf.py                       # tree hashes, revision, securityStatus verdict
+│   └── pickle_scan.py              # picklescan adapter
+├── matching/
+│   ├── versions.py                 # OSV range evaluation with PEP 440
+│   └── severity.py                 # severity and its origin
+├── lifecycle.py                    # alerts, watch events, auto-close, dismissal
+├── store.py                        # SQLite schema and evidence store
+└── reports.py                      # per-model views and history
+tests/
+├── fixtures/                       # recorded OSV and Hugging Face responses, crafted pickles, manifests
+├── unit/
+├── contract/                       # CLI JSON shapes, CycloneDX round trip, manifest rules
+└── integration/                    # register -> check -> alert -> new version -> fixed, offline
+```
+
+**Structure Decision**: a single Python package with a console script, laid out by responsibility so each
+source adapter can be tested alone against its recorded responses.
+
+## Complexity Tracking
+
+> **Fill ONLY if Constitution Check has violations that must be justified**
+
+None.
