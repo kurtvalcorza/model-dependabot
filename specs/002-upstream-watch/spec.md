@@ -8,6 +8,15 @@
 
 **Input**: User description: "Upstream watch for base models and training datasets. Using the inventory from feature 001, the service checks on a schedule and on demand whether a model's base model and training datasets have changed or disappeared: alerts for a retracted dataset, a removed dataset, a changed licence and a base model that is disabled or no longer publicly available; watch events for new versions, obsoletion, gating changes and other card changes. Anonymous access only; polling, not webhooks."
 
+## Clarifications
+
+### Session 2026-10-23
+
+- Q: Which severity should each new alert type carry? → A: Retraction and removal High; licence change High; base model disabled Medium; base model no longer publicly available Low.
+- Q: Which dataset repositories should be checked for removal records? → A: Zenodo, Figshare and Hugging Face are in scope; the Figshare and Hugging Face removal feeds are researched before planning, and until verified they raise no alerts.
+- Q: Which Hugging Face HTTP responses count as "the hub refuses access"? → A: 401, 403 and 404 all count as refusal.
+- Q: Which reference list decides whether two licence names mean the same licence? → A: The SPDX licence list.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Alert when a training dataset is retracted or removed (Priority: P1)
@@ -100,20 +109,20 @@ The owner sees, as watch events rather than alerts, changes upstream that may ma
 **Datasets**
 
 - **FR-004**: The service MUST raise an alert when a published retraction notice names a dataset's DOI, or a paper DOI the inventory ties to that dataset, with the notice's identifier, its source and the retrieval time as evidence.
-- **FR-005**: The service MUST raise an alert when the repository that published a dataset lists its record as removed, with the removal date and stated reason (or that no reason was given) as evidence.
+- **FR-005**: The service MUST raise an alert when the repository that published a dataset lists its record as removed, with the removal date and stated reason (or that no reason was given) as evidence. The repositories in scope are Zenodo, Figshare and Hugging Face. A repository whose removal feed is not yet verified MUST raise no alerts until it is.
 - **FR-006**: The service MUST raise an alert when a dataset's DOI is no longer findable in the DOI registry, with the registry's response as evidence.
 - **FR-007**: The service MUST record a watch event, not an alert, when a dataset has a newer version or is marked as replaced, naming the newer or replacing record.
 
 **Licences**
 
 - **FR-008**: The service MUST record the declared licence of the base model and of each dataset when a model version is registered, if the source declares one.
-- **FR-009**: The service MUST raise an alert when a declared licence differs from the recorded one after both are normalised to a standard licence identifier; differences in spelling, letter case or a known alias of the same identifier MUST NOT raise an alert.
+- **FR-009**: The service MUST raise an alert when a declared licence differs from the recorded one after both are normalised to an identifier from the SPDX licence list; differences in spelling, letter case or a known alias of the same identifier MUST NOT raise an alert.
 - **FR-010**: The service MUST record a watch event when a licence cannot be normalised, or a source no longer declares a licence that was recorded.
 
 **Base model**
 
 - **FR-011**: The service MUST raise an alert at once when the hub reports the base model as disabled.
-- **FR-012**: The service MUST raise a "no longer publicly available (deleted or made private)" alert only when the hub refuses access to the base model on two consecutive scheduled checks at least 24 hours apart; a single refusal MUST be a watch event; failed or timed-out requests MUST NOT count.
+- **FR-012**: The service MUST raise a "no longer publicly available (deleted or made private)" alert only when the hub refuses access to the base model (HTTP 401, 403 or 404) on two consecutive scheduled checks at least 24 hours apart; a single refusal MUST be a watch event; failed or timed-out requests MUST NOT count.
 - **FR-013**: The service MUST record watch events for a newer base-model revision (showing the pinned and newest revision), for the author's pointer to a newer model, for gating changes and for card changes other than the licence.
 
 **Lifecycle and evidence**
@@ -123,6 +132,7 @@ The owner sees, as watch events rather than alerts, changes upstream that may ma
 - **FR-016**: A "no longer publicly available" alert MUST close when the base model becomes publicly reachable again; a retraction alert MUST close as withdrawn if the retraction notice is withdrawn.
 - **FR-017**: The service MUST NOT change any model, dataset or repository.
 - **FR-018**: The service MUST NOT change any alert's state because of a source that failed during a check.
+- **FR-019**: Every alert in this feature MUST state its severity as follows: retraction and removal alerts High; licence change alerts High; base model disabled alerts Medium; "no longer publicly available" alerts Low.
 
 ### Key Entities
 
@@ -147,7 +157,7 @@ The owner sees, as watch events rather than alerts, changes upstream that may ma
 
 - Feature 001 is in place: inventories, alerts, watch events, evidence, check runs and the schedule are reused, not redefined.
 - Base models and hub-hosted datasets are on one hub (Hugging Face); other hubs are out of scope.
-- Dataset retractions come from public scholarly retraction records (Crossref retraction notices and the Retraction Watch data), removals from the publishing repository's removal records (Zenodo first), and findability from the DOI registry (DataCite); research/landscape.md sections 3 and 4 confirm these sources and their limits.
+- Dataset retractions come from public scholarly retraction records (Crossref retraction notices and the Retraction Watch data), removals from the publishing repository's removal records (Zenodo, Figshare and Hugging Face; the Figshare and Hugging Face feeds are not yet verified, see FR-005), and findability from the DOI registry (DataCite); research/landscape.md sections 3 and 4 confirm these sources and their limits.
 - The tie between a dataset and its paper DOI is declared in the inventory by the owner; the service does not guess it.
 - Changes are found by polling on the schedule; push notifications (webhooks) need a public endpoint and are out of scope.
 - Some removal records are published infrequently (Zenodo's dump monthly at best), so SC-006 holds from the time the source publishes, not from the time of removal.
