@@ -43,7 +43,7 @@ Single project: `src/model_dependabot/` and `tests/` at the repository root (pla
 
 **CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T006 [P] Write failing tests in `tests/unit/test_fetcher.py`: a `RecordedFetcher` serves responses from `tests/fixtures/` by method, URL and body; the real `UrlFetcher` sends a generic User-Agent (no personal data, no email address), applies a timeout, retries with back-off on 429/5xx, and caches by URL and body; every response returns its body, status, URL and retrieval time
+- [ ] T006 [P] Write failing tests in `tests/unit/test_fetcher.py`: a `RecordedFetcher` serves responses from `tests/fixtures/` by method, URL and body; the real `UrlFetcher` sends a generic User-Agent (no personal data, no email address), applies a timeout, retries with back-off on 429/5xx and caches by URL and body; every response returns its body, status, URL and retrieval time
 - [ ] T007 Implement `src/model_dependabot/sources/fetcher.py` (`Fetcher` protocol, `UrlFetcher` on `urllib.request`, `RecordedFetcher`) until T006 passes
 - [ ] T008 [P] Write failing tests in `tests/unit/test_store.py` for the SQLite schema of data-model.md: tables for models, model versions, inventory entries, advisories, check runs, evidence, alerts and watch events; "At most one `open` alert per `model_id` and `cause_key`" enforced by the database; evidence bodies stored as files named by SHA-256 and referenced by `body_sha256`; a model version's inventory cannot be updated once recorded (FR-005)
 - [ ] T009 Implement `src/model_dependabot/store.py` until T008 passes
@@ -118,7 +118,7 @@ Single project: `src/model_dependabot/` and `tests/` at the repository root (pla
 ### Tests for User Story 3
 
 - [ ] T035 [P] [US3] Create crafted pickle fixtures in `tests/fixtures/pickles/`, built as raw opcode bytes by a fixture script and never loaded: one importing `os.system` (dangerous), one importing only `collections.OrderedDict` and `torch._utils._rebuild_tensor_v2` (innocuous), one importing a suspicious global; plus a PyTorch-zip-wrapped copy of the dangerous one
-- [ ] T036 [P] [US3] Write failing tests in `tests/unit/test_pickle_scan.py`: the adapter calls `picklescan.scanner.scan_bytes` with the file extension, never unpickles, and maps `dangerous`, `suspicious` and `innocuous` globals to findings with the global names as evidence
+- [ ] T036 [P] [US3] Write failing tests in `tests/unit/test_pickle_scan.py`: the adapter calls `picklescan.scanner.scan_bytes` with the file extension, never unpickles and maps `dangerous`, `suspicious` and `innocuous` globals to findings with the global names as evidence
 - [ ] T037 [P] [US3] Write failing tests in `tests/unit/test_hf_scan.py` with recorded `GET /api/models/{repo}?securityStatus=true` responses in `tests/fixtures/hf/`: an explicit unsafe verdict for a file whose SHA-256 matches the inventory raises an alert; missing, pending, unrecognised or hash-mismatched results are watch events (`hub_scan_unknown`, `hash_mismatch`) (research R5)
 - [ ] T038 [P] [US3] Write failing tests in `tests/unit/test_lifecycle_weights.py`: every pickle-based file gets a `pickle_format` watch event with format and suggestion (FR-011); a `dangerous` scan raises a `weight_file_scan` alert with severity `HIGH`, the scanner and the dangerous globals (FR-013); `suspicious` adds a `scan_suspicious` watch event; code-free formats get nothing
 - [ ] T039 [US3] Write a failing integration test in `tests/integration/test_check_weights.py` covering the Independent Test above
@@ -135,7 +135,7 @@ Single project: `src/model_dependabot/` and `tests/` at the repository root (pla
 
 ## Phase 6: User Story 4 - Alerts close when a new model version fixes the cause (Priority: P2)
 
-**Goal**: Registering a newer version closes alerts whose cause it removed, carries forward those it still has, and people can dismiss with a listed reason.
+**Goal**: Registering a newer version closes alerts whose cause it removed, carries forward those it still has and lets people dismiss with a listed reason.
 
 **Independent Test**: Version 2 with the package upgraded past the fixed version closes the alert as `fixed` by version 2 (SC-004); a dismissal records reason, person and time.
 
