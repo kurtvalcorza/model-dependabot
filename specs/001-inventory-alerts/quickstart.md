@@ -52,8 +52,16 @@ suite covers the dangerous case with a crafted pickle fixture that is never load
 
 ## 5. Auto-close
 
-Register version 2 with the vulnerable package upgraded past the fixed version, then check again.
-Expected: the alert shows `fixed`, closed by version 2 (US4, SC-004).
+Register version 2 with the vulnerable package upgraded past the fixed version, then list the alerts
+without running a check:
+
+```bash
+uv run model-dependabot register example-v2.toml --model-id rice-pest-r50-v5
+uv run model-dependabot alerts rice-pest-r50-v5 --state all
+```
+
+Expected: the alert shows `fixed`, closed by version 2, straight after registration; no source is
+consulted (US4, FR-014, SC-004).
 
 ## 6. Source failure
 
@@ -65,4 +73,11 @@ alert changes state (SC-007).
 Run `uv run model-dependabot check --all` daily from the host scheduler:
 
 - Linux: a cron line such as `15 2 * * * cd /srv/model-dependabot && uv run model-dependabot check --all`.
+- Linux with systemd: a `model-dependabot.service` unit with `WorkingDirectory=/srv/model-dependabot`
+  and `ExecStart=uv run model-dependabot check --all`, plus a `model-dependabot.timer` unit with
+  `OnCalendar=*-*-* 02:15:00` and `Persistent=true`, enabled with `systemctl enable --now
+  model-dependabot.timer`.
 - Windows: a Task Scheduler task with the same command.
+
+A daily run meets SC-006: an advisory published after one run is matched at the next, within one
+scheduled interval, and an owner can run `check` at any time (FR-006).

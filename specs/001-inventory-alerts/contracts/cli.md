@@ -8,16 +8,16 @@ output is plain text. No command changes a model or writes to a model's reposito
 
 | Command | Does | Requirements |
 | :-- | :-- | :-- |
-| `register MANIFEST.toml [--model-id ID]` | Registers a new model, or a new version of `ID`, from a [manifest](manifest.md); computes hashes; records gaps. A new version re-evaluates the previous version's open alerts (fixed or carried forward). | FR-001 to FR-003, FR-005, FR-014 |
+| `register MANIFEST.toml [--model-id ID]` | Registers a new model, or a new version of `ID`, from a [manifest](manifest.md); computes hashes; records gaps. A new version re-evaluates the previous version's open alerts at registration (fixed or carried forward), by comparing the two inventories; no source is consulted. | FR-001 to FR-003, FR-005, FR-014 |
 | `import BOM.json --model-id ID` | Registers a version from an existing CycloneDX inventory ([profile](inventory-profile.md)); entries without exact identifiers become gaps. | FR-004, FR-003 |
 | `inventory show ID [--version N]` | Lists entries with identifiers, and gaps with their reasons. | US1 |
 | `inventory export ID [--version N] -o FILE` | Writes the stored CycloneDX 1.7 document, validated against the official schema. | FR-004 |
-| `check (ID \| --all) [--source osv,picklescan,hf-scan]` | Runs the checks now and records a check run. Scheduled use: `check --all` daily. | FR-006, FR-011, FR-012, FR-016 |
-| `policy ID --format (default\|strict)` | Sets the model's format policy; takes effect at the next check. | FR-021 |
+| `check (ID \| --all) [--source osv,picklescan,hf-scan]` | Runs the checks now and records a check run; closes alerts as `withdrawn` or `cleared` when a source that answered in this run withdraws or clears the cause. Scheduled use: `check --all` daily. | FR-006, FR-009, FR-011, FR-012, FR-016, FR-023 |
+| `policy ID --format (default\|strict) --by NAME` | Sets the model's format policy and records who set it and when (the evidence for a `format_policy` alert); takes effect at the next check. | FR-021 |
 | `alerts ID [--state open\|closed\|all]` | Lists alerts by severity, then watch events. | FR-018 |
 | `alert show ALERT_ID` | One alert with all its evidence. | FR-019 |
 | `alert dismiss ALERT_ID --reason REASON [--note TEXT] --by NAME` | Dismisses with a listed reason. | FR-015 |
-| `history ID` | Closed alerts with how and when they closed. | US5 |
+| `history ID` | Closed alerts with how (`fixed`, `dismissed`, `withdrawn` or `cleared`) and when they closed. | US5 |
 
 `REASON` is one of `not_used_at_runtime`, `risk_accepted`, `false_positive`, `fix_not_available`.
 
