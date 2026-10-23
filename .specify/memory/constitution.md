@@ -32,8 +32,9 @@ inventory.
 
 The service MUST only alert and suggest. It MUST NOT change, retrain, re-export, retire or unpublish a
 model, and it MUST NOT open changes against a model's repository on its own. An alert closes
-automatically only when a newer model version's inventory shows the cause is gone; otherwise a person
-closes it with a recorded reason.
+automatically only when a newer model version's inventory shows the cause is gone, or when the source
+itself withdraws or clears the cause, with that observation recorded as evidence; otherwise a person closes
+it with a recorded reason.
 
 Rationale: the model's owner is accountable for the model; a monitoring service that acts on its own
 can break what it watches.
@@ -82,4 +83,4 @@ follow semantic versioning: MAJOR when a principle is removed or redefined, MINO
 section is added or materially expanded, PATCH for clarifications. Each feature plan's Constitution
 Check verifies compliance; a justified exception is recorded in that plan's Complexity Tracking.
 
-**Version**: 1.0.0 | **Ratified**: 2026-10-23 | **Last Amended**: 2026-10-23
+**Version**: 1.0.1 | **Ratified**: 2026-10-23 | **Last Amended**: 2026-10-24

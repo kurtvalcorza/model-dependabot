@@ -169,5 +169,5 @@ The owner sees, as watch events rather than alerts, changes upstream that may ma
 - Dataset retractions come from public scholarly retraction records (Crossref retraction notices and the Retraction Watch data), removals from Zenodo's deleted-records list and from Hugging Face's disabled state and takedown-notice log (Figshare publishes no anonymous removal signal; see FR-005 and research/landscape.md section 9), and findability from the DOI registry (DataCite); research/landscape.md sections 3 and 4 confirm these sources and their limits.
 - The tie between a dataset and its paper DOI is declared in the inventory by the owner; the service does not guess it.
 - Changes are found by polling on the schedule; push notifications (webhooks) need a public endpoint and are out of scope.
-- Some removal records are published infrequently (Zenodo's dump monthly at best), so SC-006 holds from the time the source publishes, not from the time of removal.
+- Zenodo answers a removed record's request with its removal record at once, so a Zenodo removal appears at the next check. Other sources may publish later than the removal itself, so SC-006 holds from the time the source publishes, not from the time of removal.
 - Out of scope: hub accounts or tokens (so a deleted base model cannot be told from a private one), model-level weakness databases and platform integration.
