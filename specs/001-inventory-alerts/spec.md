@@ -57,6 +57,8 @@ The service checks each weight file in a model's inventory for unsafe serialisat
 2. **Given** a pickle-based weight file in which a scan of its contents finds instructions that would run code beyond rebuilding the model (for example calls to the operating system or the network), **When** a check runs, **Then** an alert shows what the scan found, the scanner, the retrieval time and the file's hash.
 3. **Given** a hub-hosted weight file whose hub scan reports it unsafe, **When** a check runs, **Then** an alert shows the hub's verdict, the scanners named by the hub, the retrieval time and the file's hash.
 4. **Given** a hub-hosted file whose scan result is missing, pending or unreadable, **When** a check runs, **Then** the service records a watch event, not an alert.
+5. **Given** a model whose owner has chosen the strict format policy, and a pickle-based weight file with no file in a format that cannot run code beside it in the same model version, **When** a check runs, **Then** an alert names the policy, the file's hash and format, and suggests a format that cannot run code; with such a file beside it, only the watch event of scenario 1 is recorded.
+6. **Given** a code-capable file that the scanner cannot read to the end (for example a joblib file with raw array data between its instructions), **When** a check runs, **Then** the service records a watch event saying the scan was incomplete, and never treats the file as clean.
 
 ---
 
@@ -126,6 +128,8 @@ For each model, the owner sees open alerts ordered by severity, watch events and
 - **FR-011**: The service MUST identify weight files in formats that can run code when loaded and record each as a watch event with the file's hash, format and reason. It MUST scan the contents of such files and raise an alert only when the scan finds instructions that would run code beyond rebuilding the model; the alert names what was found and the scanner.
 - **FR-012**: For hub-hosted files whose hub publishes a security scan, the service MUST read the scan verdict and raise an alert only for a verdict that reports the file unsafe; missing, pending or unreadable verdicts MUST be watch events.
 - **FR-013**: Each weight-file alert MUST include the file's hash, its location, the verdict or rule that triggered it, the source and the retrieval time.
+- **FR-021**: The service MUST let an owner choose a format policy per model: `default` (the format alone is a watch event, FR-011) or `strict`. Under `strict`, a code-capable weight file with no code-free file beside it in the same model version MUST raise an alert naming the policy. The policy MUST default to `default`.
+- **FR-022**: When a scanner stops before the end of a code-capable file, the service MUST record a watch event that the scan was incomplete, with the scanner and the position it reached, and MUST NOT count the file as scanned clean.
 
 **Lifecycle**
 
@@ -177,3 +181,5 @@ For each model, the owner sees open alerts ordered by severity, watch events and
 ### Session 2026-10-23
 
 - Q: How should a pickle-based weight file be treated? → A: The format alone is a watch event; an alert only when a scan (the hub's or a scan of the file's contents) flags dangerous content (precision first, constitution principle IV).
+- Q: Can an owner whose own publishing rules forbid pickle-only weights get an alert for them? → A: Yes, by opting in to the `strict` format policy per model (FR-021); the default stays precision first. Added 2026-10-23 after a third-party scanner rejected pickle-only files by format alone.
+- Q: What if a scanner cannot read a file to the end? → A: A watch event that the scan was incomplete, never "clean" (FR-022). Found 2026-10-23: picklescan 1.0.5 stops at the raw array data inside joblib files.

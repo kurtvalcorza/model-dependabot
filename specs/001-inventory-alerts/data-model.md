@@ -9,6 +9,7 @@ Entities from the spec's Key Entities, with fields, rules and state changes. Sto
 | :-- | :-- |
 | `model_id` | Stable text identifier chosen by the owner, unique |
 | `name`, `owner` | Free text |
+| `format_policy` | `default` or `strict` (FR-021); defaults to `default` |
 | `created_at` | UTC timestamp |
 
 Has many **Model versions**, numbered 1, 2, 3 in registration order.

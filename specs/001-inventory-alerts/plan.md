@@ -49,7 +49,7 @@ published rate limits; never writes to a model or its repository
 | I. Evidence on Every Alert | Every alert and watch event stores source, URL, retrieval time, matched identifier and the SHA-256 of the stored raw response (data model: Evidence) | Pass | Pass |
 | II. Pinned Inventory, Open Standards | CycloneDX 1.7, validated against the official schema; purls for packages and base models; DOIs; custom values only as documented `model-dependabot:` properties ([inventory profile](contracts/inventory-profile.md)) | Pass | Pass |
 | III. Advise, Never Act | No command writes to a model or its repository; only a newer registered version closes an alert as fixed ([CLI contract](contracts/cli.md)) | Pass | Pass |
-| IV. Precision First | Package alerts need OSV's match and the local range evaluation to agree; pickle format alone is a watch event; hub verdicts other than an explicit "unsafe" are watch events; failed sources change nothing | Pass | Pass |
+| IV. Precision First | Package alerts need OSV's match and the local range evaluation to agree; pickle format alone is a watch event unless the owner opts in to the `strict` format policy (FR-021); an incomplete scan is never clean (FR-022); hub verdicts other than an explicit "unsafe" are watch events; failed sources change nothing | Pass | Pass |
 | V. Test-First with Offline Feed Tests | Every adapter tested against recorded responses; dangerous-pickle fixtures are scanned, never loaded; tests written to fail first in `tasks.md` | Pass | Pass |
 | Neutral open source; privacy; polite to sources | No institution names; no platform referenced in code; generic User-Agent; cached responses and back-off | Pass | Pass |
 

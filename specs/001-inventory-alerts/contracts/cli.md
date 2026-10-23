@@ -13,6 +13,7 @@ output is plain text. No command changes a model or writes to a model's reposito
 | `inventory show ID [--version N]` | Lists entries with identifiers, and gaps with their reasons. | US1 |
 | `inventory export ID [--version N] -o FILE` | Writes the stored CycloneDX 1.7 document, validated against the official schema. | FR-004 |
 | `check (ID \| --all) [--source osv,picklescan,hf-scan]` | Runs the checks now and records a check run. Scheduled use: `check --all` daily. | FR-006, FR-011, FR-012, FR-016 |
+| `policy ID --format (default\|strict)` | Sets the model's format policy; takes effect at the next check. | FR-021 |
 | `alerts ID [--state open\|closed\|all]` | Lists alerts by severity, then watch events. | FR-018 |
 | `alert show ALERT_ID` | One alert with all its evidence. | FR-019 |
 | `alert dismiss ALERT_ID --reason REASON [--note TEXT] --by NAME` | Dismisses with a listed reason. | FR-015 |

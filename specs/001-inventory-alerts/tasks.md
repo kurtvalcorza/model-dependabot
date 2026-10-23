@@ -122,12 +122,15 @@ Single project: `src/model_dependabot/` and `tests/` at the repository root (pla
 - [ ] T037 [P] [US3] Write failing tests in `tests/unit/test_hf_scan.py` with recorded `GET /api/models/{repo}?securityStatus=true` responses in `tests/fixtures/hf/`: an explicit unsafe verdict for a file whose SHA-256 matches the inventory raises an alert; missing, pending, unrecognised or hash-mismatched results are watch events (`hub_scan_unknown`, `hash_mismatch`) (research R5)
 - [ ] T038 [P] [US3] Write failing tests in `tests/unit/test_lifecycle_weights.py`: every pickle-based file gets a `pickle_format` watch event with format and suggestion (FR-011); a `dangerous` scan raises a `weight_file_scan` alert with severity `HIGH`, the scanner and the dangerous globals (FR-013); `suspicious` adds a `scan_suspicious` watch event; code-free formats get nothing
 - [ ] T039 [US3] Write a failing integration test in `tests/integration/test_check_weights.py` covering the Independent Test above
+- [ ] T039a [P] [US3] Write failing tests in `tests/unit/test_format_policy.py`: under `default` a pickle-only file gives only the `pickle_format` watch event; under `strict` it raises a `format_policy` alert naming the policy, and a code-free sibling file in the same version suppresses it (FR-021); `policy` CLI round trip
+- [ ] T039b [P] [US3] Write failing tests in `tests/unit/test_pickle_scan.py` with a crafted joblib-style fixture (pickle opcodes followed by raw array bytes): the scanner's stop becomes a `scan_incomplete` watch event with scanner and byte position, never `innocuous` (FR-022)
 
 ### Implementation for User Story 3
 
 - [ ] T040 [P] [US3] Implement `src/model_dependabot/sources/pickle_scan.py` until T036 passes
 - [ ] T041 [P] [US3] Implement the security-status part of `src/model_dependabot/sources/hf.py` until T037 passes
 - [ ] T042 [US3] Add weight-file findings to `src/model_dependabot/lifecycle.py` and wire the `picklescan` and `hf-scan` sources into `check` until T038 and T039 pass
+- [ ] T042a [US3] Add `format_policy` to the model store, the `policy` command to `src/model_dependabot/cli.py`, the `format_policy` alert and the `scan_incomplete` watch event to `src/model_dependabot/lifecycle.py` until T039a and T039b pass
 
 **Checkpoint**: User Stories 1 to 3 work on their own
 
