@@ -80,7 +80,7 @@ When the owner registers a newer version of a model whose inventory no longer co
 
 ### User Story 5 - See a model's alerts, watch events and history (Priority: P3)
 
-For each model, the owner sees open alerts ordered by severity, watch events and the closed history with how each item ended (fixed, dismissed, withdrawn).
+For each model, the owner sees open alerts ordered by severity, watch events and the closed history with how each item ended (fixed, dismissed, withdrawn, cleared).
 
 **Why this priority**: it presents what the earlier stories produce; useful, but the stories above deliver value without a polished view.
 
@@ -121,7 +121,8 @@ For each model, the owner sees open alerts ordered by severity, watch events and
 - **FR-007**: The service MUST raise an alert only when an advisory's affected range is confirmed to include the model's exact package version; otherwise it MUST record a watch event.
 - **FR-008**: Each package alert MUST include the advisory identifier and aliases, severity, affected range, fixed version (or that none is published), source, retrieval time and the matched package name and version.
 - **FR-009**: When an advisory is withdrawn by its publisher, the service MUST close the related alerts as withdrawn and record the withdrawal as evidence.
-- **FR-010**: The service MUST NOT raise more than one open alert for the same advisory, package version and model version.
+- **FR-010**: The service MUST NOT hold more than one open alert per model, advisory and package; an open alert is carried forward to each newer version that still has the cause rather than raised again.
+- **FR-023**: When the source itself no longer shows an alert's cause, the service MUST close the alert as cleared and record that observation as evidence: an advisory whose affected ranges are narrowed so that the pinned version is no longer affected (the source's match and the local evaluation both agree), or a hub verdict for the matching hash that changes from unsafe to an explicit safe verdict. A missing, pending or unrecognised verdict MUST NOT close an alert.
 
 **Weight files**
 
@@ -133,7 +134,7 @@ For each model, the owner sees open alerts ordered by severity, watch events and
 
 **Lifecycle**
 
-- **FR-014**: The service MUST close an alert as fixed, naming the fixing version, when the owner registers a newer version of the model whose inventory no longer contains the alert's cause.
+- **FR-014**: The service MUST close an alert as fixed, naming the fixing version, when the owner registers a newer version of the model whose inventory no longer contains the alert's cause. This closure happens at registration by comparing the two inventories and consults no source.
 - **FR-015**: The service MUST let an authorised person dismiss an alert only with a reason from a fixed list and MUST record who, when and why.
 - **FR-016**: The service MUST NOT close any alert because a source was unreachable or returned no data.
 - **FR-017**: The service MUST NOT change, delete, retrain, re-export or unpublish any model or file, and MUST NOT write to any model's repository.
@@ -150,7 +151,7 @@ For each model, the owner sees open alerts ordered by severity, watch events and
 - **Model version**: one registered state of a model with its fixed inventory; newer versions can fix alerts.
 - **Inventory entry**: one dependency of a model version (weight file, package, base model or dataset) with its exact identifier, or a gap if it cannot be pinned.
 - **Advisory**: a published security record from an advisory source, with identifier, aliases, affected ranges, fixed versions, severity and withdrawal state.
-- **Alert**: a confirmed match between an inventory entry and an advisory or unsafe-file verdict; open, fixed, dismissed or withdrawn; carries evidence.
+- **Alert**: a confirmed match between an inventory entry and an advisory, an unsafe-file verdict or the owner's strict format policy; open, fixed, dismissed, withdrawn or cleared; carries evidence.
 - **Watch event**: an uncertain signal about an inventory entry, shown to the owner but not raised as an alert.
 - **Evidence**: the source, retrieval time and exact identifier behind an alert or watch event.
 - **Check run**: one pass over a model's inventory against the sources, with which sources succeeded or failed.
@@ -162,7 +163,7 @@ For each model, the owner sees open alerts ordered by severity, watch events and
 - **SC-001**: An owner can register the worked example and see its complete inventory, with every pinned item and every gap, in under 5 minutes.
 - **SC-002**: On a test set of package versions with known published advisories and versions known to be unaffected, 100% of affected versions raise an alert and 0 unaffected versions do.
 - **SC-003**: 100% of alerts show their source, retrieval time and the exact identifier matched; an owner can reach the evidence in one step.
-- **SC-004**: When a newer model version removes an alert's cause, the alert shows as fixed at the next check, with no manual step.
+- **SC-004**: When a newer model version removes an alert's cause, the alert shows as fixed as soon as that version is registered, with no manual step and no check needed.
 - **SC-005**: An inventory exported and re-imported is identical in every pinned identifier (0 differences).
 - **SC-006**: A newly published advisory that affects a registered model appears as an alert within one scheduled check interval.
 - **SC-007**: When a source is unavailable, 0 alerts change state because of it.

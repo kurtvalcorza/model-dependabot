@@ -12,7 +12,8 @@ then checks it daily or on request. Packages are matched against OSV.dev advisor
 re-checked locally by PEP 440 range evaluation; weight files are classified by format and pickle files
 scanned statically with `picklescan`, plus the Hugging Face scan verdict for hub-hosted files. Alerts
 need a confirmed match and carry stored evidence; everything uncertain is a watch event. A newer model
-version closes the alerts whose cause it removed. Technical decisions: [research.md](research.md).
+version closes the alerts whose cause it removed; a source that withdraws or clears the cause closes its
+alerts with that observation as evidence. Technical decisions: [research.md](research.md).
 
 ## Technical Context
 
@@ -44,14 +45,16 @@ published rate limits; never writes to a model or its repository
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
+Checked against constitution 1.0.2 (2026-10-24); the first check was made against 1.0.0.
+
 | Principle | How this plan meets it | Before research | After design |
 | :-- | :-- | :-- | :-- |
-| I. Evidence on Every Alert | Every alert and watch event stores source, URL, retrieval time, matched identifier and the SHA-256 of the stored raw response (data model: Evidence) | Pass | Pass |
+| I. Evidence on Every Alert | Every alert and watch event stores source, URL, retrieval time, matched identifier and the SHA-256 of the stored raw response (data model: Evidence). A `strict` `format_policy` alert (FR-021) passes under 1.0.2: the owner's recorded policy applied to a pinned file is its primary source, and its evidence is the file's SHA-256 and format plus the policy value, who set it and when | Pass | Pass |
 | II. Pinned Inventory, Open Standards | CycloneDX 1.7, validated against the official schema; purls for packages and base models; DOIs; custom values only as documented `model-dependabot:` properties ([inventory profile](contracts/inventory-profile.md)) | Pass | Pass |
-| III. Advise, Never Act | No command writes to a model or its repository; only a newer registered version closes an alert as fixed ([CLI contract](contracts/cli.md)) | Pass | Pass |
-| IV. Precision First | Package alerts need OSV's match and the local range evaluation to agree; pickle format alone is a watch event unless the owner opts in to the `strict` format policy (FR-021); an incomplete scan is never clean (FR-022); hub verdicts other than an explicit "unsafe" are watch events; failed sources change nothing | Pass | Pass |
+| III. Advise, Never Act | No command writes to a model or its repository (FR-017, tested by T054a); an alert closes automatically only on the two paths 1.0.2 allows: a newer registered version without the cause closes it as `fixed` (FR-014), and the source itself withdrawing the advisory (`withdrawn`, FR-009) or clearing the cause (`cleared`, FR-023) closes it with that observation as evidence; otherwise a person dismisses it with a listed reason ([CLI contract](contracts/cli.md)) | Pass | Pass |
+| IV. Precision First | Package alerts need OSV's match and the local range evaluation to agree; pickle format alone is a watch event unless the owner opts in to the `strict` format policy (FR-021), whose alert is a confirmed match between a pinned file and the owner's recorded policy, a primary source under principle I of 1.0.2; an incomplete scan is never clean (FR-022); hub verdicts other than an explicit "unsafe" are watch events; every alert kind has a stated severity (data model: Alert); failed sources change nothing | Pass | Pass |
 | V. Test-First with Offline Feed Tests | Every adapter tested against recorded responses; dangerous-pickle fixtures are scanned, never loaded; tests written to fail first in `tasks.md` | Pass | Pass |
-| Neutral open source; privacy; polite to sources | No institution names; no platform referenced in code; generic User-Agent; cached responses and back-off | Pass | Pass |
+| Neutral open source; privacy; polite to sources | No institution names; no platform referenced in code; generic User-Agent; cached responses and back-off; each source's published rate limit recorded in research R8 and applied by the fetcher | Pass | Pass |
 
 No violations; Complexity Tracking is empty.
 
