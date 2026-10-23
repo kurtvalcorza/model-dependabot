@@ -96,11 +96,14 @@ src/model_dependabot/
 ├── lifecycle.py                    # alerts, watch events, auto-close, dismissal
 ├── store.py                        # SQLite schema and evidence store
 └── reports.py                      # per-model views and history
+tools/
+└── record_fixtures.py              # records live OSV and Hugging Face responses into tests/fixtures (run by hand)
 tests/
 ├── fixtures/                       # recorded OSV and Hugging Face responses, crafted pickles, manifests
 ├── unit/
 ├── contract/                       # CLI JSON shapes, CycloneDX round trip, manifest rules
-└── integration/                    # register -> check -> alert -> new version -> fixed, offline
+├── integration/                    # register -> check -> alert -> new version -> fixed, offline
+└── live/                           # marked `live`: real-source smoke tests, excluded by default
 ```
 
 **Structure Decision**: a single Python package with a console script, laid out by responsibility so each
