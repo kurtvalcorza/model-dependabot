@@ -91,4 +91,28 @@ README.
 
 ## T055: walk-through on a real inventory
 
-Not run here; it needs an owner-provided model inventory.
+Run 2026-10-24 by the orchestrator, owner's choice of model: the rice pest detector, RT-DETR r50 v5.
+The manifest and databases lived in a temporary folder outside the repository; the model's own
+repositories were only read.
+
+Inventory: two weight files (`best.pt`, 171,769,415 bytes, `sha256:e0ae635d…`; the ONNX export,
+171,744,970 bytes), the hash-locked Kaggle lock (`requirements-kaggle.lock.txt`, 61 packages, 926
+hashes, uv-generated), base model `PekingU/rtdetr_r50vd` at `df939e661d8c52e80608d1ec566561aabd25a4e7`,
+dataset DOI `10.5281/zenodo.20066074`.
+
+| Section | Command | Result | Exit |
+| :-- | :-- | :-- | :-- |
+| 1 | `uv run pytest -q` | 384 passed, 3 deselected (above) | 0 |
+| 2 | `register`, `inventory show`, `inventory export`, `import` | 65 entries (2 weight files, 61 packages, 1 base model, 1 dataset), 0 gaps; export then import gives identical entries | 0 |
+| 3 | `check` (osv, picklescan, hf-scan), `alerts --json` | 1.9 s, all sources ok; 0 alerts | 0 |
+| 3, cross-check | OSV `querybatch` for the 61 packages, sent directly | 0 packages with advisories (lock pins Pillow 13.0.0) | n/a |
+| 4 | same check | 1 `pickle_format` watch event for `best.pt` (PyTorch zip); nothing for the ONNX file | 0 |
+| 4, cross-check | `picklescan.scan_file_path` on `best.pt` directly | 4 globals, all innocuous, 0 infected | n/a |
+| 5 | v1 with the lock as it was before commit `b46d1da` (Pillow 12.3.0), `check`; then v2 with today's lock | v1: 41 `package_advisory` alerts for Pillow 12.3.0 (top severity CRITICAL); v2 `register`: all 41 closed as `fixed`, `closed_by_version` 2, 0 open; no source consulted | 0 |
+| 6 | `check --source osv` with `HTTPS_PROXY` pointed at a closed port | source failed; 41 open alerts unchanged | 2 |
+| 7 | scheduling | not run; `check --all` from the host scheduler, documented in README | n/a |
+
+Timings: registration 1.1 s (v1) and 5.0 s (v2) with warm caches, so far inside SC-001's 5 minutes;
+`check` 1.9 s for 61 packages and 18.3 s when opening 41 alerts (detail fetch per advisory, within
+OSV's limits), inside the 60-second goal. The SHA-256 of `best.pt` was the same before and after
+(FR-017). The model repository's uncommitted files predate this run (dated 2026-10-19).
