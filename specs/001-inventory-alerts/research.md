@@ -47,6 +47,12 @@ The value and its origin are both stored.
 **Rationale**: GitHub-reviewed advisories carry a qualitative severity; others carry only a CVSS vector.
 Storing the origin keeps the evidence honest.
 
+**Scoring** (owner decision, 2026-10-24): vectors are scored with the `cvss` package 3.6 (Red Hat
+Product Security, released 2025-08-04, no dependencies), which implements the v3 formula and FIRST's
+v4 macro-vector table. It replaced a hand-written v3 formula and the earlier gap where a v4 vector
+alone gave `UNKNOWN`. Checked: the v3 cases in `tests/unit/test_severity.py` give the same scores, and
+the canonical v4 vector `AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N` scores 9.3.
+
 ## R4. Unsafe weight files: format rule plus a static pickle scan
 
 **Decision**: Classify each weight file by format: pickle-based (`.pt`, `.pth`, `.bin`, `.ckpt`,

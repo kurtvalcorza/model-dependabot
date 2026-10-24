@@ -8,7 +8,12 @@ from typing import Any
 
 import pytest
 
-from model_dependabot.matching.severity import cvss3_base_score, cvss_band, severity_of
+from model_dependabot.matching.severity import (
+    cvss3_base_score,
+    cvss4_base_score,
+    cvss_band,
+    severity_of,
+)
 
 OSV = Path(__file__).resolve().parent.parent / "fixtures" / "osv"
 
@@ -46,10 +51,26 @@ def test_a_numeric_cvss_v4_score_gives_the_band() -> None:
     assert severity_of(advisory) == ("HIGH", "cvss_v4")
 
 
-def test_a_cvss_v4_vector_without_a_score_is_unknown() -> None:
-    # Scoring a CVSS v4 vector needs FIRST's macro-vector table, which is not built in (reported).
+def test_a_cvss_v4_vector_gives_the_band() -> None:
+    # The recorded vector scores 8.7, matching the advisory's own database_specific HIGH.
     advisory = _recorded("GHSA-cp9v-662q-vvx9")
     del advisory["database_specific"]
+    assert severity_of(advisory) == ("HIGH", "cvss_v4")
+
+
+@pytest.mark.parametrize(
+    ("vector", "score"),
+    [
+        ("CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N", 9.3),
+        ("CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N", 8.7),
+    ],
+)
+def test_cvss4_base_score(vector: str, score: float) -> None:
+    assert cvss4_base_score(vector) == score
+
+
+def test_an_invalid_cvss_vector_gives_unknown() -> None:
+    advisory = {"severity": [{"type": "CVSS_V4", "score": "CVSS:4.0/AV:N"}]}
     assert severity_of(advisory) == ("UNKNOWN", "unknown")
 
 

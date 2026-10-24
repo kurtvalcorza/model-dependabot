@@ -8,6 +8,7 @@ dependencies = [
     "packaging==26.3",
     "jsonschema==4.26.0",
     "picklescan==1.0.5",
+    "cvss==3.6",
 ]
 
 [project.scripts]
