@@ -29,11 +29,11 @@ Single project: `src/model_dependabot/` and `tests/` at the repository root (pla
 
 **Purpose**: Project initialisation and basic structure
 
-- [ ] T001 Create `pyproject.toml`: project `model-dependabot`, `requires-python = ">=3.12"`, dependencies `packaging==26.3`, `jsonschema==4.26.0`, `picklescan==1.0.5`; dev group `pytest`, `ruff`; console script `model-dependabot = "model_dependabot.cli:main"`; pytest config registering marker `live` and default `addopts = "-m 'not live'"`; then `uv lock`
-- [ ] T002 Create the package and test skeleton from plan.md: `src/model_dependabot/` with `__init__.py`, `inventory/`, `sources/`, `matching/` (each with `__init__.py`); `tests/unit/`, `tests/contract/`, `tests/integration/`, `tests/fixtures/`
-- [ ] T003 [P] Add `tests/conftest.py` with an autouse fixture that blocks all socket connections unless the test is marked `live` (constitution V: the default run must fail loudly on any network call)
-- [ ] T004 [P] Add ruff settings to `pyproject.toml` and a `.gitignore` covering `*.db`, the evidence store directory `evidence/`, `.venv/` and caches
-- [ ] T005 [P] Vendor the CycloneDX schemas into `src/model_dependabot/inventory/schema/`: `bom-1.7.schema.json`, `spdx.schema.json`, `jsf-0.82.schema.json` from the CycloneDX/specification repository at a recorded commit, plus `SHA256SUMS` and a `README.md` naming the source URL, commit and licence
+- [X] T001 Create `pyproject.toml`: project `model-dependabot`, `requires-python = ">=3.12"`, dependencies `packaging==26.3`, `jsonschema==4.26.0`, `picklescan==1.0.5`; dev group `pytest`, `ruff`; console script `model-dependabot = "model_dependabot.cli:main"`; pytest config registering marker `live` and default `addopts = "-m 'not live'"`; then `uv lock`
+- [X] T002 Create the package and test skeleton from plan.md: `src/model_dependabot/` with `__init__.py`, `inventory/`, `sources/`, `matching/` (each with `__init__.py`); `tests/unit/`, `tests/contract/`, `tests/integration/`, `tests/fixtures/`
+- [X] T003 [P] Add `tests/conftest.py` with an autouse fixture that blocks all socket connections unless the test is marked `live` (constitution V: the default run must fail loudly on any network call)
+- [X] T004 [P] Add ruff settings to `pyproject.toml` and a `.gitignore` covering `*.db`, the evidence store directory `evidence/`, `.venv/` and caches
+- [X] T005 [P] Vendor the CycloneDX schemas into `src/model_dependabot/inventory/schema/`: `bom-1.7.schema.json`, `spdx.schema.json`, `jsf-0.82.schema.json` from the CycloneDX/specification repository at a recorded commit, plus `SHA256SUMS` and a `README.md` naming the source URL, commit and licence
 
 ---
 
@@ -43,12 +43,12 @@ Single project: `src/model_dependabot/` and `tests/` at the repository root (pla
 
 **CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T006 [P] Write failing tests in `tests/unit/test_fetcher.py`: a `RecordedFetcher` serves responses from `tests/fixtures/` by method, URL and body; the real `UrlFetcher` sends a generic User-Agent (no personal data, no email address), applies a timeout, retries with back-off on 429/5xx and caches by URL and body; every response returns its body, status, URL and retrieval time; a per-source request ceiling throttles the Hugging Face source to its published limit (research R8), `Retry-After` is honoured and repeated `429`s mark that source `failed` for the run (FR-020)
-- [ ] T007 Implement `src/model_dependabot/sources/fetcher.py` (`Fetcher` protocol, `UrlFetcher` on `urllib.request`, `RecordedFetcher`) until T006 passes
-- [ ] T008 [P] Write failing tests in `tests/unit/test_store.py` for the SQLite schema of data-model.md: tables for models, model versions, inventory entries, advisories, check runs, evidence, alerts and watch events; "At most one `open` alert per `model_id` and `cause_key`" enforced by the database; evidence bodies stored as files named by SHA-256 and referenced by `body_sha256`; a model version's inventory cannot be updated once recorded (FR-005)
-- [ ] T009 Implement `src/model_dependabot/store.py` until T008 passes
-- [ ] T010 [P] Write failing tests in `tests/contract/test_cli_frame.py`: every command accepts `--db` and `--json`; exit codes 0 success, 1 invalid input, 2 a source failed, 3 unexpected error (contracts/cli.md)
-- [ ] T011 Implement the command frame in `src/model_dependabot/cli.py` (argument parsing, text and JSON output, exit codes) until T010 passes
+- [X] T006 [P] Write failing tests in `tests/unit/test_fetcher.py`: a `RecordedFetcher` serves responses from `tests/fixtures/` by method, URL and body; the real `UrlFetcher` sends a generic User-Agent (no personal data, no email address), applies a timeout, retries with back-off on 429/5xx and caches by URL and body; every response returns its body, status, URL and retrieval time; a per-source request ceiling throttles the Hugging Face source to its published limit (research R8), `Retry-After` is honoured and repeated `429`s mark that source `failed` for the run (FR-020)
+- [X] T007 Implement `src/model_dependabot/sources/fetcher.py` (`Fetcher` protocol, `UrlFetcher` on `urllib.request`, `RecordedFetcher`) until T006 passes
+- [X] T008 [P] Write failing tests in `tests/unit/test_store.py` for the SQLite schema of data-model.md: tables for models, model versions, inventory entries, advisories, check runs, evidence, alerts and watch events; "At most one `open` alert per `model_id` and `cause_key`" enforced by the database; evidence bodies stored as files named by SHA-256 and referenced by `body_sha256`; a model version's inventory cannot be updated once recorded (FR-005)
+- [X] T009 Implement `src/model_dependabot/store.py` until T008 passes
+- [X] T010 [P] Write failing tests in `tests/contract/test_cli_frame.py`: every command accepts `--db` and `--json`; exit codes 0 success, 1 invalid input, 2 a source failed, 3 unexpected error (contracts/cli.md)
+- [X] T011 Implement the command frame in `src/model_dependabot/cli.py` (argument parsing, text and JSON output, exit codes) until T010 passes
 
 **Checkpoint**: fetching, storage and the CLI frame are ready; stories can start
 

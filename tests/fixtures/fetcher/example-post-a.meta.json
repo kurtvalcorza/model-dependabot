@@ -1,0 +1,9 @@
+{
+  "method": "POST",
+  "url": "https://api.example.test/v1/querybatch",
+  "request_body": {"queries": [{"package": {"name": "a", "ecosystem": "PyPI"}, "version": "1.0"}]},
+  "status": 200,
+  "headers": {"Content-Type": "application/json"},
+  "retrieved_at": "2026-10-23T08:01:00Z",
+  "body_file": "example-post-a.json"
+}
