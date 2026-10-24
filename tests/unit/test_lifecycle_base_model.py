@@ -206,3 +206,29 @@ def test_a_further_refusal_carries_the_open_alert_forward(
     [alert] = alerts(store, "base_model_unavailable")
     assert len(alert["cause"]["refusals"]) == 3
     assert len(store.alert_evidence(alert["alert_id"])) == 3
+
+
+def test_disabled_false_later_clears_the_disabled_alert_with_that_observation_as_evidence(
+    store: Store, clock: Clock, answers: dict[str, Path]
+) -> None:
+    # Orchestrator disposition B4 (constitution 1.0.2): the source no longer shows the cause.
+    check(store, clock, answers, "disabled", 0 * H)
+    check(store, clock, answers, "reachable", 1 * H, trigger="on_demand")
+    assert alerts(store, "base_model_disabled") == []
+    [closed] = alerts(store, "base_model_disabled", ("cleared",))
+    latest = store.observations(PURL, "hf-hub")[-1]
+    assert latest["disabled"] in (0, False)
+    assert latest["evidence_ref"] in [
+        e["evidence_id"] for e in store.alert_evidence(closed["alert_id"])
+    ]
+    check(store, clock, answers, "disabled", 2 * H)
+    assert len(alerts(store, "base_model_disabled")) == 1
+
+
+def test_a_refusal_or_failure_after_disabled_does_not_clear_it(
+    store: Store, clock: Clock, answers: dict[str, Path]
+) -> None:
+    check(store, clock, answers, "disabled", 0 * H)
+    check(store, clock, answers, "refused", 1 * H)
+    check(store, clock, answers, "failed", 2 * H)
+    assert len(alerts(store, "base_model_disabled")) == 1

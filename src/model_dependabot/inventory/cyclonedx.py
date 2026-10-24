@@ -48,6 +48,7 @@ from model_dependabot.inventory.build import (
 )
 from model_dependabot.lockfile import NO_EXACT_VERSION, NO_HASH
 from model_dependabot.sources.hf import is_commit
+from model_dependabot.upstream.licences import join_licences, recorded
 
 SPEC_VERSION = "1.7"
 IMPORTABLE_VERSIONS = ("1.5", "1.6", "1.7")
@@ -142,15 +143,19 @@ def _with(item: dict[str, Any], **optional: Any) -> dict[str, Any]:
 
 
 def _licenses(entry: dict[str, Any]) -> list[dict[str, Any]] | None:
-    """The recorded licence in CycloneDX form (contracts/inventory-profile.md)."""
-    licence, form = entry.get("recorded_licence"), entry.get("licence_form")
-    if not licence:
+    """The recorded licence set in CycloneDX form, one choice per entry (inventory-profile.md)."""
+    licences = recorded(entry.get("recorded_licence"), entry.get("licence_form"))
+    if licences is None or not licences.entries:
         return None
-    if form == "spdx":
-        return [{"license": {"id": licence}}]
-    if form == "expression":
-        return [{"expression": licence}]
-    return [{"license": {"name": licence}}]
+    choices: list[dict[str, Any]] = []
+    for licence in sorted(licences.entries, key=lambda item: str(item.normalised)):
+        if licence.form == "spdx":
+            choices.append({"license": {"id": licence.normalised}})
+        elif licence.form == "expression":
+            choices.append({"expression": licence.normalised})
+        else:
+            choices.append({"license": {"name": licence.declared}})
+    return choices
 
 
 def _citations(entry: dict[str, Any]) -> list[dict[str, str]]:
@@ -321,19 +326,29 @@ def _references(item: dict[str, Any], kind: str) -> list[str]:
 
 
 def _read_licence(item: dict[str, Any]) -> tuple[str | None, str | None]:
-    """``(recorded_licence, licence_form)`` from a component's first ``licenses`` choice."""
+    """``(recorded_licence, licence_form)`` from every ``licenses`` choice of a component.
+
+    Several choices are the recorded set, one entry per line; the form is ``unrecognised`` if any
+    choice is a ``license.name``, ``expression`` if any is an expression, else ``spdx``.
+    """
+    entries: list[tuple[str, str]] = []
     for choice in item.get("licenses") or []:
         if not isinstance(choice, dict):
             continue
         if isinstance(choice.get("expression"), str):
-            return choice["expression"], "expression"
+            entries.append((choice["expression"], "expression"))
+            continue
         licence = choice.get("license")
         if isinstance(licence, dict):
             if isinstance(licence.get("id"), str):
-                return licence["id"], "spdx"
-            if isinstance(licence.get("name"), str):
-                return licence["name"], "unrecognised"
-    return None, None
+                entries.append((licence["id"], "spdx"))
+            elif isinstance(licence.get("name"), str):
+                entries.append((licence["name"], "unrecognised"))
+    if not entries:
+        return None, None
+    forms = {form for _, form in entries}
+    form = next(f for f in ("unrecognised", "expression", "spdx") if f in forms)
+    return join_licences([text for text, _ in entries]), form
 
 
 def _read_papers(item: dict[str, Any]) -> list[str] | None:

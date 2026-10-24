@@ -45,7 +45,7 @@ source.
       "state": "open",
       "severity": "HIGH",
       "severity_origin": "policy",
-      "cause": {"item": "pkg:huggingface/owner/base@df939e66…", "recorded": "Apache-2.0", "declared": "CC-BY-NC-4.0"},
+      "cause": {"item": "pkg:huggingface/owner/base@df939e66…", "recorded_licence": "Apache-2.0", "recorded_from": "inventory", "declared_licence": "cc-by-nc-4.0", "declared_normalised": "CC-BY-NC-4.0", "source": "hf-hub"},
       "evidence": [{"source": "hf-hub", "…": "…"}]
     },
     {

@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from model_dependabot.store import Store
-from model_dependabot.upstream.licences import Licence, normalise, recorded, same_licence
+from model_dependabot.upstream.licences import LicenceSet, normalise, recorded, same_licence
 
 COMPARED_FIELDS = (
     "http_status",
@@ -69,7 +69,7 @@ class LicenceReference:
     never changed.
     """
 
-    licence: Licence
+    licence: LicenceSet
     origin: str
     observation_id: int | None
 

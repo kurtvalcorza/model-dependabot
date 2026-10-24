@@ -132,7 +132,7 @@ def test_alerts_json_matches_the_contract(checked: Callable[..., tuple[int, Any]
         assert set(event) >= WATCH_KEYS
         assert event["identifier"].startswith("sha256:")
         _check_evidence(event["evidence"])
-    assert set(payload["last_check"]) == {"run_id", "sources"}
+    assert set(payload["last_check"]) == {"run_id", "trigger", "sources"}
     assert payload["last_check"]["sources"] == {"osv": "ok", "picklescan": "ok"}
 
 

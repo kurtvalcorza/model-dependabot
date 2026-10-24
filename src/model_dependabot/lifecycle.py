@@ -962,7 +962,7 @@ def reevaluate_version(store: Store, model_id: str, version: int) -> dict[str, l
         elif alert["kind"] in DATASET_ALERTS:
             present = _dataset_present(cause, alert["kind"], entries)
             detail["found"] = cause["identifier"] if present else None
-        elif alert["kind"] == LICENCE_CHANGED:
+        elif alert["kind"] in (LICENCE_CHANGED, BASE_MODEL_DISABLED, BASE_MODEL_UNAVAILABLE):
             present = any(
                 entry["pinned"] and entry["identifier"] == cause["identifier"] for entry in entries
             )
@@ -1605,6 +1605,13 @@ def _apply_base_model(
         cause = base | {"disabled": True, "source": HF_HUB}
         severity = BASE_MODEL_SEVERITY[BASE_MODEL_DISABLED]
         _upstream_alert(store, target, BASE_MODEL_DISABLED, key, cause, evidence, severity)
+    elif model.disabled is False:
+        # The hub reports the model enabled again: the cause is gone (constitution 1.0.2).
+        disabled = store.find_open_alert(
+            target.model_id, dataset_cause_key(BASE_MODEL_DISABLED, item)
+        )
+        if disabled is not None:
+            _close(store, target, disabled, "cleared", evidence)
     _base_model_events(store, target, entry, observation)
 
 

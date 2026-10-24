@@ -23,6 +23,7 @@ from model_dependabot.sources.fetcher import (
     SourceFailedError,
 )
 from model_dependabot.store import Store
+from model_dependabot.upstream.licences import join_licences
 
 SOURCE = "datacite"
 DOIS_ENDPOINT = "https://api.datacite.org/dois/"
@@ -89,8 +90,10 @@ ACCESS_RIGHTS = "info:eu-repo/semantics/"
 
 
 def declared_licence(attributes: object) -> str | None:
-    """The first licence in ``rightsList``: its ``rightsIdentifier``, else its ``rights`` text."""
+    """Every licence in ``rightsList``, one per line: each entry's ``rightsIdentifier``, else its
+    ``rights`` text; access-rights statements are left out (owner decision of 2026-10-24)."""
     rights = attributes.get("rightsList") if isinstance(attributes, dict) else None
+    entries: list[str] = []
     for item in rights if isinstance(rights, list) else []:
         if not isinstance(item, dict):
             continue
@@ -99,8 +102,9 @@ def declared_licence(attributes: object) -> str | None:
         for name in ("rightsIdentifier", "rights"):
             value = item.get(name)
             if isinstance(value, str) and value.strip():
-                return value
-    return None
+                entries.append(value)
+                break
+    return join_licences(entries)
 
 
 # Research U2, FR-007: the relation types that name a newer version or a replacing record.

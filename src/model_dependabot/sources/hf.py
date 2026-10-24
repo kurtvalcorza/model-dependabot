@@ -18,6 +18,7 @@ from posixpath import dirname
 from urllib.parse import quote, unquote, urlsplit
 
 from model_dependabot.sources.fetcher import Fetcher, Response, SourceFailedError
+from model_dependabot.upstream.licences import join_licences
 
 HF_ENDPOINT = "https://huggingface.co"
 _REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -323,10 +324,10 @@ def dataset_info_url(repo: str, endpoint: str = HF_ENDPOINT) -> str:
 
 
 def _declared_licence(card: object) -> str | None:
+    """``cardData.license``: every entry of a list, one per line (owner decision of 2026-10-24)."""
     licence = card.get("license") if isinstance(card, dict) else None
     if isinstance(licence, list):
-        names = [str(item) for item in licence if item]
-        return names[0] if len(names) == 1 else (" AND ".join(names) or None)
+        return join_licences([str(item) for item in licence if item])
     return str(licence) if licence else None
 
 
@@ -452,7 +453,9 @@ def parse_model(repo: str, response: Response) -> HubModel:
     if not isinstance(info, dict):
         raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}")
     sha = info.get("sha")
-    disabled = info.get("disabled", False)
+    # The reader always asks for expand[]=disabled; an answer without it is not the recorded
+    # shape, so it is unrecognised (a watch event), never false (which would clear an alert).
+    disabled = info.get("disabled")
     card = info.get("cardData")
     card = card if isinstance(card, dict) else None
     pointer = (card or {}).get("new_version")

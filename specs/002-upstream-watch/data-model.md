@@ -10,8 +10,8 @@ Advisory, Evidence and Watch event are reused; the changes below extend them. De
 | :-- | :-- |
 | `kind` | Adds no new kind: `base_model` and `dataset` already exist |
 | `identifier` | Base model `pkg:huggingface/owner/name@commit` (001); dataset a DOI (001) **or** `hf-dataset:owner/name@commit` for a hub-hosted dataset |
-| `recorded_licence` | Base model and dataset: the licence written into the inventory at registration (U8, U11); empty if the source declared none or failed. When empty, the baseline licence is the one in the item's first stored upstream observation (below), so the inventory itself is never changed |
-| `licence_form` | `spdx` (an identifier from the SPDX list), `expression`, `unrecognised` or `none` |
+| `recorded_licence` | Base model and dataset: the licence set written into the inventory at registration (U8, U11): every licence entry the source declares, normalised, one per line; empty if the source declared none or failed. When empty, the baseline licence is the one in the item's first stored upstream observation (below), so the inventory itself is never changed |
+| `licence_form` | `spdx` (an identifier from the SPDX list), `expression`, `unrecognised` or `none`; for a set of several entries, `unrecognised` if any entry is, else `expression` if any entry is one, else `spdx` |
 | `paper_dois` | Dataset only: zero or more Crossref DOIs the owner ties to the dataset (spec assumption: declared, never guessed) |
 
 A hub dataset without a revision is a gap ("no revision"), as for 001's hub weight files; gaps are not
@@ -53,7 +53,7 @@ A failed request writes no observation (FR-018).
 | `disabled` | Hub items: true or false |
 | `gated` | Hub items: `false`, `auto` or `manual` |
 | `head_revision` | Hub items: `sha`; datasets with a version link: the newest version's DOI or record |
-| `declared_licence`, `licence_form` | As declared, and its normalised form (U8) |
+| `declared_licence`, `licence_form` | Every licence entry as declared, one per line in the source's order (DataCite `rightsList` entries that are not access-rights statements under `info:eu-repo/semantics/`; each entry of a hub `cardData.license` list; Zenodo and Figshare as they declare), and the set's form (U8) |
 | `card_hash` | Base model: SHA-256 of canonical `cardData` without licence fields and `new_version` (U7) |
 | `new_version_pointer` | Base model: `cardData.new_version` |
 | `updates` | Crossref: the `updated-by` entries (type, source, notice DOI, date) |
@@ -96,7 +96,7 @@ New `kind` values, their cause keys and severities (FR-019, U9):
 | `paper_retracted` | The same for a paper DOI tied to a dataset | kind + dataset identifier + paper DOI | `HIGH` |
 | `dataset_removed` | Zenodo answers 410 with a tombstone, or the hub reports the dataset disabled | kind + dataset identifier | `HIGH` |
 | `dataset_not_findable` | DataCite answers 404 for a DataCite DOI | kind + dataset DOI | `HIGH` |
-| `licence_changed` | The declared licence's normalised form differs from the recorded licence (or the baseline observation's), both recognised | kind + item (one alert per item) | `HIGH` |
+| `licence_changed` | The normalised set of declared licence entries, order ignored, differs from the recorded set (or the baseline observation's), both recognised; adding or reordering an entry that leaves the set equal raises nothing | kind + item (one alert per item) | `HIGH` |
 | `base_model_disabled` | The hub reports the base model disabled | kind + base-model purl | `MODERATE` |
 | `base_model_unavailable` | The refusal-span rule is met (U7) | kind + base-model purl | `LOW` |
 
@@ -104,19 +104,24 @@ All carry `severity_origin: "policy"`, extending feature 001's list of kinds who
 
 **Licence alert identity**: a further licence change while a `licence_changed` alert is open adds that
 observation as evidence and updates the alert's declared licence; it never opens a second alert for the same
-item. If the declared licence's normalised form returns to the recorded one, the alert closes as `cleared`
+item. If the declared licence set returns to the recorded one, the alert closes as `cleared`
 with that observation as evidence (constitution 1.0.2, Principle III).
 
 **Refusal-span rule** (U7): `base_model_unavailable` opens when an unbroken run of refusal observations from
 scheduled check runs, with no reachable observation from any run in between, spans at least 24 hours from
 its first to its latest refusal. On-demand refusals neither count towards the span nor break the run; a
-reachable observation from any run ends it; failed requests write no observation and are ignored.
+reachable observation from any run ends it; failed requests write no observation and are ignored. Any hub
+answer other than a refusal ends a refusal run and clears `base_model_unavailable`, including a redirect
+or a 200 with `disabled: true`; a disabled model is then reported by `base_model_disabled`, which closes
+as `cleared` with that observation as evidence when a later hub answer reports `disabled: false`
+(constitution 1.0.2).
 
 This feature reuses feature 001's `cleared` state (001 FR-023: the source itself no longer shows the cause)
 and extends it to two new kinds (U12). State transitions added to 001's:
 
 ```text
  open (base_model_unavailable) ── base model reachable again ─────────────────▶ cleared
+ open (base_model_disabled) ── the hub reports disabled: false ─────────────────▶ cleared
  open (licence_changed) ── declared licence returns to the recorded one ───────▶ cleared
  open (licence_changed) ── declared licence changes again ────────────────────▶ open, evidence added, declared licence updated
  open (dataset_retracted, paper_retracted) ── no retraction update listed any more ─▶ withdrawn
@@ -143,11 +148,12 @@ New `kind` values (FR-007, FR-010, FR-013, U5 to U8):
 | `gating_changed` | `gated` changes |
 | `card_changed` | `card_hash` changes |
 | `base_model_refused` | A refusal that does not (yet) meet the refusal-span rule |
+| `base_model_unrecognised` | A hub answer of a shape this feature does not read (for example a `disabled` value that is not `true` or `false`): recorded, never an alert (U7 fail-safe) |
 | `dataset_new_version` | A newer version or record is linked |
 | `dataset_replaced` | DataCite lists `IsObsoletedBy` |
 | `dataset_moved` | The hub redirects the dataset to another namespace |
 | `dataset_unreachable` | The hub refuses a dataset, Figshare answers 404, Crossref answers 404 for a Crossref-registered dataset DOI, Zenodo answers 404 for a record asked by its DOI (U4), or no source can be asked about a dataset DOI (constitution IV: its agency is unknown, `none` or one no source reads, and the Zenodo exception of U1 does not apply); `detail.reason` names why (for example `doi.org reports the DOI does not exist`) and doi.org's answer in the run is the evidence |
 | `paper_not_found` | Crossref answers 404 for a Crossref-registered paper DOI tied to a dataset, or no source can be asked about a tied paper DOI (its agency is unknown, `none`, DataCite, whose DOIs no retraction source reads, or one no source reads), with `detail.reason` as above (for a DataCite paper DOI `registered with DataCite, which no retraction source reads`, with doi.org's answer in the run as the evidence) |
-| `licence_unrecognised` | A declared licence cannot be normalised |
+| `licence_unrecognised` | A declared licence entry cannot be normalised, so the declared set differs from the recorded one only in an unrecognised entry |
 | `licence_missing` | A source no longer declares a licence that was recorded |
 | `upstream_notice` | Crossref lists a correction or expression of concern and no retraction alert is open |

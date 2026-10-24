@@ -184,7 +184,17 @@ licences; **live-tested**) with its SHA-256. A declared licence is normalised in
 identifier ignoring case; SPDX full name ignoring case; an entry in `licences/aliases.toml`, a short in-repo
 table of repository-specific spellings (for example Figshare's `CC BY 4.0` to `CC-BY-4.0`), each with the
 source that uses it. Licence expressions (`MIT OR Apache-2.0`) are normalised term by term with operators
-upper-cased. Anything else is **unrecognised**: kept as declared, compared as text and reported as a watch
+upper-cased; the term after `WITH` is matched, ignoring case, against the vendored SPDX exceptions list
+(`exceptions.json` of the same tag, 86 exceptions, with its SHA-256), so `<licence> WITH <exception>` can
+alert on a real change, and an unknown exception leaves the expression unrecognised (owner decision of
+2026-10-24).
+
+**Several licences** (owner decision of 2026-10-24): every licence entry a source declares is recorded
+(DataCite `rightsList` entries that are not access-rights statements under `info:eu-repo/semantics/`;
+each entry of a hub `cardData.license` list; Zenodo and Figshare as they declare), and licences are
+compared as the **normalised set** of their entries, order ignored. `licence_changed` opens only when the
+set changes; adding or reordering an entry that leaves the set equal raises nothing. The CycloneDX
+`licenses` array holds the full recorded set, one choice per entry. Anything else is **unrecognised**: kept as declared, compared as text and reported as a watch
 event (FR-010), never an alert.
 
 **Recorded licence**: the licence written into the inventory at registration (CycloneDX `licenses` on the

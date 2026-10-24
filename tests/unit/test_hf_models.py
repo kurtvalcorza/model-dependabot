@@ -144,3 +144,17 @@ def test_a_disabled_answer_of_another_shape_is_a_watch_event_not_an_alert(
         assert event["detail"]["disabled"] == value
         assert event["detail"]["reason"] == hf.UNRECOGNISED_DISABLED
         assert [e["evidence_id"] for e in event["evidence"]] == [observation["evidence_ref"]]
+
+
+def test_an_answer_without_the_disabled_field_is_unrecognised_not_false(
+    derive_upstream: Callable[..., Path],
+) -> None:
+    """A missing ``disabled`` must not read as ``false``: it would clear base_model_disabled."""
+
+    def drop(body: dict[str, Any]) -> dict[str, Any]:
+        return {key: value for key, value in body.items() if key != "disabled"}
+
+    root = derive_upstream(changes={"hf_upstream/model-normal": drop})
+    model = _read(root, GPT2)
+    assert model.disabled is None
+    assert model.unrecognised == hf.UNRECOGNISED_DISABLED
