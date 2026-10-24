@@ -80,7 +80,8 @@ class _Parser(argparse.ArgumentParser):
 
 Handler = Callable[[argparse.Namespace], CommandResult]
 
-# Filled in as each command is built; a command without a handler exits 3.
+# The command handlers, keyed by COMMANDS; tests pass their own.
+# A command without a handler exits 3.
 DEFAULT_HANDLERS: dict[str, Handler] = {}
 
 
@@ -205,7 +206,7 @@ def main(
         _validate(args)
         handler = handlers.get(args.command_key)
         if handler is None:
-            raise NotImplementedError(f"the {args.command_key} command is not built yet")
+            raise LookupError(f"no handler for the {args.command_key} command")
         result = handler(args)
     except InvalidInputError as error:
         return _report_error(EXIT_INVALID_INPUT, str(error), as_json)

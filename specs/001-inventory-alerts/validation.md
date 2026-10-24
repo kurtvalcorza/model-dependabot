@@ -70,12 +70,12 @@ The property already held, so the test passed on its first run.
 
 ## T056: neutrality and privacy
 
-Pattern `P = (the list itself is kept outside the repository)`
-(case-insensitive).
+`P` is a case-insensitive search for the owner's institution, programme and personal names, their
+domains and generic academic and government words; the list itself is kept outside the repository.
 
 | Command | Result |
 | :-- | :-- |
-| `grep -rniE "$P" src tests tools README.md research specs` | 6 lines. 5 are licence names in the vendored SPDX schema (`src/model_dependabot/inventory/schema/spdx.schema.json`: University of California, Nara Institute of Science and Technology, University of Illinois), third-party data. 1 is `specs/001-inventory-alerts/plan.md:58`, which names a programme ("no platform referenced in code") in the constitution check |
+| `grep -rniE "$P" src tests tools README.md research specs` | 6 lines. 5 are licence names in the vendored SPDX schema (`src/model_dependabot/inventory/schema/spdx.schema.json`: University of California, Nara Institute of Science and Technology, University of Illinois), third-party data. 1 is `specs/001-inventory-alerts/plan.md:58`, which names the first platform's programme in the constitution check (G0-02, open for the owner) |
 | `grep -rnoE "<email pattern>" src tests tools README.md research specs` | 3: two schema authors' addresses in the vendored CycloneDX and JSF schemas, and `someone@example.org` (a reserved example domain) in `tests/unit/test_fetcher.py`, used to prove an email in the User-Agent is refused |
 | `grep -rnE "hf_…\|ghp_…\|github_pat_\|sk-…\|Bearer \|Authorization\|AKIA…"` over the same paths | none |
 | `git log --format=%B \| grep -ciE "$P"` | 0 commit messages match |
