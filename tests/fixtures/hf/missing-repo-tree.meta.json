@@ -1,0 +1,11 @@
+{
+  "method": "GET",
+  "url": "https://huggingface.co/api/models/model-dependabot-fixture/does-not-exist/tree/607a30d783dfa663caf39e06633721c8d4cfcd7e",
+  "status": 401,
+  "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "etag": "W/\"29-dEMcHWfJi78ZR1aqzb1ELAhp3Us\""
+  },
+  "retrieved_at": "2026-10-24T02:59:20Z",
+  "body_file": "missing-repo-tree.json"
+}

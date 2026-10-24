@@ -62,21 +62,21 @@ Single project: `src/model_dependabot/` and `tests/` at the repository root (pla
 
 ### Tests for User Story 1
 
-- [ ] T012 [P] [US1] Write failing tests in `tests/unit/test_lockfile.py`: `name==version` with one or more `--hash=sha256:` and backslash continuations is pinned; a missing `==` or missing hash is a gap with reason "no exact version" or "no hash"; names normalised with `packaging.utils.canonicalize_name` (research R10); use a trimmed copy of a real uv-generated lock as the fixture in `tests/fixtures/locks/`
-- [ ] T013 [P] [US1] Write failing tests in `tests/contract/test_manifest.py` for contracts/manifest.md: `model.id` required; unknown keys are an error (exit 1); a hub weight file without `revision` is a gap "no revision"; paths resolve relative to the manifest; registration never fails because of a gap
-- [ ] T014 [P] [US1] Write failing tests in `tests/unit/test_build.py`: weight files hashed with SHA-256, size recorded, format classified as pickle-based (`.pt`, `.pth`, `.bin`, `.ckpt`, `.pkl`, `.joblib`, PyTorch zip) or code-free (`.safetensors`, `.onnx`, `.gguf`) with `can_run_code` set (FR-002); every entry has `kind` in `weight_file`, `package`, `base_model`, `dataset`; `pinned` false requires a `gap_reason`
-- [ ] T015 [P] [US1] Write failing tests in `tests/unit/test_hf_tree.py` with recorded Hugging Face tree and model-info responses in `tests/fixtures/hf/`: a hub file's SHA-256 comes from the tree API's `lfs.oid` and the revision from `X-Repo-Commit`; a 401 response is recorded as a gap, not an error
-- [ ] T016 [P] [US1] Write failing tests in `tests/contract/test_inventory_profile.py` for contracts/inventory-profile.md: each entry kind lands at its documented CycloneDX location and identifier; exports validate against the vendored `bom-1.7.schema.json`; export then import yields identical entries and identifiers; custom values only as `model-dependabot:` properties, and exactly the documented set (`format`, `can-run-code`, `size`, `hub-repo`, `hub-revision`, `hub-file`, `gap`), with a hub weight file's repository, revision and file name surviving the round trip; CycloneDX 1.5 and 1.6 inputs import, with unreadable entries becoming gaps
-- [ ] T017 [US1] Write a failing integration test in `tests/integration/test_register.py`: `register`, `inventory show`, `inventory export`, `import` on `tests/fixtures/manifests/example.toml`; a second `register` with `--model-id` creates version 2
+- [X] T012 [P] [US1] Write failing tests in `tests/unit/test_lockfile.py`: `name==version` with one or more `--hash=sha256:` and backslash continuations is pinned; a missing `==` or missing hash is a gap with reason "no exact version" or "no hash"; names normalised with `packaging.utils.canonicalize_name` (research R10); use a trimmed copy of a real uv-generated lock as the fixture in `tests/fixtures/locks/`
+- [X] T013 [P] [US1] Write failing tests in `tests/contract/test_manifest.py` for contracts/manifest.md: `model.id` required; unknown keys are an error (exit 1); a hub weight file without `revision` is a gap "no revision"; paths resolve relative to the manifest; registration never fails because of a gap
+- [X] T014 [P] [US1] Write failing tests in `tests/unit/test_build.py`: weight files hashed with SHA-256, size recorded, format classified as pickle-based (`.pt`, `.pth`, `.bin`, `.ckpt`, `.pkl`, `.joblib`, PyTorch zip) or code-free (`.safetensors`, `.onnx`, `.gguf`) with `can_run_code` set (FR-002); every entry has `kind` in `weight_file`, `package`, `base_model`, `dataset`; `pinned` false requires a `gap_reason`
+- [X] T015 [P] [US1] Write failing tests in `tests/unit/test_hf_tree.py` with recorded Hugging Face tree and model-info responses in `tests/fixtures/hf/`: a hub file's SHA-256 comes from the tree API's `lfs.oid` and the revision from `X-Repo-Commit`; a 401 response is recorded as a gap, not an error
+- [X] T016 [P] [US1] Write failing tests in `tests/contract/test_inventory_profile.py` for contracts/inventory-profile.md: each entry kind lands at its documented CycloneDX location and identifier; exports validate against the vendored `bom-1.7.schema.json`; export then import yields identical entries and identifiers; custom values only as `model-dependabot:` properties, and exactly the documented set (`format`, `can-run-code`, `size`, `hub-repo`, `hub-revision`, `hub-file`, `gap`), with a hub weight file's repository, revision and file name surviving the round trip; CycloneDX 1.5 and 1.6 inputs import, with unreadable entries becoming gaps
+- [X] T017 [US1] Write a failing integration test in `tests/integration/test_register.py`: `register`, `inventory show`, `inventory export`, `import` on `tests/fixtures/manifests/example.toml`; a second `register` with `--model-id` creates version 2
 
 ### Implementation for User Story 1
 
-- [ ] T018 [P] [US1] Implement `src/model_dependabot/lockfile.py` until T012 passes
-- [ ] T019 [P] [US1] Implement `src/model_dependabot/manifest.py` with `tomllib` until T013 passes
-- [ ] T020 [P] [US1] Implement the tree and revision part of `src/model_dependabot/sources/hf.py` until T015 passes
-- [ ] T021 [US1] Implement `src/model_dependabot/inventory/build.py` (manifest to inventory entries, hashing, gaps) until T014 passes
-- [ ] T022 [US1] Implement `src/model_dependabot/inventory/cyclonedx.py` (entries to and from CycloneDX 1.7 JSON, validation with `jsonschema` against the vendored schemas) until T016 passes
-- [ ] T023 [US1] Add `register`, `import` and `inventory show|export` to `src/model_dependabot/cli.py` until T017 passes
+- [X] T018 [P] [US1] Implement `src/model_dependabot/lockfile.py` until T012 passes
+- [X] T019 [P] [US1] Implement `src/model_dependabot/manifest.py` with `tomllib` until T013 passes
+- [X] T020 [P] [US1] Implement the tree and revision part of `src/model_dependabot/sources/hf.py` until T015 passes
+- [X] T021 [US1] Implement `src/model_dependabot/inventory/build.py` (manifest to inventory entries, hashing, gaps) until T014 passes
+- [X] T022 [US1] Implement `src/model_dependabot/inventory/cyclonedx.py` (entries to and from CycloneDX 1.7 JSON, validation with `jsonschema` against the vendored schemas) until T016 passes
+- [X] T023 [US1] Add `register`, `import` and `inventory show|export` to `src/model_dependabot/cli.py` until T017 passes
 
 **Checkpoint**: User Story 1 works on its own
 

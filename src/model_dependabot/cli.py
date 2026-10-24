@@ -9,14 +9,19 @@ error. No command changes a model or writes to a model's repository (FR-017).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-from model_dependabot.sources.fetcher import SourceFailedError
-from model_dependabot.store import DISMISSAL_REASONS
+from model_dependabot.inventory.build import build_entries
+from model_dependabot.inventory.cyclonedx import InventoryError, export_bom, import_bom, validate
+from model_dependabot.manifest import ManifestError, load_manifest
+from model_dependabot.sources.fetcher import Fetcher, SourceFailedError, UrlFetcher
+from model_dependabot.store import DISMISSAL_REASONS, Store
 
 EXIT_OK = 0
 EXIT_INVALID_INPUT = 1
@@ -203,6 +208,144 @@ def main(
     elif result.text:
         print(result.text)
     return EXIT_SOURCE_FAILED if result.sources_failed else EXIT_OK
+
+
+# --- inventory commands (US1) ------------------------------------------------------------------
+
+
+def _entry_view(entry: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in entry.items() if value is not None or key == "identifier"}
+
+
+def _inventory_payload(model_id: str, version: int, entries: list[dict[str, Any]]) -> dict:
+    return {
+        "model_id": model_id,
+        "version": version,
+        "entries": [_entry_view(entry) for entry in entries if entry["pinned"]],
+        "gaps": [_entry_view(entry) for entry in entries if not entry["pinned"]],
+    }
+
+
+def _entry_label(entry: Mapping[str, Any]) -> str:
+    kind = entry["kind"]
+    if kind == "weight_file":
+        where = entry.get("location") or f"hf:{entry.get('hub_repo')}/{entry.get('hub_file')}"
+        return f"{where} [{entry['format']}]" if entry.get("format") else where
+    if kind in ("package", "base_model"):
+        version = entry.get("version")
+        return f"{entry.get('name')}=={version}" if version else str(entry.get("name"))
+    return "dataset"
+
+
+def _inventory_text(payload: Mapping[str, Any], heading: str) -> str:
+    lines = [heading, f"Entries ({len(payload['entries'])}):"]
+    for entry in payload["entries"]:
+        lines.append(f"  {entry['kind']:<12} {entry['identifier']}  {_entry_label(entry)}")
+    lines.append(f"Gaps ({len(payload['gaps'])}):")
+    for entry in payload["gaps"]:
+        lines.append(f"  {entry['kind']:<12} {_entry_label(entry)}: {entry['gap_reason']}")
+    return "\n".join(lines)
+
+
+def _version_of(store: Store, model_id: str, version: int | None) -> int:
+    if store.get_model(model_id) is None:
+        raise InvalidInputError(f"no model {model_id!r} is registered")
+    chosen = store.latest_version(model_id) if version is None else version
+    if chosen is None or store.get_version(model_id, chosen) is None:
+        raise InvalidInputError(f"model {model_id!r} has no version {version}")
+    return chosen
+
+
+def _record(
+    store: Store,
+    model_id: str,
+    entries: list[dict[str, Any]],
+    input_sha256: str,
+    *,
+    name: str | None = None,
+    owner: str | None = None,
+) -> int:
+    """Record the next version with its validated CycloneDX 1.7 document (FR-004, FR-005)."""
+    if store.get_model(model_id) is None:
+        store.add_model(model_id, name=name, owner=owner)
+    version = (store.latest_version(model_id) or 0) + 1
+    document = export_bom(model_id, version, entries)
+    validate(document)
+    recorded = store.add_version(model_id, document, input_sha256, entries)
+    if recorded != version:
+        raise RuntimeError(f"expected to record version {version}, recorded {recorded}")
+    return version
+
+
+def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
+    """The built command handlers; ``fetcher`` replaces the real sources in tests."""
+
+    def _fetcher() -> Fetcher:
+        return UrlFetcher() if fetcher is None else fetcher
+
+    def register(args: argparse.Namespace) -> CommandResult:
+        try:
+            manifest = load_manifest(args.manifest)
+        except ManifestError as error:
+            raise InvalidInputError(str(error)) from None
+        model_id = args.model_id or manifest.model_id
+        with Store(args.db) as store:
+            if args.model_id is None and store.get_model(model_id) is not None:
+                raise InvalidInputError(
+                    f"model {model_id!r} is already registered; pass --model-id {model_id} to"
+                    " register a new version"
+                )
+            entries = build_entries(manifest, _fetcher())
+            version = _record(
+                store, model_id, entries, manifest.sha256, name=manifest.name, owner=manifest.owner
+            )
+            payload = _inventory_payload(model_id, version, store.entries(model_id, version))
+        return CommandResult(payload, _inventory_text(payload, f"Registered {model_id} v{version}"))
+
+    def import_inventory(args: argparse.Namespace) -> CommandResult:
+        try:
+            raw = Path(args.bom).read_bytes()
+            document = json.loads(raw)
+        except (OSError, ValueError) as error:
+            raise InvalidInputError(f"cannot read {args.bom} as JSON: {error}") from None
+        try:
+            entries = import_bom(document)
+        except InventoryError as error:
+            raise InvalidInputError(str(error)) from None
+        model_id = args.model_id
+        with Store(args.db) as store:
+            version = _record(store, model_id, entries, hashlib.sha256(raw).hexdigest())
+            payload = _inventory_payload(model_id, version, store.entries(model_id, version))
+        return CommandResult(payload, _inventory_text(payload, f"Imported {model_id} v{version}"))
+
+    def show(args: argparse.Namespace) -> CommandResult:
+        with Store(args.db) as store:
+            version = _version_of(store, args.model_id, args.version)
+            payload = _inventory_payload(
+                args.model_id, version, store.entries(args.model_id, version)
+            )
+        return CommandResult(payload, _inventory_text(payload, f"{args.model_id} v{version}"))
+
+    def export(args: argparse.Namespace) -> CommandResult:
+        with Store(args.db) as store:
+            version = _version_of(store, args.model_id, args.version)
+            record = store.get_version(args.model_id, version)
+        assert record is not None
+        document = record["inventory"]
+        validate(document)
+        Path(args.output).write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+        payload = {"model_id": args.model_id, "version": version, "output": args.output}
+        return CommandResult(payload, f"Wrote {args.model_id} v{version} to {args.output}")
+
+    return {
+        "register": register,
+        "import": import_inventory,
+        "inventory show": show,
+        "inventory export": export,
+    }
+
+
+DEFAULT_HANDLERS.update(make_handlers())
 
 
 if __name__ == "__main__":
