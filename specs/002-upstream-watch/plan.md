@@ -50,9 +50,9 @@ requests per five minutes); never writes to a model, dataset or repository
 | :-- | :-- | :-- | :-- |
 | I. Evidence on Every Alert | Every alert and watch event stores source, URL, retrieval time, matched identifier and the original response's SHA-256; redacted bodies record both hashes and the fields removed (research U10) | Pass | Pass |
 | II. Pinned Inventory, Open Standards | Licences, paper ties and hub datasets use standard CycloneDX 1.7 fields (`licenses`, `externalReferences` of type `citation` and `distribution`); no new custom property; licences normalised to SPDX identifiers (U8, U11) | Pass | Pass |
-| III. Advise, Never Act | Nothing writes to a model, dataset or repository. Alerts close automatically only through a newer model version or when the source withdraws or clears the cause, with that observation as evidence (constitution 1.0.1; research U12) | Pass | Pass |
-| IV. Precision First | Alerts only on a confirmed source answer: a retraction update, a 410 tombstone, a hub `disabled` flag, a DataCite 404, a recognised licence change or two scheduled refusals 24 hours apart. Takedown-log entries, Figshare 404s, redirects, unrecognised licences, new revisions and card changes are watch events; failed requests change nothing | Pass | Pass |
-| V. Test-First with Offline Feed Tests | Every new adapter tested against recorded responses before it is written; the two-refusal rule and licence pairs tested with replayed sequences | Pass | Pass |
+| III. Advise, Never Act | Nothing writes to a model, dataset or repository. Alerts close automatically only through a newer model version or when the source withdraws or clears the cause, with that observation as evidence (constitution 1.0.2; research U12) | Pass | Pass |
+| IV. Precision First | Alerts only on a confirmed source answer: a retraction update, a 410 tombstone, a hub `disabled` flag, a DataCite 404, a recognised licence change or an unbroken run of scheduled refusals spanning 24 hours. A Crossref 404 is a watch event. Takedown-log entries, Figshare 404s, redirects, unrecognised licences, new revisions and card changes are watch events; failed requests change nothing | Pass | Pass |
+| V. Test-First with Offline Feed Tests | Every new adapter tested against recorded responses before it is written; the refusal-span rule and licence pairs tested with replayed sequences | Pass | Pass |
 | Neutral open source; privacy; polite to sources | No institution names; no email to any source (so Crossref's public pool); personal fields removed before storage (U10); per-source request pacing and ETag caching (U13) | Pass | Pass |
 
 ## Project Structure
@@ -95,19 +95,20 @@ src/model_dependabot/
 │   └── figshare.py                 # new: articles/{id}, licence, 404
 ├── upstream/
 │   ├── observe.py                  # new: one observation per item per source per run
-│   ├── changes.py                  # new: compare with the previous observation; two-refusal rule
+│   ├── changes.py                  # new: compare with the previous observation; refusal-span rule
 │   └── licences.py                 # new: SPDX normalisation and expressions
 ├── licences/
 │   ├── spdx-licenses-3.29.0.json   # vendored SPDX licence list, with its SHA-256 listed
 │   └── aliases.toml                # repository-specific spellings, each with its source
 ├── redact.py                       # new: per-source field removal (research U10)
-├── lifecycle.py                    # changed: new kinds, severities, cleared state
+├── reports.py                      # changed: new kinds, cleared, redacted evidence
+├── lifecycle.py                    # changed: new kinds, severities, 001's cleared state extended
 └── store.py                        # changed: observation, routing and takedown tables; trigger
 tools/
 └── record_fixtures.py              # changed: records the new sources (redacted) into tests/fixtures
 tests/
 ├── fixtures/                       # recorded responses for every new source
-├── unit/                           # licences, redaction, two-refusal rule, change detection
+├── unit/                           # licences, redaction, refusal-span rule, change detection
 ├── contract/                       # CLI JSON for new kinds; manifest and CycloneDX additions
 ├── integration/                    # register -> check -> alert -> close, offline, per user story
 └── live/                           # marked `live`
@@ -115,10 +116,11 @@ tests/
 
 **Structure Decision**: the same single package as 001. Each new source is a separate adapter under
 `sources/` so it can be tested alone against recorded responses; change detection lives in `upstream/`,
-apart from the adapters, so the two-refusal rule and licence comparison are tested without any source.
+apart from the adapters, so the refusal-span rule and licence comparison are tested without any source.
 
 ## Complexity Tracking
 
 None. Closing an alert when the source withdraws or clears its cause was an exception to Principle III
-1.0.0; the owner settled it with the 1.0.1 amendment on 2026-10-24, which also covers feature 001's
-withdrawn advisories.
+1.0.0; the owner settled it by amendment on 2026-10-24. The current constitution, 1.0.2, allows closing when
+the source withdraws or clears the cause, which covers feature 001's withdrawn and cleared advisories and this
+feature's `withdrawn` and `cleared` closes.

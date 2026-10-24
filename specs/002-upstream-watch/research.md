@@ -27,8 +27,10 @@ more requests and false "not found" signals.
 **Decision**: For each Crossref DOI in scope (a dataset DOI registered at Crossref, or a paper DOI the owner
 ties to a dataset), read `GET https://api.crossref.org/works/{doi}` and its `updated-by[]` list. An entry of
 type `retraction`, `withdrawal` or `removal` raises an alert (FR-004); `expression_of_concern` and
-`correction` add evidence to an open alert or, with no alert open, record a watch event. Requests run one at
-a time at no more than one per second.
+`correction` add evidence to an open alert or, with no alert open, record a watch event. A 404 for a
+Crossref-registered DOI records a watch event, never an alert: `dataset_unreachable` for a dataset DOI,
+`paper_not_found` for a tied paper DOI (Crossref has no findability state, so a 404 confirms nothing about
+removal). Requests run one at a time at no more than one per second.
 
 **Rationale**: **Live-tested**: the retracted article `10.1177/1758835919874651` returns `updated-by` with two
 retraction entries for the notice `10.1177/17588359211061903`, one with `source: "retraction-watch"` (and its
@@ -44,7 +46,8 @@ same answer).
 ## U3. Findability, licence and version links for DataCite DOIs: DataCite REST
 
 **Decision**: `GET https://api.datacite.org/dois/{doi}` for each DataCite DOI. A 404 while DataCite answers
-other requests normally raises the "no longer findable" alert (FR-006). `rightsList[]` gives the declared
+other requests normally raises the "no longer findable" alert (FR-006, which covers DataCite DOIs only;
+Crossref DOIs are covered by FR-004 through U2, and a Crossref 404 is a watch event). `rightsList[]` gives the declared
 licence (FR-008, FR-009). `relatedIdentifiers[]` with `IsPreviousVersionOf` or `HasVersion` pointing to a
 newer record, or `IsObsoletedBy`, records a watch event (FR-007).
 
@@ -106,7 +109,7 @@ through DataCite (U3).
 **Rationale**: landscape §9: Figshare's API has no removal field, and its 404 is shared by removed, private
 and nonexistent items (documented). The clarified FR-005 keeps Figshare to watch events.
 
-## U7. Base model: hub model info and the two-refusal rule
+## U7. Base model: hub model info and the refusal-span rule
 
 **Decision**: `GET /api/models/{owner}/{name}?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha&expand[]=lastModified`
 at every check.
@@ -114,16 +117,23 @@ at every check.
 - `disabled: true` raises the base-model-disabled alert at once (FR-011).
 - HTTP 401, 403 or 404 is a **refusal** observation. A timeout, connection error or HTTP 5xx is a source
   failure, not an observation (FR-012, FR-018).
-- The "no longer publicly available" alert opens when the two most recent refusal observations from
-  **scheduled** check runs are at least 24 hours apart and no reachable observation, from any run, lies
-  between them. A refusal that does not meet this records a `base_model_refused` watch event.
+- The "no longer publicly available" alert opens when an **unbroken run of refusal observations from
+  scheduled check runs**, with no reachable observation from any run in between, spans at least 24 hours
+  from its first to its latest refusal. On-demand refusals do not count towards the span and do not break
+  the run; a reachable observation from any run ends the run; failed requests are ignored. Because the span
+  is measured from the first refusal of the run, daily runs that land a few seconds under 24 hours apart
+  still open the alert on the next scheduled run. A refusal that does not meet this records a
+  `base_model_refused` watch event.
 - `sha` differing from the pinned commit records `base_model_new_revision` (pinned and newest revision);
   `cardData.new_version` records `base_model_new_version_pointer`; a change in `gated` records
   `gating_changed`; a change in the hash of `cardData` with the licence fields (`license`, `license_name`,
   `license_link`) and `new_version` removed records `card_changed` (FR-013).
 
 **Rationale**: landscape §3 live-tested these fields and the 401 answer for a missing model. The 24-hour
-two-observation rule is the owner's guard against transient refusals (spec clarification).
+refusal-span rule is the owner's guard against transient refusals (spec clarification). Measuring the
+span over the whole unbroken run, not over the two most recent refusals, keeps SC-003 deterministic: with a
+daily schedule whose start times drift by seconds, a pairwise rule could stay just under 24 hours on every
+pair and never open the alert.
 
 **Scheduled versus on-demand**: FR-012 counts scheduled checks only, so a check run records its `trigger`.
 `check --all --scheduled` is what the host scheduler runs; any other `check` is `on_demand`
@@ -131,7 +141,7 @@ two-observation rule is the owner's guard against transient refusals (spec clari
 
 **To confirm when recording fixtures**: that a disabled **model** answers like a disabled dataset (200 with
 `disabled: true`). If it does not, the adapter fails safe to a watch event and the fixture records what the
-hub returned.
+hub returned (tested in T042).
 
 ## U8. Licence normalisation: the SPDX licence list, vendored, plus a small documented alias table
 
@@ -146,7 +156,12 @@ event (FR-010), never an alert.
 **Recorded licence**: the licence written into the inventory at registration (CycloneDX `licenses` on the
 base-model or dataset component, U11). If the source failed at registration, or the inventory was imported
 without licences, the first successful observation becomes the baseline and is labelled as such; it never
-raises an alert by itself.
+raises an alert by itself. That stored observation is the baseline record; the inventory is never changed.
+
+**Licence alert identity**: `licence_changed` is keyed on kind + item, so one item has at most one open
+licence alert. A further change while it is open adds evidence and updates the declared licence on the same
+alert; a return of the declared licence to the recorded one closes it as `cleared` with that observation as
+evidence (constitution 1.0.2, Principle III; U12).
 
 **Rationale**: the owner chose the SPDX list (clarification Q4); constitution II prefers the open standard.
 Hub licence tags are lower-case SPDX identifiers where one exists (`mit`, `apache-2.0`, `cc-by-4.0`) and
@@ -197,15 +212,18 @@ for this feature (constitution II).
 
 ## U12. Closing alerts when the upstream condition ends
 
-**Decision**: Add one alert state to feature 001's lifecycle, `cleared`: a "no longer publicly available"
-alert closes as `cleared` when the base model is reachable again (FR-016), with that observation as
-evidence. A retraction alert closes as `withdrawn` (001's existing state) when a later successful Crossref
-response no longer lists any retraction, withdrawal or removal update for the DOI, with that response as
-evidence. Every other alert in this feature stays open until a newer model version no longer depends on the
-affected item (`fixed`) or a person dismisses it.
+**Decision**: Reuse feature 001's `cleared` state (001 FR-023 and data model), adding no new state, and
+extend it to two kinds: a "no longer publicly available" alert closes as `cleared` when the base model is
+reachable again (FR-016), and a `licence_changed` alert closes as `cleared` when the declared licence returns
+to the recorded one (U8), each with that observation as evidence. A retraction alert closes as `withdrawn`
+(001's existing state) when a later successful Crossref response no longer lists any retraction, withdrawal
+or removal update for the DOI, with that response as evidence. Every other alert in this feature stays open
+until a newer model version no longer depends on the affected item (`fixed`) or a person dismisses it. 001's
+re-open rule (a closed alert whose cause is found again in the current version gives a new open alert)
+applies to the new kinds unchanged.
 
-**Rationale**: FR-015 and FR-016. Constitution 1.0.1 (Principle III) allows automatic closing when the source
-withdraws or clears the cause, as feature 001 already does for withdrawn advisories.
+**Rationale**: FR-015 and FR-016. Constitution 1.0.2 (Principle III) allows automatic closing when the source
+withdraws or clears the cause, as feature 001 already does for withdrawn and cleared advisories.
 
 ## U13. Request budget per check
 

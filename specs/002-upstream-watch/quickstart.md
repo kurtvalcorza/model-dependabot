@@ -31,7 +31,9 @@ Using recorded responses:
 Replay pairs of recorded responses: `apache-2.0` then `Apache-2.0` (no alert), Figshare `CC BY 4.0` against a
 recorded `CC-BY-4.0` (no alert), `apache-2.0` then `cc-by-nc-4.0` (one `licence_changed` alert showing both),
 `mit` then `llama3.1` (a `licence_unrecognised` watch event, no alert), a licence then none
-(`licence_missing` watch event).
+(`licence_missing` watch event). `apache-2.0` then `cc-by-nc-4.0` then `mit`: still one `licence_changed`
+alert, with both observations as evidence and `mit` as the declared licence; `apache-2.0` then
+`cc-by-nc-4.0` then `Apache-2.0`: the alert closes as `cleared`.
 
 ## 4. Base model availability (US3, SC-003)
 
@@ -39,16 +41,21 @@ Replay hub answers across simulated check runs:
 
 - scheduled refusal at day 0, reachable at day 1: a `base_model_refused` watch event, no alert;
 - scheduled refusals at day 0 and day 1 (24 hours apart): one `base_model_unavailable` alert, severity `LOW`,
-  showing both refusals;
-- an on-demand refusal between them changes nothing; a timeout is a failed source, not a refusal;
+  showing the refusals of the run;
+- scheduled refusals at day 0, then a few seconds under 24 hours later, then a few seconds under 24 hours
+  after that: no alert on the second run, one alert on the third, because the unbroken run of scheduled
+  refusals now spans at least 24 hours from its first refusal (the refusal-span rule, research U7);
+- an on-demand refusal between them changes nothing (it neither counts nor breaks the run); an on-demand
+  reachable answer ends the run; a timeout is a failed source, not a refusal;
 - the base model reachable again: the alert closes as `cleared`;
 - `disabled: true`: one `base_model_disabled` alert at once, severity `MODERATE`.
 
 ## 5. Watch events only (US4)
 
 Replay a newer head revision, a `new_version` pointer, a gating change from `false` to `manual`, a card
-change, a newer Zenodo version, a DataCite `IsObsoletedBy`, a hub redirect to `defunct-datasets/` and a
-Figshare 404. Expected: one watch event each, no alerts.
+change, a newer Zenodo version, a DataCite `IsObsoletedBy`, a hub redirect to `defunct-datasets/`, a
+Figshare 404 and a Crossref 404 for a tied paper DOI (`paper_not_found`). Expected: one watch event each, no
+alerts.
 
 ## 6. Source failure (SC-005)
 
@@ -72,5 +79,5 @@ Expected: the live answers still match the shapes recorded in the fixtures (for 
 
 ## 9. Scheduling
 
-The host scheduler now runs `uv run model-dependabot check --all --scheduled` daily; only these runs count
-towards the two-refusal rule.
+The host scheduler now runs `uv run model-dependabot check --all --scheduled` daily, superseding feature
+001's `check --all` ([CLI contract](contracts/cli.md)); only these runs count towards the refusal-span rule.

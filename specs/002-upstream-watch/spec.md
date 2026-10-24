@@ -12,7 +12,7 @@
 
 ### Session 2026-10-23
 
-- Q: Which severity should each new alert type carry? → A: Retraction and removal High; licence change High; base model disabled Medium; base model no longer publicly available Low.
+- Q: Which severity should each new alert type carry? → A: Retraction and removal High; licence change High; base model disabled Medium (recorded as feature 001's `MODERATE`, research U9); base model no longer publicly available Low.
 - Q: Which dataset repositories should be checked for removal records? → A: Zenodo, Figshare and Hugging Face are in scope; the Figshare and Hugging Face removal feeds are researched before planning, and until verified they raise no alerts.
 - Q: Which Hugging Face HTTP responses count as "the hub refuses access"? → A: 401, 403 and 404 all count as refusal.
 - Q: Which reference list decides whether two licence names mean the same licence? → A: The SPDX licence list.
@@ -115,11 +115,11 @@ The owner sees, as watch events rather than alerts, changes upstream that may ma
 
 - **FR-004**: The service MUST raise an alert when a published retraction notice names a dataset's DOI, or a paper DOI the inventory ties to that dataset, with the notice's identifier, its source and the retrieval time as evidence.
 - **FR-005**: The service MUST raise an alert when the repository that published a dataset confirms the dataset was removed, with the evidence that repository gives. The repositories in scope are Zenodo, Figshare and Hugging Face:
-  - Zenodo: an entry in its deleted-records list raises an alert showing the removal date and stated reason (or that no reason was given).
+  - Zenodo: the records API's removal record for the dataset (HTTP 410 with a tombstone) raises an alert showing the removal date and stated reason (or that no reason was given).
   - Hugging Face: the hub marking the dataset as disabled raises an alert. If the dataset appears in the hub's public takedown-notice log, the alert shows that entry's date, labelled as a notice date and not a removal date; otherwise it says no reason was given. A dataset moved to another namespace MUST be a watch event, not an alert.
   - Figshare: publishes no anonymous removal signal, so it raises no removal alert. A Figshare item that can no longer be found MUST be recorded as a watch event.
   - The service MUST NOT store the party that requested a takedown.
-- **FR-006**: The service MUST raise an alert when a dataset's DOI is no longer findable in the DOI registry, with the registry's response as evidence.
+- **FR-006**: The service MUST raise an alert when a dataset DOI registered with DataCite (the registry that records findability states) is no longer findable there, with the registry's response as evidence. Crossref-registered DOIs are covered by FR-004; a Crossref answer that a DOI is not found MUST be a watch event, not an alert.
 - **FR-007**: The service MUST record a watch event, not an alert, when a dataset has a newer version or is marked as replaced, naming the newer or replacing record.
 
 **Licences**
@@ -131,24 +131,24 @@ The owner sees, as watch events rather than alerts, changes upstream that may ma
 **Base model**
 
 - **FR-011**: The service MUST raise an alert at once when the hub reports the base model as disabled.
-- **FR-012**: The service MUST raise a "no longer publicly available (deleted or made private)" alert only when the hub refuses access to the base model (HTTP 401, 403 or 404) on two consecutive scheduled checks at least 24 hours apart; a single refusal MUST be a watch event; failed or timed-out requests MUST NOT count.
+- **FR-012**: The service MUST raise a "no longer publicly available (deleted or made private)" alert only when the hub refuses access to the base model (HTTP 401, 403 or 404) on an unbroken run of consecutive scheduled checks, with no reachable answer from any check in between, that spans at least 24 hours from its first to its latest refusal; a refusal that does not complete such a run MUST be a watch event; on-demand checks MUST NOT count towards the span; failed or timed-out requests MUST NOT count.
 - **FR-013**: The service MUST record watch events for a newer base-model revision (showing the pinned and newest revision), for the author's pointer to a newer model, for gating changes and for card changes other than the licence.
 
 **Lifecycle and evidence**
 
 - **FR-014**: Every alert and watch event in this feature MUST carry evidence as defined in feature 001: source, retrieval time and the exact identifier matched.
 - **FR-015**: An alert MUST close as fixed when the owner registers a newer model version whose inventory no longer depends on the affected base model or dataset (feature 001 rules); a person MAY dismiss it with a listed reason.
-- **FR-016**: A "no longer publicly available" alert MUST close when the base model becomes publicly reachable again; a retraction alert MUST close as withdrawn if the retraction notice is withdrawn.
+- **FR-016**: A "no longer publicly available" alert MUST close when the base model becomes publicly reachable again; a licence change alert MUST close when the declared licence returns to the recorded one; a retraction alert MUST close as withdrawn if the retraction notice is withdrawn.
 - **FR-017**: The service MUST NOT change any model, dataset or repository.
 - **FR-018**: The service MUST NOT change any alert's state because of a source that failed during a check.
-- **FR-019**: Every alert in this feature MUST state its severity as follows: retraction and removal alerts High; licence change alerts High; base model disabled alerts Medium; "no longer publicly available" alerts Low.
+- **FR-019**: Every alert in this feature MUST state its severity as follows: retraction and removal alerts High; licence change alerts High; base model disabled alerts Moderate; "no longer publicly available" alerts Low (feature 001's severity values `HIGH`, `MODERATE` and `LOW`; research U9).
 
 ### Key Entities
 
 - **Upstream item**: a base model or a training dataset in a model version's inventory, with its pinned identifier (hub repository and revision, DOI or hub dataset repository) and its recorded licence.
 - **Upstream observation**: what a check saw for an upstream item: availability, disabled state, latest revision or version, declared licence, gating and replacement or newer-version links; kept over time so changes can be found.
 - **Retraction notice**: a published record retracting a dataset or a paper tied to it, with its identifier, source and date.
-- **Removal record**: a repository's confirmation that a dataset was removed: a deleted-records entry with date and stated reason, or a hub's disabled state with a takedown-notice date where one is listed.
+- **Removal record**: a repository's confirmation that a dataset was removed: a Zenodo tombstone (the records API's 410 answer) with date and stated reason, or a hub's disabled state with a takedown-notice date where one is listed.
 - Alerts, watch events, evidence and check runs are as defined in feature 001.
 
 ## Success Criteria *(mandatory)*
@@ -157,7 +157,7 @@ The owner sees, as watch events rather than alerts, changes upstream that may ma
 
 - **SC-001**: On a test set of recorded retraction and removal records, 100% of datasets named in them raise an alert and 0 datasets not named do.
 - **SC-002**: On a test set of recorded licence pairs, every real change raises an alert and 0 spelling, case or alias differences do.
-- **SC-003**: A base model unreachable on only one check never raises an alert; one unreachable on two consecutive checks at least 24 hours apart always does.
+- **SC-003**: A base model unreachable on only one check never raises an alert; one unreachable on two consecutive scheduled checks at least 24 hours apart always does, and so does one refused on every scheduled check of an unbroken run that spans at least 24 hours, even when no two consecutive checks are a full 24 hours apart.
 - **SC-004**: 100% of alerts and watch events in this feature show their source, retrieval time and the exact identifier matched.
 - **SC-005**: When any source is unavailable during a check, 0 alerts change state because of it.
 - **SC-006**: A retraction or removal published for a registered model's dataset appears as an alert within one scheduled check interval after the source publishes it.
@@ -166,7 +166,7 @@ The owner sees, as watch events rather than alerts, changes upstream that may ma
 
 - Feature 001 is in place: inventories, alerts, watch events, evidence, check runs and the schedule are reused, not redefined.
 - Base models and hub-hosted datasets are on one hub (Hugging Face); other hubs are out of scope.
-- Dataset retractions come from public scholarly retraction records (Crossref retraction notices and the Retraction Watch data), removals from Zenodo's deleted-records list and from Hugging Face's disabled state and takedown-notice log (Figshare publishes no anonymous removal signal; see FR-005 and research/landscape.md section 9), and findability from the DOI registry (DataCite); research/landscape.md sections 3 and 4 confirm these sources and their limits.
+- Dataset retractions come from public scholarly retraction records (Crossref retraction notices and the Retraction Watch data), removals from the Zenodo records API's 410 tombstone and from Hugging Face's disabled state and takedown-notice log (Figshare publishes no anonymous removal signal; see FR-005 and research/landscape.md section 9), and findability from the DOI registry (DataCite); research/landscape.md sections 3 and 4 confirm these sources and their limits.
 - The tie between a dataset and its paper DOI is declared in the inventory by the owner; the service does not guess it.
 - Changes are found by polling on the schedule; push notifications (webhooks) need a public endpoint and are out of scope.
 - Zenodo answers a removed record's request with its removal record at once, so a Zenodo removal appears at the next check. Other sources may publish later than the removal itself, so SC-006 holds from the time the source publishes, not from the time of removal.
