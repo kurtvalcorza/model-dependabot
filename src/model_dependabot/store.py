@@ -56,6 +56,7 @@ WATCH_KINDS = (
     "gating_changed",
     "card_changed",
     "base_model_refused",
+    "base_model_unrecognised",
     "dataset_new_version",
     "dataset_replaced",
     "dataset_moved",

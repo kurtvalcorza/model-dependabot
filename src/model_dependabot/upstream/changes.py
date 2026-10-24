@@ -2,14 +2,14 @@
 
 A new observation is compared with the previous observation of the same item from the same source.
 The first observation is the baseline: it is recorded and raises nothing by itself. The licence
-comparison is below (US2); later stories add the refusal-span rule and the watch-event
-detection on top of this core.
+comparison (US2), the refusal-span rule (US3) and the watch-event detection (US4) are below.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from model_dependabot.store import Store
@@ -103,3 +103,78 @@ def compare_licence(reference: LicenceReference, observation: Mapping[str, Any])
     if not reference.licence.recognised:
         return None
     return "same" if same_licence(declared, reference.licence) else "changed"
+
+
+# Research U7, FR-012: the owner's guard against transient refusals.
+REFUSAL_SPAN = timedelta(hours=24)
+
+
+@dataclass(frozen=True)
+class RefusalRun:
+    """The unbroken run of scheduled refusals the latest observation belongs to (research U7).
+
+    ``refusals`` are the run's scheduled refusals, oldest first; ``counted`` is whether the latest
+    observation is one of them (a scheduled refusal); ``qualifies`` is whether the run spans at
+    least ``REFUSAL_SPAN`` from its first to its latest refusal.
+    """
+
+    refusals: tuple[dict[str, Any], ...]
+    counted: bool
+    qualifies: bool
+
+
+def _moment(text: str) -> datetime:
+    return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+
+
+def refusal_run(observations: Sequence[Mapping[str, Any]]) -> RefusalRun:
+    """Apply the refusal-span rule to one item's hub observations, oldest first (research U7).
+
+    Walking back from the latest observation: a scheduled refusal joins the run, an on-demand
+    refusal is passed over (it neither counts nor breaks the run) and any other answer, from any
+    run, ends it. A failed request wrote no observation, so it is never seen here.
+    """
+    if not observations or observations[-1].get("outcome") != "refused":
+        return RefusalRun((), False, False)
+    run: list[dict[str, Any]] = []
+    for observation in reversed(observations):
+        if observation.get("outcome") != "refused":
+            break
+        if observation.get("trigger") == "scheduled":
+            run.append(dict(observation))
+    run.reverse()
+    counted = observations[-1].get("trigger") == "scheduled"
+    if not run:
+        return RefusalRun((), counted, False)
+    span = _moment(run[-1]["observed_at"]) - _moment(run[0]["observed_at"])
+    return RefusalRun(tuple(run), counted, span >= REFUSAL_SPAN)
+
+
+def previous_answer(store: Store, observation: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The latest earlier ``reachable`` observation of the same item from the same source."""
+    earlier = [
+        seen
+        for seen in store.observations(observation["item"], observation["source"])
+        if seen["observation_id"] < observation["observation_id"] and seen["outcome"] == "reachable"
+    ]
+    return earlier[-1] if earlier else None
+
+
+def appeared(previous: Mapping[str, Any] | None, current: Mapping[str, Any], name: str) -> bool:
+    """A pointer to something newer is present and was not there, or was another, before.
+
+    For the newest revision, the ``new_version`` pointer and a dataset's newest version: each is
+    recorded once when it first appears (on the baseline too) and again only when it changes.
+    """
+    value = current.get(name)
+    return bool(value) and (previous is None or previous.get(name) != value)
+
+
+def changed(previous: Mapping[str, Any] | None, current: Mapping[str, Any], name: str) -> bool:
+    """A field differs from the previous answer; the baseline, or a field it lacked, is no change.
+
+    For ``gated`` and ``card_hash`` (FR-013): only a change between two answers is reported.
+    """
+    if previous is None or previous.get(name) is None or current.get(name) is None:
+        return False
+    return previous.get(name) != current.get(name)

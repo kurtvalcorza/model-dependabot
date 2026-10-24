@@ -80,6 +80,8 @@ class DataciteRecord:
     repository: str | None = None
     repository_id: str | None = None
     licence: str | None = None
+    newer: tuple[str, ...] = ()
+    replaced_by: tuple[str, ...] = ()
 
 
 # rightsList entries under this URI prefix state access rights (``Open Access``), not a licence.
@@ -101,6 +103,23 @@ def declared_licence(attributes: object) -> str | None:
     return None
 
 
+# Research U2, FR-007: the relation types that name a newer version or a replacing record.
+NEWER_RELATIONS = ("IsPreviousVersionOf", "HasVersion")
+REPLACED_RELATIONS = ("IsObsoletedBy",)
+
+
+def related(attributes: object, relations: tuple[str, ...]) -> tuple[str, ...]:
+    """The related identifiers of the given relation types, in the record's order."""
+    items = attributes.get("relatedIdentifiers") if isinstance(attributes, dict) else None
+    found = []
+    for item in items if isinstance(items, list) else []:
+        if isinstance(item, dict) and item.get("relationType") in relations:
+            value = item.get("relatedIdentifier")
+            if isinstance(value, str) and value.strip():
+                found.append(value.strip())
+    return tuple(dict.fromkeys(found))
+
+
 def parse_record(doi: str, response: Response) -> DataciteRecord:
     if response.status == 404:
         return DataciteRecord(doi, response, "not_found")
@@ -112,10 +131,13 @@ def parse_record(doi: str, response: Response) -> DataciteRecord:
         raise SourceFailedError(SOURCE, f"unreadable answer for {doi}: {error}") from None
     url = attributes.get("url") if isinstance(attributes, dict) else None
     licence = declared_licence(attributes)
+    versions = related(attributes, NEWER_RELATIONS), related(attributes, REPLACED_RELATIONS)
     if not isinstance(url, str) or not url:
-        return DataciteRecord(doi, response, "reachable", None, "other", None, licence)
+        return DataciteRecord(doi, response, "reachable", None, "other", None, licence, *versions)
     repository, repository_id = route(url)
-    return DataciteRecord(doi, response, "reachable", url, repository, repository_id, licence)
+    return DataciteRecord(
+        doi, response, "reachable", url, repository, repository_id, licence, *versions
+    )
 
 
 class DataCite:

@@ -143,16 +143,16 @@ hours apart, which alert on the third run), none for a single refusal and `clear
 
 ### Tests for User Story 3
 
-- [ ] T042 [P] [US3] Write failing tests in `tests/unit/test_hf_models.py` against `tests/fixtures/hf_upstream/`: model info reads `disabled`, `gated`, `private`, `sha`, `cardData` and `lastModified`; HTTP 401, 403 or 404 is `refused`; a timeout, connection error or HTTP 5xx is a source failure, not an observation; U7's fail-safe: a model-info answer for a disabled model that does not match the dataset shape recorded in T019 (200 with `disabled: true`) records a watch event with the hub's response as evidence and opens no alert (research U7)
-- [ ] T043 [P] [US3] Write failing tests in `tests/unit/test_refusal_rule.py` for research U7's refusal-span rule: the alert opens when "an unbroken run of refusal observations from scheduled check runs, with no reachable observation from any run in between, spans at least 24 hours from its first to its latest refusal"; two scheduled refusals 23 hours apart do not qualify; daily scheduled refusals landing a few seconds under 24 hours apart do not qualify on the second run and do qualify on the third; an on-demand refusal neither counts towards the span nor breaks the run; a reachable observation from any run (scheduled or on-demand) ends the run, and the next refusal starts a new one; a failed request is ignored; a refusal that does not qualify records `base_model_refused`
-- [ ] T044 [P] [US3] Write failing tests in `tests/unit/test_lifecycle_base_model.py`: `base_model_disabled` (cause key "kind + base-model purl", `MODERATE`) opens at once with the hub response as evidence; `base_model_unavailable` (`LOW`) states "no longer publicly available (deleted or made private)" and shows the refusals of the run; it closes as 001's `cleared` when the base model is reachable again, with that observation as evidence (FR-016, constitution 1.0.2); a later qualifying run after `cleared` opens a new alert (001's re-open rule)
-- [ ] T045 [US3] Write a failing integration test in `tests/integration/test_check_base_model.py` following quickstart.md section 4, including daily scheduled runs that land a few seconds under 24 hours apart: no alert on the second refused run, one `base_model_unavailable` alert on the third
+- [X] T042 [P] [US3] Write failing tests in `tests/unit/test_hf_models.py` against `tests/fixtures/hf_upstream/`: model info reads `disabled`, `gated`, `private`, `sha`, `cardData` and `lastModified`; HTTP 401, 403 or 404 is `refused`; a timeout, connection error or HTTP 5xx is a source failure, not an observation; U7's fail-safe: a model-info answer for a disabled model that does not match the dataset shape recorded in T019 (200 with `disabled: true`) records a watch event with the hub's response as evidence and opens no alert (research U7)
+- [X] T043 [P] [US3] Write failing tests in `tests/unit/test_refusal_rule.py` for research U7's refusal-span rule: the alert opens when "an unbroken run of refusal observations from scheduled check runs, with no reachable observation from any run in between, spans at least 24 hours from its first to its latest refusal"; two scheduled refusals 23 hours apart do not qualify; daily scheduled refusals landing a few seconds under 24 hours apart do not qualify on the second run and do qualify on the third; an on-demand refusal neither counts towards the span nor breaks the run; a reachable observation from any run (scheduled or on-demand) ends the run, and the next refusal starts a new one; a failed request is ignored; a refusal that does not qualify records `base_model_refused`
+- [X] T044 [P] [US3] Write failing tests in `tests/unit/test_lifecycle_base_model.py`: `base_model_disabled` (cause key "kind + base-model purl", `MODERATE`) opens at once with the hub response as evidence; `base_model_unavailable` (`LOW`) states "no longer publicly available (deleted or made private)" and shows the refusals of the run; it closes as 001's `cleared` when the base model is reachable again, with that observation as evidence (FR-016, constitution 1.0.2); a later qualifying run after `cleared` opens a new alert (001's re-open rule)
+- [X] T045 [US3] Write a failing integration test in `tests/integration/test_check_base_model.py` following quickstart.md section 4, including daily scheduled runs that land a few seconds under 24 hours apart: no alert on the second refused run, one `base_model_unavailable` alert on the third
 
 ### Implementation for User Story 3
 
-- [ ] T046 [US3] Implement the model-info part of `src/model_dependabot/sources/hf.py` until T042 passes (after T032, same file)
-- [ ] T047 [US3] Implement the refusal-span rule in `src/model_dependabot/upstream/changes.py` until T043 passes
-- [ ] T048 [US3] Add the base-model kinds and their transition to 001's `cleared` state to `src/model_dependabot/lifecycle.py` (needs 001:T046a) until T044 and T045 pass
+- [X] T046 [US3] Implement the model-info part of `src/model_dependabot/sources/hf.py` until T042 passes (after T032, same file)
+- [X] T047 [US3] Implement the refusal-span rule in `src/model_dependabot/upstream/changes.py` until T043 passes
+- [X] T048 [US3] Add the base-model kinds and their transition to 001's `cleared` state to `src/model_dependabot/lifecycle.py` (needs 001:T046a) until T044 and T045 pass
 
 **Checkpoint**: User Stories 1 to 3 work on their own
 
@@ -167,13 +167,13 @@ and moves are recorded as watch events with evidence, never alerts.
 
 ### Tests for User Story 4
 
-- [ ] T049 [P] [US4] Write failing tests in `tests/unit/test_watch_events_base_model.py`: `base_model_new_revision` shows the pinned and newest revision; `base_model_new_version_pointer` when `cardData.new_version` appears or changes; `gating_changed` when `gated` changes (`false`, `auto` or `manual`); `card_changed` when the SHA-256 of canonical `cardData` "without licence fields and `new_version`" changes; each recorded once per change, never as an alert (FR-013)
-- [ ] T050 [P] [US4] Write failing tests in `tests/unit/test_watch_events_datasets.py`: `dataset_new_version` from Zenodo `links.latest` or DataCite `IsPreviousVersionOf` / `HasVersion`; `dataset_replaced` from DataCite `IsObsoletedBy`, naming the newer or replacing record; never an alert (FR-007)
-- [ ] T051 [US4] Write a failing integration test in `tests/integration/test_check_watch_events.py` following quickstart.md section 5
+- [X] T049 [P] [US4] Write failing tests in `tests/unit/test_watch_events_base_model.py`: `base_model_new_revision` shows the pinned and newest revision; `base_model_new_version_pointer` when `cardData.new_version` appears or changes; `gating_changed` when `gated` changes (`false`, `auto` or `manual`); `card_changed` when the SHA-256 of canonical `cardData` "without licence fields and `new_version`" changes; each recorded once per change, never as an alert (FR-013)
+- [X] T050 [P] [US4] Write failing tests in `tests/unit/test_watch_events_datasets.py`: `dataset_new_version` from Zenodo `links.latest` or DataCite `IsPreviousVersionOf` / `HasVersion`; `dataset_replaced` from DataCite `IsObsoletedBy`, naming the newer or replacing record; never an alert (FR-007)
+- [X] T051 [US4] Write a failing integration test in `tests/integration/test_check_watch_events.py` following quickstart.md section 5
 
 ### Implementation for User Story 4
 
-- [ ] T052 [US4] Add revision, pointer, gating, card and dataset-version detection to `src/model_dependabot/upstream/changes.py` and the watch-event kinds to `src/model_dependabot/lifecycle.py` until T049, T050 and T051 pass
+- [X] T052 [US4] Add revision, pointer, gating, card and dataset-version detection to `src/model_dependabot/upstream/changes.py` and the watch-event kinds to `src/model_dependabot/lifecycle.py` until T049, T050 and T051 pass
 
 **Checkpoint**: all user stories work on their own
 

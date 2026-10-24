@@ -14,6 +14,7 @@ import json
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -335,8 +336,13 @@ def _route_dois(store: Store, fetcher: Fetcher, entries: Sequence[Mapping[str, A
             ensure_repository(store, fetcher, doi)
 
 
-def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
-    """The built command handlers; ``fetcher`` replaces the real sources in tests."""
+def make_handlers(
+    fetcher: Fetcher | None = None, now: Callable[[], datetime] | None = None
+) -> dict[str, Handler]:
+    """The command handlers; ``fetcher`` and ``now`` stand in for sources and clock in tests."""
+
+    def _open(path: Path | str) -> Store:
+        return Store(path, now=now)
 
     def _fetcher() -> Fetcher:
         return UrlFetcher() if fetcher is None else fetcher
@@ -347,7 +353,7 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
         except ManifestError as error:
             raise InvalidInputError(str(error)) from None
         model_id = args.model_id or manifest.model_id
-        with Store(args.db) as store:
+        with _open(args.db) as store:
             if args.model_id is None and store.get_model(model_id) is not None:
                 raise InvalidInputError(
                     f"model {model_id!r} is already registered; pass --model-id {model_id} to"
@@ -381,7 +387,7 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
         except InventoryError as error:
             raise InvalidInputError(str(error)) from None
         model_id = args.model_id
-        with Store(args.db) as store:
+        with _open(args.db) as store:
             version = _record(
                 store,
                 model_id,
@@ -394,7 +400,7 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
         return CommandResult(payload, _inventory_text(payload, f"Imported {model_id} v{version}"))
 
     def show(args: argparse.Namespace) -> CommandResult:
-        with Store(args.db) as store:
+        with _open(args.db) as store:
             version = _version_of(store, args.model_id, args.version)
             payload = _inventory_payload(
                 args.model_id, version, store.entries(args.model_id, version)
@@ -402,7 +408,7 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
         return CommandResult(payload, _inventory_text(payload, f"{args.model_id} v{version}"))
 
     def export(args: argparse.Namespace) -> CommandResult:
-        with Store(args.db) as store:
+        with _open(args.db) as store:
             version = _version_of(store, args.model_id, args.version)
             record = store.get_version(args.model_id, version)
         assert record is not None
@@ -413,7 +419,7 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
         return CommandResult(payload, f"Wrote {args.model_id} v{version} to {args.output}")
 
     def check(args: argparse.Namespace) -> CommandResult:
-        with Store(args.db) as store:
+        with _open(args.db) as store:
             if args.all:
                 model_ids, scope = store.model_ids(), SCOPE_ALL
             else:
@@ -434,7 +440,7 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
         return CommandResult(payload, _check_text(payload), sources_failed=outcome.failed)
 
     def policy(args: argparse.Namespace) -> CommandResult:
-        with Store(args.db) as store:
+        with _open(args.db) as store:
             if store.get_model(args.model_id) is None:
                 raise InvalidInputError(f"no model {args.model_id!r}")
             try:
@@ -454,19 +460,19 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
         return CommandResult(payload, text)
 
     def alerts(args: argparse.Namespace) -> CommandResult:
-        with Store(args.db) as store:
+        with _open(args.db) as store:
             _version_of(store, args.model_id, None)
             payload = alerts_report(store, args.model_id, state=args.state)
         return CommandResult(payload, alerts_text(payload))
 
     def history(args: argparse.Namespace) -> CommandResult:
-        with Store(args.db) as store:
+        with _open(args.db) as store:
             _version_of(store, args.model_id, None)
             payload = history_report(store, args.model_id)
         return CommandResult(payload, history_text(payload))
 
     def alert_show(args: argparse.Namespace) -> CommandResult:
-        with Store(args.db) as store:
+        with _open(args.db) as store:
             alert = store.get_alert(args.alert_id)
             if alert is None:
                 raise InvalidInputError(f"no alert {args.alert_id}")
@@ -474,7 +480,7 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
         return CommandResult(payload, _alert_text(payload))
 
     def alert_dismiss(args: argparse.Namespace) -> CommandResult:
-        with Store(args.db) as store:
+        with _open(args.db) as store:
             try:
                 alert = dismiss_alert(
                     store, args.alert_id, reason=args.reason, by=args.by, note=args.note

@@ -331,6 +331,8 @@ def test_moves_refusals_and_404s_are_watch_events_never_alerts(
         ("dataset_unreachable", FIGSHARE_DOI),
         ("dataset_unreachable", CROSSREF_MISSING),
         ("paper_not_found", CROSSREF_MISSING),
+        # US4 (FR-007): the recorded DataCite record lists IsPreviousVersionOf, a watch event too.
+        ("dataset_new_version", FIGSHARE_DOI),
     }
     assert events[("dataset_moved", f"hf-dataset:owner/books3@{MUXUE_SHA}")]["detail"]["to"] == (
         "defunct-datasets/books3"

@@ -10,6 +10,7 @@ private or missing repository, is a gap, never an error. Requests are anonymous 
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -412,6 +413,28 @@ class HubModel:
     gated: str | None = None
     sha: str | None = None
     licence: str | None = None
+    private: bool | None = None
+    last_modified: str | None = None
+    card: dict[str, object] | None = None
+    card_hash: str | None = None
+    new_version: str | None = None
+    unrecognised: str | None = None
+
+
+# Research U7: a disabled model answers HTTP 200 with ``disabled: true`` (recorded in
+# ``model-disabled``). Any other value of ``disabled`` is not that shape, so it opens no alert.
+UNRECOGNISED_DISABLED = "the hub's disabled field is not true or false"
+# Left out of ``card_hash``: the licence fields are compared on their own (FR-008) and
+# ``new_version`` is its own watch event (data-model.md, Upstream observation).
+CARD_EXCLUDED = ("license", "license_name", "license_link", "new_version")
+
+
+def card_hash(card: object) -> str:
+    """SHA-256 of the canonical ``cardData`` without licence fields and ``new_version``."""
+    fields = card if isinstance(card, dict) else {}
+    kept = {name: value for name, value in fields.items() if name not in CARD_EXCLUDED}
+    canonical = json.dumps(kept, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def parse_model(repo: str, response: Response) -> HubModel:
@@ -429,14 +452,25 @@ def parse_model(repo: str, response: Response) -> HubModel:
     if not isinstance(info, dict):
         raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}")
     sha = info.get("sha")
+    disabled = info.get("disabled", False)
+    card = info.get("cardData")
+    card = card if isinstance(card, dict) else None
+    pointer = (card or {}).get("new_version")
+    modified = info.get("lastModified")
     return HubModel(
         repo,
         response,
         "reachable",
-        disabled=bool(info.get("disabled", False)),
+        disabled=disabled if isinstance(disabled, bool) else None,
         gated=_gated(info.get("gated", False)),
         sha=sha if isinstance(sha, str) else None,
-        licence=_declared_licence(info.get("cardData")),
+        licence=_declared_licence(card),
+        private=info.get("private") if isinstance(info.get("private"), bool) else None,
+        last_modified=modified if isinstance(modified, str) else None,
+        card=card,
+        card_hash=card_hash(card),
+        new_version=pointer if isinstance(pointer, str) and pointer else None,
+        unrecognised=None if isinstance(disabled, bool) else UNRECOGNISED_DISABLED,
     )
 
 

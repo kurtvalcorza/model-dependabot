@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from model_dependabot.sources.fetcher import Fetcher, Response, SourceFailedError
 
@@ -44,6 +44,8 @@ class ZenodoRecord:
     outcome: str
     removal: dict[str, Any] | None = None
     licence: str | None = None
+    newer: str | None = None
+    newer_response: Response | None = None
 
 
 def _licence(body: bytes) -> str | None:
@@ -68,6 +70,37 @@ def _removal(body: bytes) -> dict[str, Any]:
     }
 
 
+def latest_link(body: bytes) -> str | None:
+    """``links.latest`` of a record that is not the last of its versions, else ``None`` (U3)."""
+    try:
+        record = json.loads(body)
+    except ValueError:
+        return None
+    if not isinstance(record, dict):
+        return None
+    versions = ((record.get("metadata") or {}).get("relations") or {}).get("version") or []
+    last = versions[0].get("is_last") if versions and isinstance(versions[0], dict) else None
+    link = (record.get("links") or {}).get("latest")
+    return link if last is False and isinstance(link, str) and link else None
+
+
+def newest_record(response: Response) -> str | None:
+    """The record id ``links.latest`` leads to: its redirect target, or the record it returns."""
+    if 300 <= response.status < 400:
+        path = urlsplit(response.redirected_to or "").path.rstrip("/")
+        prefix = "/api/records/"
+        return path[len(prefix) :] if path.startswith(prefix) else None
+    if response.status == 200:
+        try:
+            value = json.loads(response.body).get("id")
+        except (ValueError, AttributeError):
+            return None
+        return str(value) if value else None
+    if response.status in (404, 410):
+        return None
+    raise SourceFailedError(SOURCE, f"HTTP {response.status} for {response.url}")
+
+
 def parse_record(record_id: str, response: Response) -> ZenodoRecord:
     if response.status == 200:
         return ZenodoRecord(record_id, response, "reachable", licence=_licence(response.body))
@@ -85,4 +118,12 @@ class Zenodo:
         self.fetcher = fetcher
 
     def record(self, record_id: str) -> ZenodoRecord:
-        return parse_record(record_id, self.fetcher.get(record_url(record_id)))
+        """The record; for one that is not its last version, also where ``links.latest`` leads."""
+        record = parse_record(record_id, self.fetcher.get(record_url(record_id)))
+        link = latest_link(record.response.body) if record.outcome == "reachable" else None
+        if link is None:
+            return record
+        latest = self.fetcher.get(link, follow_redirects=False)
+        newer = newest_record(latest)
+        newer = newer if newer != record_id else None
+        return replace(record, newer=newer, newer_response=latest if newer else None)
