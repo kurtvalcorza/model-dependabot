@@ -39,7 +39,7 @@ failures; scripts read the JSON instead.
 
 ```json
 {
-  "model_id": "rice-pest-r50-v5",
+  "model_id": "example-detector-v1",
   "current_version": 2,
   "alerts": [
     {
@@ -67,7 +67,7 @@ or `cleared`, with the fields that outcome needs and the others `null`):
 
 ```json
 {
-  "model_id": "rice-pest-r50-v5",
+  "model_id": "example-detector-v1",
   "current_version": 2,
   "history": [
     {

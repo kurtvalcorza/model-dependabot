@@ -24,8 +24,8 @@ file, a pinned base-model revision, a dataset DOI), then:
 
 ```bash
 uv run model-dependabot register example.toml
-uv run model-dependabot inventory show rice-pest-r50-v5
-uv run model-dependabot inventory export rice-pest-r50-v5 -o bom.json
+uv run model-dependabot inventory show example-detector-v1
+uv run model-dependabot inventory export example-detector-v1 -o bom.json
 ```
 
 Expected: every pinned item appears with its identifier and every gap with a reason (US1, SC-001);
@@ -37,8 +37,8 @@ Register a manifest whose lock pins a package version with a known published adv
 old Pillow release), then run a check:
 
 ```bash
-uv run model-dependabot check rice-pest-r50-v5
-uv run model-dependabot alerts rice-pest-r50-v5 --json
+uv run model-dependabot check example-detector-v1
+uv run model-dependabot alerts example-detector-v1 --json
 ```
 
 Expected: one open alert per matching advisory, with severity, fixed version and evidence (US2, SC-002,
@@ -56,8 +56,8 @@ Register version 2 with the vulnerable package upgraded past the fixed version, 
 without running a check:
 
 ```bash
-uv run model-dependabot register example-v2.toml --model-id rice-pest-r50-v5
-uv run model-dependabot alerts rice-pest-r50-v5 --state all
+uv run model-dependabot register example-v2.toml --model-id example-detector-v1
+uv run model-dependabot alerts example-detector-v1 --state all
 ```
 
 Expected: the alert shows `fixed`, closed by version 2, straight after registration; no source is
