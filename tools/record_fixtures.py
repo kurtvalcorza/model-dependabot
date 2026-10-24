@@ -4,6 +4,7 @@ Usage::
 
     uv run python tools/record_fixtures.py hf
     uv run python tools/record_fixtures.py osv
+    uv run python tools/record_fixtures.py hf-scan
 
 Requests are anonymous and carry only the generic User-Agent of ``UrlFetcher``; no token is sent.
 Each response is written in ``RecordedFetcher``'s format: ``NAME.meta.json`` beside the body file.
@@ -26,6 +27,9 @@ HF_API = "https://huggingface.co/api/models"
 HF_REPO = "openai-community/gpt2"
 HF_MISSING_REPO = "model-dependabot-fixture/does-not-exist"
 KEPT_HEADERS = ("content-type", "x-repo-commit", "etag")
+# The hub's security status (research R5): a public test repository whose files carry real
+# ``unsafe`` verdicts, and gpt2 for a real clean answer.
+HF_SCAN_UNSAFE_REPO = "mcpotato/42-eicar-street"
 
 OSV_API = "https://api.osv.dev/v1"
 # Each batch is one recording, matched by its request body. pillow 12.3.0 is affected and 13.0.0 is
@@ -136,7 +140,19 @@ def record_osv() -> None:
         _write(out, f"vuln-{advisory_id}", response, response.body, None)
 
 
-RECORDERS = {"hf": record_hf, "osv": record_osv}
+def record_hf_scan() -> None:
+    out = ROOT / "tests" / "fixtures" / "hf"
+    fetcher = UrlFetcher()
+    for name, repo in (("eicar-security", HF_SCAN_UNSAFE_REPO), ("gpt2-security", HF_REPO)):
+        status = fetcher.get(f"{HF_API}/{repo}?securityStatus=true")
+        _write(out, name, status, status.body, None)
+        if repo == HF_SCAN_UNSAFE_REPO:
+            commit = json.loads(status.body)["sha"]
+            tree = fetcher.get(f"{HF_API}/{repo}/tree/{commit}?expand=true")
+            _write(out, "eicar-tree-expand", tree, tree.body, None)
+
+
+RECORDERS = {"hf": record_hf, "osv": record_osv, "hf-scan": record_hf_scan}
 
 
 def main(argv: list[str]) -> int:

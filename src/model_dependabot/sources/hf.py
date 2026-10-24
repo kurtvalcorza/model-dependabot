@@ -155,3 +155,150 @@ class HuggingFace:
         if pinned.gap_reason is not None:
             return HubFileResult(commit=None, file=found, gap_reason=pinned.gap_reason)
         return HubFileResult(commit=pinned.commit, file=found)
+
+
+# --- security status (research R5; FR-012) -------------------------------------------------------
+#
+# ``GET /api/models/{repo}?securityStatus=true`` is undocumented. Its ``securityRepoStatus`` object
+# (recorded on 2026-10-24, see ``tests/fixtures/hf/NOTES.md``) has ``scansDone`` and
+# ``filesWithIssues``, a list of ``{"path", "level"}`` for the files at the model's ``sha``. The
+# per-scanner results and each file's SHA-256 come from the tree at that commit with
+# ``expand=true`` (``securityFileStatus`` and ``lfs.oid``). Anything not recognised fails safe: it
+# becomes a watch event, never an alert.
+
+UNSAFE = "unsafe"
+CAUTION = "caution"
+CLEAN = "clean"
+PENDING = "pending"
+MISSING = "missing"
+UNRECOGNISED = "unrecognised"
+LISTED_LEVELS = {"unsafe": UNSAFE, "caution": CAUTION, "safe": CLEAN}
+
+
+@dataclass(frozen=True)
+class SecurityStatus:
+    """The hub's security status for one repository: ``answered``, ``pending`` or ``missing``."""
+
+    repo: str
+    response: Response
+    state: str
+    commit: str | None = None
+    levels: dict[str, str] = field(default_factory=dict)
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class FileVerdict:
+    """The hub's verdict for one file: ``unsafe``, ``caution``, ``clean``, ``pending``, ``missing``
+    or ``unrecognised``, with the hub's SHA-256 of the file at the verdict's commit."""
+
+    repo: str
+    file: str
+    state: str
+    status: SecurityStatus
+    level: str | None = None
+    hub_sha256: str | None = None
+    scanners: dict[str, str] = field(default_factory=dict)
+    file_status: dict[str, object] | None = None
+    tree_response: Response | None = None
+    reason: str | None = None
+
+
+def security_status_url(repo: str, endpoint: str = HF_ENDPOINT) -> str:
+    return f"{endpoint}/api/models/{_path(repo)}?securityStatus=true"
+
+
+def _parse_status(repo: str, response: Response) -> SecurityStatus:
+    if response.status != 200:
+        return SecurityStatus(repo, response, MISSING, reason=_refusal(response))
+    try:
+        info = json.loads(response.body)
+    except ValueError:
+        return SecurityStatus(repo, response, MISSING, reason="response is not JSON")
+    status = info.get("securityRepoStatus") if isinstance(info, dict) else None
+    if not isinstance(status, dict):
+        return SecurityStatus(repo, response, MISSING, reason="no securityRepoStatus in response")
+    commit = info.get("sha")
+    commit = commit if is_commit(commit) else None
+    if status.get("scansDone") is not True:
+        return SecurityStatus(repo, response, PENDING, commit, reason="scans not done")
+    issues = status.get("filesWithIssues")
+    if not isinstance(issues, list) or commit is None:
+        reason = "no commit in response" if commit is None else "filesWithIssues is not a list"
+        return SecurityStatus(repo, response, UNRECOGNISED, commit, reason=reason)
+    levels: dict[str, str] = {}
+    for item in issues:
+        if isinstance(item, dict) and isinstance(item.get("path"), str):
+            levels[item["path"]] = str(item.get("level"))
+    return SecurityStatus(repo, response, "answered", commit, levels)
+
+
+def _scanners(file_status: dict[str, object]) -> dict[str, str]:
+    found = {}
+    for name, value in sorted(file_status.items()):
+        if name.endswith("Scan") and isinstance(value, dict) and "status" in value:
+            found[name] = str(value["status"])
+    return found
+
+
+class HubSecurity:
+    """Read-only access to the hub's scan verdicts. A request that fails raises
+    ``SourceFailedError`` so the check run records the source as failed (FR-016)."""
+
+    def __init__(self, fetcher: Fetcher, endpoint: str = HF_ENDPOINT) -> None:
+        self.fetcher = fetcher
+        self.endpoint = endpoint
+        self._trees: dict[tuple[str, str, str], Response] = {}
+
+    def status(self, repo: str) -> SecurityStatus:
+        return _parse_status(repo, self.fetcher.get(security_status_url(repo, self.endpoint)))
+
+    def _tree(self, repo: str, commit: str, directory: str) -> Response:
+        key = (repo, commit, directory)
+        if key not in self._trees:
+            url = f"{self.endpoint}/api/models/{_path(repo)}/tree/{quote(commit, safe='')}"
+            if directory:
+                url += f"/{_path(directory)}"
+            self._trees[key] = self.fetcher.get(url + "?expand=true")
+        return self._trees[key]
+
+    def verdict(self, status: SecurityStatus, file: str) -> FileVerdict:
+        """The verdict for one file; a listed file's hash and scanners come from the tree."""
+        if status.state != "answered":
+            return FileVerdict(status.repo, file, status.state, status, reason=status.reason)
+        level = status.levels.get(file)
+        if level is None:
+            return FileVerdict(status.repo, file, CLEAN, status)
+        state = LISTED_LEVELS.get(level)
+        if state is None:
+            return FileVerdict(
+                status.repo, file, UNRECOGNISED, status, level, reason=f"level {level!r}"
+            )
+        if state == CLEAN:
+            return FileVerdict(status.repo, file, CLEAN, status, level)
+        assert status.commit is not None
+        response = self._tree(status.repo, status.commit, dirname(file))
+        sha256, file_status = None, None
+        if response.status == 200:
+            try:
+                items = json.loads(response.body)
+            except ValueError:
+                items = []
+            for item in items if isinstance(items, list) else []:
+                if isinstance(item, dict) and item.get("path") == file:
+                    lfs = item.get("lfs") if isinstance(item.get("lfs"), dict) else {}
+                    oid = str(lfs.get("oid", "")).lower()
+                    sha256 = oid if _SHA256.match(oid) else None
+                    raw = item.get("securityFileStatus")
+                    file_status = raw if isinstance(raw, dict) else None
+        return FileVerdict(
+            status.repo,
+            file,
+            state,
+            status,
+            level,
+            hub_sha256=sha256,
+            scanners=_scanners(file_status or {}),
+            file_status=file_status,
+            tree_response=response,
+        )

@@ -266,6 +266,7 @@ def _record(
     *,
     name: str | None = None,
     owner: str | None = None,
+    base_dir: Path | None = None,
 ) -> int:
     """Record the next version with its validated CycloneDX 1.7 document (FR-004, FR-005)."""
     if store.get_model(model_id) is None:
@@ -273,7 +274,7 @@ def _record(
     version = (store.latest_version(model_id) or 0) + 1
     document = export_bom(model_id, version, entries)
     validate(document)
-    recorded = store.add_version(model_id, document, input_sha256, entries)
+    recorded = store.add_version(model_id, document, input_sha256, entries, base_dir=base_dir)
     if recorded != version:
         raise RuntimeError(f"expected to record version {version}, recorded {recorded}")
     return version
@@ -321,11 +322,13 @@ def _watch_view(event: Mapping[str, Any]) -> dict[str, Any]:
 
 def _alert_line(alert: Mapping[str, Any]) -> str:
     cause = alert["cause"]
-    fixed = ", ".join(cause.get("fixed") or []) or "none published"
-    return (
-        f"  #{alert['alert_id']} {alert['severity']:<8} {alert['state']:<9}"
-        f" {cause['advisory_id']} {cause['package']}=={cause['version']} (fixed: {fixed})"
-    )
+    head = f"  #{alert['alert_id']} {alert['severity']:<8} {alert['state']:<9}"
+    if alert["kind"] == "package_advisory":
+        fixed = ", ".join(cause.get("fixed") or []) or "none published"
+        return (
+            f"{head} {cause['advisory_id']} {cause['package']}=={cause['version']} (fixed: {fixed})"
+        )
+    return f"{head} {alert['kind']} {cause.get('location')} ({cause.get('identifier')})"
 
 
 def _check_text(payload: Mapping[str, Any]) -> str:
@@ -379,7 +382,13 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
                 )
             entries = build_entries(manifest, _fetcher())
             version = _record(
-                store, model_id, entries, manifest.sha256, name=manifest.name, owner=manifest.owner
+                store,
+                model_id,
+                entries,
+                manifest.sha256,
+                name=manifest.name,
+                owner=manifest.owner,
+                base_dir=Path(args.manifest).parent,
             )
             payload = _inventory_payload(model_id, version, store.entries(model_id, version))
         return CommandResult(payload, _inventory_text(payload, f"Registered {model_id} v{version}"))
@@ -396,7 +405,13 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
             raise InvalidInputError(str(error)) from None
         model_id = args.model_id
         with Store(args.db) as store:
-            version = _record(store, model_id, entries, hashlib.sha256(raw).hexdigest())
+            version = _record(
+                store,
+                model_id,
+                entries,
+                hashlib.sha256(raw).hexdigest(),
+                base_dir=Path(args.bom).parent,
+            )
             payload = _inventory_payload(model_id, version, store.entries(model_id, version))
         return CommandResult(payload, _inventory_text(payload, f"Imported {model_id} v{version}"))
 
@@ -435,6 +450,26 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
         }
         return CommandResult(payload, _check_text(payload), sources_failed=outcome.failed)
 
+    def policy(args: argparse.Namespace) -> CommandResult:
+        with Store(args.db) as store:
+            if store.get_model(args.model_id) is None:
+                raise InvalidInputError(f"no model {args.model_id!r}")
+            try:
+                model = store.set_format_policy(args.model_id, args.format, set_by=args.by)
+            except ValueError as error:
+                raise InvalidInputError(str(error)) from None
+        payload = {
+            "model_id": args.model_id,
+            "format_policy": model["format_policy"],
+            "set_by": model["format_policy_set_by"],
+            "set_at": model["format_policy_set_at"],
+        }
+        text = (
+            f"{args.model_id}: format policy {payload['format_policy']}, set by"
+            f" {payload['set_by']} at {payload['set_at']}; takes effect at the next check"
+        )
+        return CommandResult(payload, text)
+
     def alerts(args: argparse.Namespace) -> CommandResult:
         states = {"open": ["open"], "closed": list(CLOSED_STATES), "all": None}[args.state]
         with Store(args.db) as store:
@@ -471,6 +506,7 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
         "inventory show": show,
         "inventory export": export,
         "check": check,
+        "policy": policy,
         "alerts": alerts,
         "alert show": alert_show,
     }

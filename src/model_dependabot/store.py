@@ -22,6 +22,7 @@ from typing import Any
 ENTRY_KINDS = ("weight_file", "package", "base_model", "dataset")
 ALERT_KINDS = ("package_advisory", "weight_file_scan", "hub_scan", "format_policy")
 ALERT_STATES = ("open", "fixed", "dismissed", "withdrawn", "cleared")
+FORMAT_POLICIES = ("default", "strict")
 DISMISSAL_REASONS = ("not_used_at_runtime", "risk_accepted", "false_positive", "fix_not_available")
 WATCH_KINDS = (
     "pickle_format",
@@ -54,6 +55,7 @@ CREATE TABLE IF NOT EXISTS model_versions (
     registered_at TEXT NOT NULL,
     manifest_sha256 TEXT NOT NULL,
     inventory TEXT NOT NULL,
+    base_dir TEXT,
     PRIMARY KEY (model_id, version)
 );
 
@@ -235,6 +237,10 @@ class Store:
     def _stamp(self) -> str:
         return utc_text(self._now())
 
+    def now(self) -> datetime:
+        """The store's clock (a fixed time in tests)."""
+        return self._now()
+
     # --- schema --------------------------------------------------------------------------------
 
     def tables(self) -> set[str]:
@@ -261,6 +267,24 @@ class Store:
         row = self.conn.execute("SELECT * FROM models WHERE model_id = ?", (model_id,)).fetchone()
         return None if row is None else dict(row)
 
+    def set_format_policy(self, model_id: str, policy: str, *, set_by: str) -> dict[str, Any]:
+        """Record the model's format policy, who set it and when (FR-021, constitution I)."""
+        if policy not in FORMAT_POLICIES:
+            raise ValueError(f"format policy must be one of {FORMAT_POLICIES}, got {policy!r}")
+        if not set_by.strip():
+            raise ValueError("a format policy needs the name of who set it")
+        with self.conn:
+            cursor = self.conn.execute(
+                "UPDATE models SET format_policy = ?, format_policy_set_by = ?,"
+                " format_policy_set_at = ? WHERE model_id = ?",
+                (policy, set_by, self._stamp(), model_id),
+            )
+        if cursor.rowcount != 1:
+            raise KeyError(model_id)
+        model = self.get_model(model_id)
+        assert model is not None
+        return model
+
     def latest_version(self, model_id: str) -> int | None:
         row = self.conn.execute(
             "SELECT max(version) AS v FROM model_versions WHERE model_id = ?", (model_id,)
@@ -273,14 +297,27 @@ class Store:
         inventory: Mapping[str, Any],
         manifest_sha256: str,
         entries: Iterable[Mapping[str, Any]],
+        *,
+        base_dir: Path | str | None = None,
     ) -> int:
-        """Record the next version of a model with its inventory and entries, all or nothing."""
+        """Record the next version of a model with its inventory and entries, all or nothing.
+
+        ``base_dir`` is the directory that local weight-file locations are relative to (the
+        manifest's or the imported inventory's), so a check can find the files to scan.
+        """
         with self.conn:
             version = (self.latest_version(model_id) or 0) + 1
             self.conn.execute(
                 "INSERT INTO model_versions (model_id, version, registered_at, manifest_sha256,"
-                " inventory) VALUES (?, ?, ?, ?, ?)",
-                (model_id, version, self._stamp(), manifest_sha256, json.dumps(inventory)),
+                " inventory, base_dir) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    model_id,
+                    version,
+                    self._stamp(),
+                    manifest_sha256,
+                    json.dumps(inventory),
+                    None if base_dir is None else str(Path(base_dir).resolve()),
+                ),
             )
             for entry in entries:
                 self._insert_entry(model_id, version, entry)

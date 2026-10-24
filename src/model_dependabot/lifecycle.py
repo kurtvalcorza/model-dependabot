@@ -12,20 +12,34 @@ source, and a changed record is added as new evidence beside the earlier one. A 
 closes its alerts as ``withdrawn`` with the withdrawn record as evidence (FR-009). OSV leaves
 withdrawn records out of query answers, so the advisory of every open alert is fetched by id on each
 run.
+
+Weight files (research R4, R5; FR-011 to FR-013, FR-021, FR-022): every pinned code-capable file
+gets a ``pickle_format`` watch event, and under the owner's ``strict`` format policy a
+``format_policy`` alert when no code-free file is beside it in the version. These two rules read
+only the inventory and the owner's recorded policy, and run whenever ``picklescan`` or ``hf-scan``
+is requested. ``picklescan`` scans the local files (never loading them): a ``dangerous`` global
+raises a ``weight_file_scan`` alert, a ``suspicious`` one a ``scan_suspicious`` watch event, and a
+scan that stopped early a ``scan_incomplete`` watch event. ``hf-scan`` reads the hub's verdict: only
+an explicit ``unsafe`` verdict for a file whose hub SHA-256 matches the inventory raises a
+``hub_scan`` alert; anything else it cannot confirm is a watch event.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from packaging.utils import canonicalize_name
 
 from model_dependabot.matching.severity import severity_of
 from model_dependabot.matching.versions import advisory_affects, affected_ranges, fixed_versions
-from model_dependabot.sources.fetcher import Fetcher, SourceFailedError
+from model_dependabot.sources import hf as hub
+from model_dependabot.sources import pickle_scan
+from model_dependabot.sources.fetcher import Fetcher, SourceFailedError, source_of
 from model_dependabot.sources.osv import (
     SOURCE,
     BatchAnswer,
@@ -39,6 +53,31 @@ from model_dependabot.store import Store
 
 PACKAGE_ALERT = "package_advisory"
 UNMATCHED = "advisory_unmatched"
+
+WEIGHT_SCAN_ALERT = "weight_file_scan"
+HUB_SCAN_ALERT = "hub_scan"
+FORMAT_POLICY_ALERT = "format_policy"
+PICKLE_FORMAT = "pickle_format"
+SCAN_SUSPICIOUS = "scan_suspicious"
+SCAN_INCOMPLETE = "scan_incomplete"
+HUB_SCAN_UNKNOWN = "hub_scan_unknown"
+HASH_MISMATCH = "hash_mismatch"
+
+PICKLESCAN = "picklescan"
+HF_SCAN = "hf-scan"
+WEIGHT_SOURCES = (PICKLESCAN, HF_SCAN)
+FORMAT_RULE_SOURCE = "format-rule"
+FORMAT_POLICY_SOURCE = "format-policy"
+
+# data-model.md, Alert: fixed rules of this service, not values from a source.
+WEIGHT_SEVERITY = {
+    WEIGHT_SCAN_ALERT: "HIGH",
+    HUB_SCAN_ALERT: "HIGH",
+    FORMAT_POLICY_ALERT: "MODERATE",
+}
+POLICY_ORIGIN = "policy"
+PICKLE_REASON = "the format can run code when loaded"
+SUGGESTION = "use a format that cannot run code when loaded: safetensors, ONNX or GGUF"
 
 
 @dataclass
@@ -66,6 +105,7 @@ class _Target:
     version: int
     entries: list[dict[str, Any]]
     summary: dict[str, Any]
+    base_dir: str | None = None
 
 
 @dataclass
@@ -97,10 +137,28 @@ def run_check(
             "closed": [],
             "watch_events": [],
         }
-        targets.append(_Target(model_id, version, store.entries(model_id, version), summary))
+        record = store.get_version(model_id, version) or {}
+        entries = store.entries(model_id, version)
+        targets.append(_Target(model_id, version, entries, summary, record.get("base_dir")))
 
     statuses: dict[str, str] = {}
     for source in sources:
+        if source == PICKLESCAN:
+            scans = _read_local_scans(store, targets)
+            for target in targets:
+                _apply_local_scans(store, run_id, target, scans)
+            statuses[source] = "ok"
+            continue
+        if source == HF_SCAN:
+            try:
+                verdicts = _read_hub(hub.HubSecurity(fetcher), targets)
+            except SourceFailedError as error:
+                statuses[source] = f"failed: {error.reason}"
+                continue
+            for target in targets:
+                _apply_hub(store, run_id, target, verdicts)
+            statuses[source] = "ok"
+            continue
         if source != "osv":
             statuses[source] = "skipped"
             continue
@@ -112,6 +170,9 @@ def run_check(
         for target in targets:
             _apply_osv(store, run_id, read, target)
         statuses[source] = "ok"
+    if any(source in WEIGHT_SOURCES for source in sources):
+        for target in targets:
+            _apply_format_rules(store, run_id, target)
     store.finish_check_run(run_id, statuses)
     return CheckOutcome(run_id, statuses, [target.summary for target in targets])
 
@@ -301,3 +362,389 @@ def _unmatched(
     _cache(store, record, evidence_id)
     if watch_event_id not in target.summary["watch_events"]:
         target.summary["watch_events"].append(watch_event_id)
+
+
+# --- weight files (US3) --------------------------------------------------------------------------
+
+
+def weight_cause_key(kind: str, identifier: str) -> str:
+    """``kind`` plus the file's SHA-256 (data-model.md, Alert)."""
+    return f"{kind}:{identifier.removeprefix('sha256:')}"
+
+
+def _code_capable(entries: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """Pinned weight files whose format can run code; gaps are never scanned."""
+    return [
+        entry
+        for entry in entries
+        if entry["kind"] == "weight_file" and entry["pinned"] and entry["can_run_code"]
+    ]
+
+
+def _json_body(record: Mapping[str, Any]) -> bytes:
+    return json.dumps(record, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+@dataclass
+class _Observation:
+    """One piece of evidence about a weight file, before it is stored."""
+
+    source: str
+    url: str
+    retrieved_at: Any
+    body: bytes
+    detail: dict[str, Any]
+
+
+def _store_observations(
+    store: Store,
+    run_id: int,
+    identifier: str,
+    observations: Sequence[_Observation],
+    existing: Sequence[Mapping[str, Any]] = (),
+) -> list[int]:
+    """Evidence ids for the observations, reusing identical records already linked."""
+    ids = []
+    for item in observations:
+        digest = _sha256(item.body)
+        detail = json.loads(json.dumps(item.detail))
+        reused = next(
+            (
+                int(evidence["evidence_id"])
+                for evidence in existing
+                if evidence["source"] == item.source
+                and evidence["url"] == item.url
+                and evidence["body_sha256"] == digest
+                and evidence["detail"] == detail
+            ),
+            None,
+        )
+        if reused is None:
+            reused = store.add_evidence(
+                source=item.source,
+                url=item.url,
+                retrieved_at=item.retrieved_at,
+                matched_identifier=identifier,
+                body=item.body,
+                detail=item.detail,
+                run_id=run_id,
+            )
+        ids.append(reused)
+    return ids
+
+
+def _weight_alert(
+    store: Store,
+    run_id: int,
+    target: _Target,
+    kind: str,
+    entry: Mapping[str, Any],
+    cause: Mapping[str, Any],
+    observations: Sequence[_Observation],
+) -> None:
+    """Open a weight-file alert, or carry the open one forward (FR-010, FR-013)."""
+    identifier = entry["identifier"]
+    cause_key = weight_cause_key(kind, identifier)
+    severity = WEIGHT_SEVERITY[kind]
+    existing = store.find_open_alert(target.model_id, cause_key)
+    if existing is None:
+        evidence_ids = _store_observations(store, run_id, identifier, observations)
+        alert_id = store.insert_alert(
+            model_id=target.model_id,
+            kind=kind,
+            cause_key=cause_key,
+            cause=cause,
+            severity=severity,
+            severity_origin=POLICY_ORIGIN,
+            opened_in_version=target.version,
+            evidence_ids=evidence_ids,
+        )
+        target.summary["opened"].append(alert_id)
+        return
+    alert_id = existing["alert_id"]
+    linked = store.alert_evidence(alert_id)
+    for evidence_id in _store_observations(store, run_id, identifier, observations, linked):
+        store.link_alert_evidence(alert_id, evidence_id)
+    store.update_open_alert(
+        alert_id,
+        current_version=max(existing["current_version"], target.version),
+        severity=severity,
+        severity_origin=POLICY_ORIGIN,
+        cause=cause,
+    )
+    if alert_id not in target.summary["carried_forward"]:
+        target.summary["carried_forward"].append(alert_id)
+
+
+def _watch(
+    store: Store,
+    run_id: int,
+    target: _Target,
+    kind: str,
+    identifier: str,
+    detail: Mapping[str, Any],
+    observations: Sequence[_Observation],
+) -> None:
+    existing = store.get_watch_event(target.model_id, target.version, identifier, kind)
+    linked = existing["evidence"] if existing else []
+    evidence_ids = _store_observations(store, run_id, identifier, observations, linked)
+    watch_event_id = store.record_watch_event(
+        model_id=target.model_id,
+        version=target.version,
+        entry_identifier=identifier,
+        kind=kind,
+        detail=detail,
+        evidence_ids=evidence_ids,
+    )
+    if watch_event_id not in target.summary["watch_events"]:
+        target.summary["watch_events"].append(watch_event_id)
+
+
+def _where(entry: Mapping[str, Any]) -> str | None:
+    if entry.get("location"):
+        return str(entry["location"])
+    if entry.get("hub_repo"):
+        return f"hf:{entry['hub_repo']}/{entry['hub_file']}"
+    return None
+
+
+# --- format rules: pickle_format watch events and the strict format policy ------------------------
+
+
+def _apply_format_rules(store: Store, run_id: int, target: _Target) -> None:
+    capable = _code_capable(target.entries)
+    now = store.now()
+    for entry in capable:
+        detail = {
+            "format": entry["format"],
+            "reason": PICKLE_REASON,
+            "suggestion": SUGGESTION,
+            "location": _where(entry),
+        }
+        record = {"identifier": entry["identifier"], "can_run_code": True, **detail}
+        observation = _Observation(FORMAT_RULE_SOURCE, "", now, _json_body(record), detail)
+        _watch(store, run_id, target, PICKLE_FORMAT, entry["identifier"], detail, [observation])
+
+    model = store.get_model(target.model_id) or {}
+    if model.get("format_policy") != "strict":
+        return
+    code_free_beside = any(
+        entry["kind"] == "weight_file" and entry["can_run_code"] is False
+        for entry in target.entries
+    )
+    if code_free_beside:
+        return  # FR-021: a code-free file beside it suppresses the policy alert
+    policy = {
+        "model_id": target.model_id,
+        "format_policy": "strict",
+        "set_by": model.get("format_policy_set_by"),
+        "set_at": model.get("format_policy_set_at"),
+    }
+    body = _json_body(policy)  # the owner's recorded policy is the primary source (constitution I)
+    for entry in capable:
+        detail = {
+            "format": entry["format"],
+            "policy": "strict",
+            "set_by": policy["set_by"],
+            "set_at": policy["set_at"],
+            "location": _where(entry),
+        }
+        cause = {"identifier": entry["identifier"], **detail, "suggestion": SUGGESTION}
+        observation = _Observation(FORMAT_POLICY_SOURCE, "", now, body, detail)
+        _weight_alert(store, run_id, target, FORMAT_POLICY_ALERT, entry, cause, [observation])
+
+
+# --- picklescan: static scans of local files ------------------------------------------------------
+
+
+@dataclass
+class _LocalScan:
+    path: Path
+    retrieved_at: Any
+    report: pickle_scan.ScanReport | None = None
+    actual_sha256: str | None = None
+    read_error: str | None = None
+
+
+def _local_path(target: _Target, location: str) -> Path:
+    path = Path(location)
+    if not path.is_absolute() and target.base_dir is not None:
+        path = Path(target.base_dir) / path
+    return path.resolve()
+
+
+def _read_local_scans(
+    store: Store, targets: Sequence[_Target]
+) -> dict[tuple[str, int, str], _LocalScan]:
+    """Scan every local code-capable file before anything changes; a file is never loaded."""
+    scans: dict[tuple[str, int, str], _LocalScan] = {}
+    for target in targets:
+        for entry in _code_capable(target.entries):
+            if entry.get("hub_repo") or not entry.get("location"):
+                continue
+            path = _local_path(target, entry["location"])
+            scan = _LocalScan(path, store.now())
+            try:
+                data = path.read_bytes()
+            except OSError as error:
+                scan.read_error = f"cannot read the file: {error.strerror or error}"
+            else:
+                scan.actual_sha256 = _sha256(data)
+                if f"sha256:{scan.actual_sha256}" == entry["identifier"]:
+                    scan.report = pickle_scan.scan(data, path.name)
+            scans[(target.model_id, target.version, entry["identifier"])] = scan
+    return scans
+
+
+def _apply_local_scans(
+    store: Store, run_id: int, target: _Target, scans: Mapping[tuple[str, int, str], _LocalScan]
+) -> None:
+    for entry in _code_capable(target.entries):
+        identifier = entry["identifier"]
+        scan = scans.get((target.model_id, target.version, identifier))
+        if scan is None:
+            continue
+        url = scan.path.as_uri()
+        location = entry["location"]
+        if scan.report is None and scan.read_error is None:
+            detail = {
+                "scanner": pickle_scan.SCANNER,
+                "location": location,
+                "inventory_sha256": identifier.removeprefix("sha256:"),
+                "actual_sha256": scan.actual_sha256,
+            }
+            observation = _Observation(
+                pickle_scan.SCANNER, url, scan.retrieved_at, _json_body(detail), detail
+            )
+            _watch(store, run_id, target, HASH_MISMATCH, identifier, detail, [observation])
+            continue
+        if scan.report is None:
+            detail = {
+                "scanner": pickle_scan.SCANNER,
+                "scanner_version": pickle_scan.SCANNER_VERSION,
+                "position": 0,
+                "size": entry.get("size"),
+                "reason": scan.read_error,
+                "location": location,
+            }
+            observation = _Observation(
+                pickle_scan.SCANNER, url, scan.retrieved_at, _json_body(detail), detail
+            )
+            _watch(store, run_id, target, SCAN_INCOMPLETE, identifier, detail, [observation])
+            continue
+
+        report = scan.report
+        body = _json_body(report.as_record())
+        base = {
+            "scanner": report.scanner,
+            "scanner_version": report.scanner_version,
+            "location": location,
+            "format": entry["format"],
+        }
+        if report.dangerous:
+            detail = {
+                **base,
+                "dangerous": report.dangerous,
+                "suspicious": report.suspicious,
+                "complete": report.complete,
+                "position": report.position,
+            }
+            cause = {"identifier": identifier, **detail}
+            observation = _Observation(report.scanner, url, scan.retrieved_at, body, detail)
+            _weight_alert(store, run_id, target, WEIGHT_SCAN_ALERT, entry, cause, [observation])
+        if report.suspicious:
+            detail = {**base, "suspicious": report.suspicious}
+            observation = _Observation(report.scanner, url, scan.retrieved_at, body, detail)
+            _watch(store, run_id, target, SCAN_SUSPICIOUS, identifier, detail, [observation])
+        if not report.complete:
+            detail = {
+                **base,
+                "position": report.position,
+                "size": report.size,
+                "reason": report.error,
+            }
+            observation = _Observation(report.scanner, url, scan.retrieved_at, body, detail)
+            _watch(store, run_id, target, SCAN_INCOMPLETE, identifier, detail, [observation])
+
+
+# --- hf-scan: the hub's verdicts ------------------------------------------------------------------
+
+
+def _hub_files(target: _Target) -> list[Mapping[str, Any]]:
+    return [
+        entry
+        for entry in target.entries
+        if entry["kind"] == "weight_file"
+        and entry["pinned"]
+        and entry.get("hub_repo")
+        and entry.get("hub_file")
+    ]
+
+
+def _read_hub(
+    security: hub.HubSecurity, targets: Sequence[_Target]
+) -> dict[tuple[str, str], hub.FileVerdict]:
+    """Every verdict the run needs, read before anything changes (FR-016)."""
+    statuses: dict[str, hub.SecurityStatus] = {}
+    verdicts: dict[tuple[str, str], hub.FileVerdict] = {}
+    for target in targets:
+        for entry in _hub_files(target):
+            repo, file = entry["hub_repo"], entry["hub_file"]
+            if repo not in statuses:
+                statuses[repo] = security.status(repo)
+            if (repo, file) not in verdicts:
+                verdicts[(repo, file)] = security.verdict(statuses[repo], file)
+    return verdicts
+
+
+def _hub_observations(verdict: hub.FileVerdict, detail: dict[str, Any]) -> list[_Observation]:
+    found = []
+    for response in (verdict.status.response, verdict.tree_response):
+        if response is not None:
+            found.append(
+                _Observation(
+                    source_of(response.url),
+                    response.url,
+                    response.retrieved_at,
+                    response.body,
+                    detail,
+                )
+            )
+    return found
+
+
+def _apply_hub(
+    store: Store, run_id: int, target: _Target, verdicts: Mapping[tuple[str, str], hub.FileVerdict]
+) -> None:
+    for entry in _hub_files(target):
+        verdict = verdicts.get((entry["hub_repo"], entry["hub_file"]))
+        if verdict is None or verdict.state == hub.CLEAN:
+            continue
+        identifier = entry["identifier"]
+        sha256 = identifier.removeprefix("sha256:")
+        detail: dict[str, Any] = {
+            "scanner": HF_SCAN,
+            "verdict": verdict.state,
+            "level": verdict.level,
+            "scanners": verdict.scanners,
+            "hub_repo": verdict.repo,
+            "hub_file": verdict.file,
+            "hub_commit": verdict.status.commit,
+            "location": _where(entry),
+        }
+        if verdict.state in (hub.PENDING, hub.MISSING, hub.UNRECOGNISED):
+            detail["reason"] = verdict.reason
+            observations = _hub_observations(verdict, detail)
+            _watch(store, run_id, target, HUB_SCAN_UNKNOWN, identifier, detail, observations)
+            continue
+        if verdict.hub_sha256 != sha256:
+            detail |= {"inventory_sha256": sha256, "hub_sha256": verdict.hub_sha256}
+            observations = _hub_observations(verdict, detail)
+            _watch(store, run_id, target, HASH_MISMATCH, identifier, detail, observations)
+            continue
+        observations = _hub_observations(verdict, detail)
+        if verdict.state == hub.UNSAFE:
+            cause = {"identifier": identifier, **detail}
+            _weight_alert(store, run_id, target, HUB_SCAN_ALERT, entry, cause, observations)
+        else:  # caution: the hub's counterpart of a suspicious import
+            _watch(store, run_id, target, SCAN_SUSPICIOUS, identifier, detail, observations)
