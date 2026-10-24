@@ -1,0 +1,9 @@
+# A model whose lock pins pillow 12.3.0 (affected) and validators 0.12.2, for the OSV tests.
+
+[model]
+id = "pillow-model"
+name = "Model pinning an affected pillow, test fixture"
+owner = "Model owner"
+
+[environment]
+lock = "../locks/vulnerable.txt"

@@ -506,3 +506,182 @@ class Store:
         record = dict(row)
         record["sources"] = _loads(record["sources"])
         return record
+
+    def latest_check_run(self, scopes: Iterable[str] | None = None) -> dict[str, Any] | None:
+        """The latest check run, or the latest whose scope is one of ``scopes``."""
+        query, params = "SELECT max(run_id) AS r FROM check_runs", tuple(scopes or ())
+        if scopes is not None:
+            query += " WHERE scope IN (" + ", ".join("?" for _ in params) + ")"
+        row = self.conn.execute(query, params).fetchone()
+        return None if row["r"] is None else self.get_check_run(row["r"])
+
+    # --- models, alerts and watch events as the checks use them -------------------------------
+
+    def model_ids(self) -> list[str]:
+        return [
+            row["model_id"]
+            for row in self.conn.execute("SELECT model_id FROM models ORDER BY model_id")
+        ]
+
+    def find_open_alert(self, model_id: str, cause_key: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT alert_id FROM alerts WHERE model_id = ? AND cause_key = ? AND state = 'open'",
+            (model_id, cause_key),
+        ).fetchone()
+        return None if row is None else self.get_alert(row["alert_id"])
+
+    def update_open_alert(
+        self,
+        alert_id: int,
+        *,
+        current_version: int,
+        severity: str,
+        severity_origin: str,
+        cause: Mapping[str, Any],
+    ) -> None:
+        """Carry an open alert forward with the source's current values (FR-010)."""
+        with self.conn:
+            cursor = self.conn.execute(
+                "UPDATE alerts SET current_version = ?, severity = ?, severity_origin = ?,"
+                " cause = ? WHERE alert_id = ? AND state = 'open'",
+                (current_version, severity, severity_origin, json.dumps(cause), alert_id),
+            )
+        if cursor.rowcount != 1:
+            raise ValueError(f"alert {alert_id} is not open")
+
+    def link_alert_evidence(self, alert_id: int, evidence_id: int) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO alert_evidence (alert_id, evidence_id) VALUES (?, ?)",
+                (alert_id, evidence_id),
+            )
+
+    def alerts_for(
+        self, model_id: str, states: Iterable[str] | None = None
+    ) -> list[dict[str, Any]]:
+        wanted = None if states is None else set(states)
+        rows = self.conn.execute(
+            "SELECT alert_id, state FROM alerts WHERE model_id = ? ORDER BY alert_id", (model_id,)
+        )
+        ids = [row["alert_id"] for row in rows if wanted is None or row["state"] in wanted]
+        return [alert for alert in (self.get_alert(alert_id) for alert_id in ids) if alert]
+
+    def alert_evidence(self, alert_id: int) -> list[dict[str, Any]]:
+        alert = self.get_alert(alert_id)
+        if alert is None:
+            return []
+        return [record for record in map(self.get_evidence, alert["evidence_ids"]) if record]
+
+    # --- advisories ----------------------------------------------------------------------------
+
+    def upsert_advisory(
+        self,
+        *,
+        source: str,
+        advisory_id: str,
+        aliases: Iterable[str],
+        modified: str | None,
+        withdrawn: str | None,
+        severity: str,
+        severity_origin: str,
+        affected: Any,
+        evidence_id: int,
+    ) -> None:
+        """Keep the latest copy of a published record (data-model.md, Advisory)."""
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO advisories (source, advisory_id, aliases, modified, withdrawn,"
+                " severity, severity_origin, affected, evidence_id)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT (source, advisory_id) DO UPDATE SET aliases = excluded.aliases,"
+                " modified = excluded.modified, withdrawn = excluded.withdrawn,"
+                " severity = excluded.severity, severity_origin = excluded.severity_origin,"
+                " affected = excluded.affected, evidence_id = excluded.evidence_id",
+                (
+                    source,
+                    advisory_id,
+                    json.dumps(list(aliases)),
+                    modified,
+                    withdrawn,
+                    severity,
+                    severity_origin,
+                    json.dumps(affected),
+                    evidence_id,
+                ),
+            )
+
+    def get_advisory(self, source: str, advisory_id: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM advisories WHERE source = ? AND advisory_id = ?", (source, advisory_id)
+        ).fetchone()
+        if row is None:
+            return None
+        record = dict(row)
+        record["aliases"] = _loads(record["aliases"])
+        record["affected"] = _loads(record["affected"])
+        return record
+
+    # --- watch events --------------------------------------------------------------------------
+
+    def get_watch_event(
+        self, model_id: str, version: int, entry_identifier: str, kind: str
+    ) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM watch_events WHERE model_id = ? AND version = ?"
+            " AND entry_identifier = ? AND kind = ?",
+            (model_id, version, entry_identifier, kind),
+        ).fetchone()
+        return None if row is None else self._watch_event(row)
+
+    def _watch_event(self, row: sqlite3.Row) -> dict[str, Any]:
+        record = dict(row)
+        record["detail"] = _loads(record["detail"])
+        links = self.conn.execute(
+            "SELECT evidence_id FROM watch_event_evidence WHERE watch_event_id = ?"
+            " ORDER BY evidence_id",
+            (record["watch_event_id"],),
+        )
+        record["evidence"] = [self.get_evidence(link["evidence_id"]) for link in links]
+        return record
+
+    def record_watch_event(
+        self,
+        *,
+        model_id: str,
+        version: int,
+        entry_identifier: str,
+        kind: str,
+        detail: Mapping[str, Any],
+        evidence_ids: Iterable[int],
+    ) -> int:
+        """One record per model version, entry and kind; a repeat updates it (data-model.md)."""
+        stamp = self._stamp()
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO watch_events (model_id, version, entry_identifier, kind, detail,"
+                " first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT (model_id, version, entry_identifier, kind) DO UPDATE SET"
+                " detail = excluded.detail, last_seen = excluded.last_seen",
+                (model_id, version, entry_identifier, kind, json.dumps(detail), stamp, stamp),
+            )
+            row = self.conn.execute(
+                "SELECT watch_event_id FROM watch_events WHERE model_id = ? AND version = ?"
+                " AND entry_identifier = ? AND kind = ?",
+                (model_id, version, entry_identifier, kind),
+            ).fetchone()
+            watch_event_id = int(row["watch_event_id"])
+            self.conn.executemany(
+                "INSERT OR IGNORE INTO watch_event_evidence (watch_event_id, evidence_id)"
+                " VALUES (?, ?)",
+                [(watch_event_id, evidence_id) for evidence_id in evidence_ids],
+            )
+        return watch_event_id
+
+    def watch_events(self, model_id: str, version: int | None = None) -> list[dict[str, Any]]:
+        query = "SELECT * FROM watch_events WHERE model_id = ?"
+        params: tuple[Any, ...] = (model_id,)
+        if version is not None:
+            query += " AND version = ?"
+            params += (version,)
+        rows = self.conn.execute(query + " ORDER BY watch_event_id", params).fetchall()
+        return [self._watch_event(row) for row in rows]

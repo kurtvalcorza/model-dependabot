@@ -1,0 +1,21 @@
+{
+  "method": "POST",
+  "url": "https://api.osv.dev/v1/querybatch",
+  "request_body": {
+    "queries": [
+      {
+        "package": {
+          "name": "pillow",
+          "ecosystem": "PyPI"
+        },
+        "version": "13.0.0"
+      }
+    ]
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "retrieved_at": "2026-10-24T03:54:34Z",
+  "body_file": "querybatch-pillow-13.0.0.json"
+}

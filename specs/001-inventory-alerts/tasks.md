@@ -90,21 +90,21 @@ Single project: `src/model_dependabot/` and `tests/` at the repository root (pla
 
 ### Tests for User Story 2
 
-- [ ] T024 [US2] Write `tools/record_fixtures.py` (marked live, run by hand) that records OSV.dev `POST /v1/querybatch` and `GET /v1/vulns/{id}` responses for a chosen package list into `tests/fixtures/osv/`, with the retrieval date in a sidecar file; record a set including an affected version (for example `pillow==12.3.0`), an unaffected one (`pillow==13.0.0`) and one withdrawn advisory
-- [ ] T025 [P] [US2] Write failing tests in `tests/unit/test_versions.py`: evaluation of OSV `affected[].ranges` (`introduced`, `fixed`, `last_affected` events, `ECOSYSTEM` type) and `affected[].versions` under PEP 440 with `packaging` (research R2), including pre-releases and multiple ranges
-- [ ] T026 [P] [US2] Write failing tests in `tests/unit/test_severity.py`: `database_specific.severity` first, else a band from a CVSS v3 or v4 score, else `UNKNOWN`; origin recorded (research R3)
-- [ ] T027 [P] [US2] Write failing tests in `tests/unit/test_osv.py` against the recorded fixtures: batch query, detail fetch, aliases, fixed versions, the `withdrawn` field; only package entries with `pinned` true are queried (FR-003)
-- [ ] T028 [P] [US2] Write failing tests in `tests/unit/test_lifecycle_packages.py`: alert only when OSV and the local evaluation agree, otherwise a watch event of kind `advisory_unmatched` (FR-007); alert fields per FR-008; withdrawal closes the alert as `withdrawn` with the withdrawal as evidence (FR-009); never two open alerts per model, advisory and package, the alert being carried forward rather than raised again (FR-010, the `cause_key` rule tested in T008); a source that failed in a run changes no alert (FR-016); the same advisory in two models gives each model its own alert; two recorded responses for one advisory with different severity and fixed version: the alert shows the new values and keeps both evidence records (spec edge case)
-- [ ] T029 [US2] Write a failing integration test in `tests/integration/test_check_packages.py`: `register` then `check` then `alerts --json` with the recorded fixtures; exit code 2 and no state change when OSV is made to fail (SC-007)
-- [ ] T029a [US2] Write a failing integration test in `tests/integration/test_new_advisory.py`: a first `check` against a recorded fixture set with no advisory for the pinned version opens nothing; a second `check` against a set where a newly published advisory affects it opens the alert, so with the daily schedule an advisory appears within one scheduled interval (SC-006)
+- [X] T024 [US2] Write `tools/record_fixtures.py` (marked live, run by hand) that records OSV.dev `POST /v1/querybatch` and `GET /v1/vulns/{id}` responses for a chosen package list into `tests/fixtures/osv/`, with the retrieval date in a sidecar file; record a set including an affected version (for example `pillow==12.3.0`), an unaffected one (`pillow==13.0.0`) and one withdrawn advisory
+- [X] T025 [P] [US2] Write failing tests in `tests/unit/test_versions.py`: evaluation of OSV `affected[].ranges` (`introduced`, `fixed`, `last_affected` events, `ECOSYSTEM` type) and `affected[].versions` under PEP 440 with `packaging` (research R2), including pre-releases and multiple ranges
+- [X] T026 [P] [US2] Write failing tests in `tests/unit/test_severity.py`: `database_specific.severity` first, else a band from a CVSS v3 or v4 score, else `UNKNOWN`; origin recorded (research R3)
+- [X] T027 [P] [US2] Write failing tests in `tests/unit/test_osv.py` against the recorded fixtures: batch query, detail fetch, aliases, fixed versions, the `withdrawn` field; only package entries with `pinned` true are queried (FR-003)
+- [X] T028 [P] [US2] Write failing tests in `tests/unit/test_lifecycle_packages.py`: alert only when OSV and the local evaluation agree, otherwise a watch event of kind `advisory_unmatched` (FR-007); alert fields per FR-008; withdrawal closes the alert as `withdrawn` with the withdrawal as evidence (FR-009); never two open alerts per model, advisory and package, the alert being carried forward rather than raised again (FR-010, the `cause_key` rule tested in T008); a source that failed in a run changes no alert (FR-016); the same advisory in two models gives each model its own alert; two recorded responses for one advisory with different severity and fixed version: the alert shows the new values and keeps both evidence records (spec edge case)
+- [X] T029 [US2] Write a failing integration test in `tests/integration/test_check_packages.py`: `register` then `check` then `alerts --json` with the recorded fixtures; exit code 2 and no state change when OSV is made to fail (SC-007)
+- [X] T029a [US2] Write a failing integration test in `tests/integration/test_new_advisory.py`: a first `check` against a recorded fixture set with no advisory for the pinned version opens nothing; a second `check` against a set where a newly published advisory affects it opens the alert, so with the daily schedule an advisory appears within one scheduled interval (SC-006)
 
 ### Implementation for User Story 2
 
-- [ ] T030 [P] [US2] Implement `src/model_dependabot/matching/versions.py` until T025 passes
-- [ ] T031 [P] [US2] Implement `src/model_dependabot/matching/severity.py` until T026 passes
-- [ ] T032 [P] [US2] Implement `src/model_dependabot/sources/osv.py` until T027 passes
-- [ ] T033 [US2] Implement package alerts, watch events, evidence and check runs in `src/model_dependabot/lifecycle.py` until T028 passes
-- [ ] T034 [US2] Add `check (ID | --all) [--source ...]`, `alerts` and `alert show` to `src/model_dependabot/cli.py` until T029 and T029a pass
+- [X] T030 [P] [US2] Implement `src/model_dependabot/matching/versions.py` until T025 passes
+- [X] T031 [P] [US2] Implement `src/model_dependabot/matching/severity.py` until T026 passes
+- [X] T032 [P] [US2] Implement `src/model_dependabot/sources/osv.py` until T027 passes
+- [X] T033 [US2] Implement package alerts, watch events, evidence and check runs in `src/model_dependabot/lifecycle.py` until T028 passes
+- [X] T034 [US2] Add `check (ID | --all) [--source ...]`, `alerts` and `alert show` to `src/model_dependabot/cli.py` until T029 and T029a pass
 
 **Checkpoint**: User Stories 1 and 2 work on their own
 

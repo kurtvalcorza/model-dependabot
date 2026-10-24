@@ -1,0 +1,29 @@
+{
+  "method": "POST",
+  "url": "https://api.osv.dev/v1/querybatch",
+  "request_body": {
+    "queries": [
+      {
+        "package": {
+          "name": "pillow",
+          "ecosystem": "PyPI"
+        },
+        "version": "12.3.0"
+      },
+      {
+        "package": {
+          "name": "validators",
+          "ecosystem": "PyPI"
+        },
+        "version": "0.12.2"
+      }
+    ]
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "retrieved_at": "2026-10-24T03:54:33Z",
+  "body_file": "querybatch-vulnerable.json",
+  "trimmed": "kept GHSA-cp9v-662q-vvx9, GHSA-24rc-8hj2-v98c, PYSEC-2019-64; removed 41 other vulns"
+}
