@@ -53,8 +53,10 @@ from model_dependabot.sources import (
     zenodo,
 )
 from model_dependabot.sources import hf as hub
-from model_dependabot.sources.doi_ra import ensure_agency
-from model_dependabot.sources.fetcher import Fetcher, SourceFailedError, source_of
+from model_dependabot.sources.doi_ra import NOT_REGISTERED, refresh_agency
+from model_dependabot.sources.doi_ra import SOURCE as DOI_RA
+from model_dependabot.sources.doi_ra import unknown as agency_unknown
+from model_dependabot.sources.fetcher import Fetcher, Response, SourceFailedError, source_of
 from model_dependabot.sources.osv import (
     SOURCE,
     BatchAnswer,
@@ -1017,6 +1019,7 @@ DATASET_REMOVED = "dataset_removed"
 DATASET_NOT_FINDABLE = "dataset_not_findable"
 DATASET_ALERTS = (DATASET_RETRACTED, PAPER_RETRACTED, DATASET_REMOVED, DATASET_NOT_FINDABLE)
 DATASET_UNREACHABLE = "dataset_unreachable"
+PAPER_NOT_FOUND = "paper_not_found"
 DATASET_MOVED = "dataset_moved"
 UPSTREAM_NOTICE = "upstream_notice"
 # Research U9: every US1 alert is HIGH by policy.
@@ -1044,6 +1047,11 @@ class _UpstreamRead:
 
     statuses: dict[str, str]
     reads: dict[str, Any]
+    sources: tuple[str, ...] = ()
+    # doi.org's answers given in this run, by DOI (supporting evidence only, never an alert).
+    agency_answers: dict[str, Response] = field(default_factory=dict)
+    # Dataset DOIs asked at Zenodo by their own record id, not routed by DataCite (research U4).
+    zenodo_by_doi: frozenset[str] = frozenset()
 
 
 def _datasets(targets: Sequence[_Target]) -> list[dict[str, Any]]:
@@ -1069,6 +1077,28 @@ def _routed(store: Store, dois: Sequence[str], repository: str) -> dict[str, str
     return found
 
 
+def _zenodo_by_doi(store: Store, dois: Sequence[str], records: Mapping[str, Any]) -> dict[str, str]:
+    """Zenodo DOIs asked at Zenodo with their own record id (research U1 exception, U4).
+
+    A ``10.5281/zenodo.<digits>`` DOI is asked directly when its agency is unknown (doi.org's
+    lookup failed or reports the DOI does not exist) and DataCite has not routed it, or when its
+    agency is DataCite and DataCite answered 404. Only Zenodo's answer then decides.
+    """
+    found = {}
+    for doi in dois:
+        record_id = zenodo.record_id_from_doi(doi)
+        if record_id is None:
+            continue
+        agency = _agency(store, doi)
+        record = records.get(doi)
+        missing = record is not None and record.outcome == "not_found"
+        if (agency_unknown(agency) and (record is None or missing)) or (
+            datacite.queried(agency) and missing
+        ):
+            found[doi] = record_id
+    return found
+
+
 def _read_upstream(
     store: Store, fetcher: Fetcher, targets: Sequence[_Target], sources: Sequence[str]
 ) -> _UpstreamRead:
@@ -1078,21 +1108,35 @@ def _read_upstream(
     dataset_dois = list(dict.fromkeys(e["identifier"] for e in entries if not e.get("hub_repo")))
     paper_dois = [paper for entry in entries for paper in entry.get("paper_dois") or []]
     all_dois = list(dict.fromkeys(dataset_dois + paper_dois))
+    agency_answers: dict[str, Response] = {}
     if any(source in DOI_SOURCES for source in sources):
-        # A DOI whose agency lookup failed at registration is looked up again (research U1).
+        # A DOI whose agency lookup failed at registration is looked up again, and one doi.org
+        # reported as not existing is asked again once per run (research U1).
         for doi in all_dois:
-            ensure_agency(store, fetcher, doi)
+            answer = refresh_agency(store, fetcher, doi, recheck_unregistered=True)
+            if answer is not None and answer.response is not None:
+                agency_answers[doi] = answer.response
+
+    def asked_at_datacite(doi: str) -> bool:
+        agency = _agency(store, doi)
+        unknown_zenodo = agency_unknown(agency) and zenodo.record_id_from_doi(doi) is not None
+        return datacite.queried(agency) or unknown_zenodo
+
+    by_doi: dict[str, str] = {}
+
+    def read_zenodo() -> dict[str, zenodo.ZenodoRecord]:
+        records = reads.get(DATACITE) if statuses.get(DATACITE) == "ok" else None
+        by_doi.update(_zenodo_by_doi(store, dataset_dois, records or {}))
+        routed = _routed(store, dataset_dois, "zenodo") | by_doi
+        return {doi: zenodo.Zenodo(fetcher).record(rid) for doi, rid in routed.items()}
 
     readers: dict[str, Callable[[], Any]] = {
         DATACITE: lambda: {
             doi: datacite.DataCite(fetcher).record(doi)
             for doi in dataset_dois
-            if datacite.queried(_agency(store, doi))
+            if asked_at_datacite(doi)
         },
-        ZENODO: lambda: {
-            doi: zenodo.Zenodo(fetcher).record(rid)
-            for doi, rid in _routed(store, dataset_dois, "zenodo").items()
-        },
+        ZENODO: read_zenodo,
         FIGSHARE: lambda: {
             doi: figshare.Figshare(fetcher).article(rid)
             for doi, rid in _routed(store, dataset_dois, "figshare").items()
@@ -1122,7 +1166,7 @@ def _read_upstream(
                 datacite.remember_repository(store, record)
         if source == HF_TAKEDOWNS and reads[source] is not None:
             store.replace_takedown_notices(reads[source].notices)
-    return _UpstreamRead(statuses, reads)
+    return _UpstreamRead(statuses, reads, tuple(sources), agency_answers, frozenset(by_doi))
 
 
 class _Observed:
@@ -1132,6 +1176,18 @@ class _Observed:
         self.store = store
         self.run_id = run_id
         self._seen: dict[tuple[str, str], dict[str, Any]] = {}
+        self._agency: dict[str, int] = {}
+
+    def agency(self, read: _UpstreamRead, doi: str) -> list[int]:
+        """Evidence of doi.org's answer for ``doi`` in this run, stored once; none if not asked."""
+        response = read.agency_answers.get(doi)
+        if response is None:
+            return []
+        if doi not in self._agency:
+            self._agency[doi] = self.store.add_response_evidence(
+                response, source=DOI_RA, matched_identifier=doi, run_id=self.run_id
+            )
+        return [self._agency[doi]]
 
     def __call__(self, source: str, item: str, response: Any, **fields: Any) -> dict[str, Any]:
         key = (source, item)
@@ -1250,19 +1306,64 @@ def _apply_crossref(
         _upstream_watch(store, target, UPSTREAM_NOTICE, doi, detail, [evidence_id])
 
 
+NOT_ASKED_REASONS = {
+    None: "doi.org could not be asked which agency registered the DOI",
+    NOT_REGISTERED: "doi.org reports the DOI does not exist",
+}
+
+
+def _not_asked_reason(agency: str | None) -> str | None:
+    """Why no source can be asked about a DOI of this agency, or ``None`` if one can."""
+    if agency in NOT_ASKED_REASONS:
+        return NOT_ASKED_REASONS[agency]
+    if datacite.queried(agency) or crossref.queried(agency):
+        return None
+    return f"registered with {agency}, which no source reads"
+
+
+def _not_asked(
+    store: Store,
+    target: _Target,
+    observed: _Observed,
+    read: _UpstreamRead,
+    doi: str,
+    dataset: str | None = None,
+) -> None:
+    """Constitution IV: a DOI no source could be asked about is a watch event naming why."""
+    if not any(source in DOI_SOURCES for source in read.sources):
+        return
+    agency = _agency(store, doi)
+    reason = _not_asked_reason(agency)
+    if reason is None:
+        return
+    by_record_id = zenodo.record_id_from_doi(doi) is not None and agency_unknown(agency)
+    if dataset is None and ZENODO in read.sources and by_record_id:
+        return  # asked at Zenodo with its own record id (research U4)
+    detail: dict[str, Any] = {"source": DOI_RA, "doi": doi, "reason": reason}
+    kind = DATASET_UNREACHABLE if dataset is None else PAPER_NOT_FOUND
+    if dataset is not None:
+        detail["dataset"] = dataset
+    _upstream_watch(store, target, kind, doi, detail, observed.agency(read, doi))
+
+
 def _apply_doi_dataset(
     store: Store,
     target: _Target,
     observed: _Observed,
+    read: _UpstreamRead,
     reads: Mapping[str, Any],
     entry: Mapping[str, Any],
 ) -> None:
     doi = entry["identifier"]
     base = {"identifier": doi, "dataset": doi}
     record = (reads.get(DATACITE) or {}).get(doi)
+    supporting: list[int] = []
     if record is not None:
         evidence_id = observed(DATACITE, doi, record.response)["evidence_ref"]
-        if record.outcome == "not_found":
+        supporting.append(evidence_id)
+        # FR-006: a DataCite 404 alerts only for a DOI DataCite registered; for a DOI whose agency
+        # is unknown it is supporting evidence only.
+        if record.outcome == "not_found" and datacite.queried(_agency(store, doi)):
             cause = base | {"doi": doi, "source": DATACITE, "http_status": record.response.status}
             key = dataset_cause_key(DATASET_NOT_FINDABLE, doi)
             _upstream_alert(store, target, DATASET_NOT_FINDABLE, key, cause, [evidence_id])
@@ -1270,6 +1371,8 @@ def _apply_doi_dataset(
     if removal is not None:
         observation = observed(ZENODO, doi, removal.response, removal=removal.removal)
         evidence_id = observation["evidence_ref"]
+        # Asked by its own record id: doi.org's and DataCite's answers support Zenodo's.
+        support = supporting + observed.agency(read, doi) if doi in read.zenodo_by_doi else []
         if removal.outcome == "removed":
             tombstone = removal.removal or {}
             cause = base | {
@@ -1279,10 +1382,11 @@ def _apply_doi_dataset(
                 "reason": tombstone.get("removal_reason") or NO_REASON,
             }
             key = dataset_cause_key(DATASET_REMOVED, doi)
-            _upstream_alert(store, target, DATASET_REMOVED, key, cause, [evidence_id])
+            _upstream_alert(store, target, DATASET_REMOVED, key, cause, [evidence_id, *support])
         elif removal.outcome == "not_found":
             detail = {"source": ZENODO, "http_status": 404, "record_id": removal.record_id}
-            _upstream_watch(store, target, DATASET_UNREACHABLE, doi, detail, [evidence_id])
+            evidence = [evidence_id, *support]
+            _upstream_watch(store, target, DATASET_UNREACHABLE, doi, detail, evidence)
     article = (reads.get(FIGSHARE) or {}).get(doi)
     if article is not None:
         evidence_id = observed(FIGSHARE, doi, article.response)["evidence_ref"]
@@ -1293,6 +1397,7 @@ def _apply_doi_dataset(
     works = reads.get(CROSSREF) or {}
     if doi in works:
         _apply_crossref(store, target, observed, doi, doi, "dataset", works[doi])
+    _not_asked(store, target, observed, read, doi)
 
 
 def _apply_hub_dataset(
@@ -1371,13 +1476,14 @@ def _apply_upstream(
         if entry.get("hub_repo"):
             _apply_hub_dataset(store, target, observed, reads, entry)
         else:
-            _apply_doi_dataset(store, target, observed, reads, entry)
+            _apply_doi_dataset(store, target, observed, read, reads, entry)
         # Papers the owner ties to the dataset, whether it has a DOI or lives on the hub (FR-004).
         works = reads.get(CROSSREF) or {}
+        dataset = entry["identifier"]
         for paper in entry.get("paper_dois") or []:
             if paper in works:
-                dataset = entry["identifier"]
                 _apply_crossref(store, target, observed, dataset, paper, "paper", works[paper])
+            _not_asked(store, target, observed, read, paper, dataset)
 
 
 def _dataset_present(

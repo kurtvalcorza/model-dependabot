@@ -20,10 +20,14 @@ Using recorded responses:
 
 - a dataset tied to a paper DOI that Crossref lists as retracted: one `paper_retracted` alert naming both
   DOIs and the notice, with `source: "retraction-watch"` or `"publisher"` in the evidence;
-- a Zenodo dataset whose record answers 410: one `dataset_removed` alert with the removal date and reason;
+- a Zenodo dataset whose record answers 410: one `dataset_removed` alert with the removal date and reason,
+  including a deleted record whose DOI doi.org reports as not existing (asked at Zenodo by its record id,
+  research U1 and U4);
 - a hub dataset reported `disabled: true` and listed in the takedown log: one `dataset_removed` alert whose
   evidence labels the date a notice date;
 - a DataCite DOI that answers 404: one `dataset_not_findable` alert;
+- a made-up DOI that doi.org reports as not existing: no alert, and one `dataset_unreachable` watch event
+  whose `detail.reason` is `doi.org reports the DOI does not exist`;
 - a dataset in none of these: no alert.
 
 ## 3. Licences (US2, SC-002)

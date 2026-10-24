@@ -4,11 +4,16 @@
 ``tombstone`` for a removed one; the tombstone's ``removal_date`` and ``removal_reason.id`` are the
 evidence. ``removed_by``, ``note`` and ``citation_text`` are removed by the fetcher before anything
 is stored (research U10). A 404 says only that the record is not there.
+
+A DOI ``10.5281/zenodo.<digits>`` that doi.org does not know, or whose DataCite record is 404, is
+still asked here with that record id (``record_id_from_doi``): the one exception to research U1's
+rule against routing by prefix, recorded there and in U4.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
@@ -17,6 +22,13 @@ from model_dependabot.sources.fetcher import Fetcher, Response, SourceFailedErro
 
 SOURCE = "zenodo"
 RECORDS_ENDPOINT = "https://zenodo.org/api/records/"
+ZENODO_DOI = re.compile(r"10\.5281/zenodo\.(\d+)", re.IGNORECASE)
+
+
+def record_id_from_doi(doi: str) -> str | None:
+    """The Zenodo record id a ``10.5281/zenodo.<digits>`` DOI names, or ``None``."""
+    found = ZENODO_DOI.fullmatch(doi.strip())
+    return found.group(1) if found else None
 
 
 def record_url(record_id: str) -> str:

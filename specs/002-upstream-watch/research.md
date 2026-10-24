@@ -22,6 +22,19 @@ be meaningless and would otherwise look like FR-006's "no longer findable".
 breaks for Figshare institutional portals and other repositories; asking every source about every DOI:
 more requests and false "not found" signals.
 
+**Exception (2026-10-24, from a live end-to-end run)**: a deleted Zenodo record's DOI
+(`10.5281/zenodo.12584226`, removed as `duplicate`) is not known to doi.org: **live-tested**, `doiRA`
+answered `[{"DOI": "10.5281/zenodo.12584226", "status": "DOI does not exist"}]` (no `RA`), DataCite answered
+404 and Zenodo answered 410 with a tombstone. Routing by agency alone skipped it silently, which
+constitution IV does not allow. So a DOI of the exact form `10.5281/zenodo.<digits>` whose agency is unknown
+(failed lookup, or `none` for "DOI does not exist") and that DataCite has not routed, or whose agency is
+DataCite and whose DataCite record is 404, is still asked at Zenodo with that record id (U4). Such a DOI is
+also asked at DataCite, but a DataCite 404 then is supporting evidence only (FR-006 stays limited to DOIs
+DataCite registered). The exception is narrow because the prefix rule fails only for repositories other
+than Zenodo: `10.5281/zenodo.<digits>` names a Zenodo record id by construction, and only Zenodo's own
+answer decides. Any other DOI that no source can be asked about records a watch event naming why
+(data-model.md), never an alert.
+
 ## U2. Retractions: the Crossref REST API, which already carries Retraction Watch
 
 **Decision**: For each Crossref DOI in scope (a dataset DOI registered at Crossref, or a paper DOI the owner
@@ -72,6 +85,12 @@ the removal itself (SC-006), not within a month. The exporter (`GET /api/exporte
 Zenodo-wide `records-deleted.csv.gz` of 27,423,086 bytes, last updated 2026-10-03, with columns
 `record_id,doi,parent_id,parent_doi,removal_note,removal_reason,removal_date,citation_text`. Guests are
 allowed 60 requests a minute and 2,000 an hour (landscape §4).
+
+**Asked by DOI (U1 exception)**: a `10.5281/zenodo.<digits>` DOI that doi.org does not know, or whose
+DataCite record is 404, is asked here with that record id. **Live-tested** with `10.5281/zenodo.12584226`:
+410 with a `duplicate` tombstone raises `dataset_removed` (HIGH) with the Zenodo response as evidence and
+doi.org's and DataCite's answers as supporting evidence; 200 is a normal observation; 404 is a
+`dataset_unreachable` watch event.
 
 **Alternatives considered**: downloading the deleted-records dump on each change (27 MB, monthly at best,
 and its `citation_text` names people, so every copy would need redacting); OAI-PMH deleted headers (not

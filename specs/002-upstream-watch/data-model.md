@@ -22,12 +22,15 @@ checked.
 | Field | Rule |
 | :-- | :-- |
 | `doi` | Normalised to lower case |
-| `agency` | `Crossref`, `DataCite` or another agency named by `doiRA` (U1) |
+| `agency` | `Crossref`, `DataCite` or another agency named by `doiRA` (U1); `none` when `doiRA` answers `"status": "DOI does not exist"`; empty when the lookup failed |
 | `repository` | DataCite DOIs only: `zenodo`, `figshare` or `other`, from the DataCite record's `url` |
 | `repository_id` | The Zenodo record id or Figshare article id |
 | `looked_up_at` | UTC timestamp |
 
-Looked up at registration and kept; re-looked up only if empty because the lookup failed.
+Looked up at registration and kept; re-looked up only if empty because the lookup failed. `none` is a
+definite answer, not a failed lookup: it is kept, and asked again at most once per check run in case the
+DOI is registered later; a failed lookup never replaces it. doi.org's answers in a check run are stored as
+evidence (source `doi-ra`) only when a watch event or alert cites them, and never open an alert alone.
 
 ## Check run (extended)
 
@@ -143,8 +146,8 @@ New `kind` values (FR-007, FR-010, FR-013, U5 to U8):
 | `dataset_new_version` | A newer version or record is linked |
 | `dataset_replaced` | DataCite lists `IsObsoletedBy` |
 | `dataset_moved` | The hub redirects the dataset to another namespace |
-| `dataset_unreachable` | The hub refuses a dataset, Figshare answers 404 or Crossref answers 404 for a Crossref-registered dataset DOI |
-| `paper_not_found` | Crossref answers 404 for a Crossref-registered paper DOI tied to a dataset |
+| `dataset_unreachable` | The hub refuses a dataset, Figshare answers 404, Crossref answers 404 for a Crossref-registered dataset DOI, Zenodo answers 404 for a record asked by its DOI (U4), or no source can be asked about a dataset DOI (constitution IV: its agency is unknown, `none` or one no source reads, and the Zenodo exception of U1 does not apply); `detail.reason` names why (for example `doi.org reports the DOI does not exist`) and doi.org's answer in the run is the evidence |
+| `paper_not_found` | Crossref answers 404 for a Crossref-registered paper DOI tied to a dataset, or no source can be asked about a tied paper DOI (its agency is unknown, `none` or one no source reads), with `detail.reason` as above |
 | `licence_unrecognised` | A declared licence cannot be normalised |
 | `licence_missing` | A source no longer declares a licence that was recorded |
 | `upstream_notice` | Crossref lists a correction or expression of concern and no retraction alert is open |

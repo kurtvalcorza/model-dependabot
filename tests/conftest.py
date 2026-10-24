@@ -189,8 +189,8 @@ def derive_upstream(tmp_path: Path) -> Callable[..., Path]:
     any other body) to the new body; ``errors`` maps a name to a failure reason, so
     ``RecordedFetcher`` replays a failed request (FR-018); ``extra`` adds recordings, each
     ``{"url", "status", "body"}`` plus an optional ``redirected_to``, for states no recording has
-    (a recorded body moved to another identifier). Every derived state is written out in the test
-    that uses it.
+    (a recorded body moved to another identifier); an extra recording replaces a copied one of the
+    same URL. Every derived state is written out in the test that uses it.
     """
     counter = iter(range(1000))
 
@@ -221,6 +221,14 @@ def derive_upstream(tmp_path: Path) -> Callable[..., Path]:
                 meta.pop(key, None)
             meta["error"] = reason
             meta_path.write_text(json.dumps(meta), "utf-8")
+        replaced = {spec["url"] for spec in (extra or {}).values()}
+        for meta_path in list(root.rglob("*.meta.json")) if replaced else []:
+            meta = json.loads(meta_path.read_text("utf-8"))
+            if meta["url"] in replaced:
+                body_file = meta.get("body_file")
+                if body_file:
+                    (meta_path.parent / body_file).unlink()
+                meta_path.unlink()
         for name, spec in (extra or {}).items():
             path = root / "extra" / name
             path.parent.mkdir(parents=True, exist_ok=True)

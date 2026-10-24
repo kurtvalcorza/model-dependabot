@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
+
 from model_dependabot.sources.fetcher import RecordedFetcher
 from model_dependabot.sources.zenodo import Zenodo, record_url
 from model_dependabot.store import Store
@@ -54,3 +56,19 @@ def test_removed_by_note_and_citation_text_are_not_stored(
         assert text not in stored
     assert {"citation_text", "note", "removed_by"} <= set(evidence["redacted_fields"])
     assert record.removal is not None and record.removal["removal_reason"] == "duplicate"
+
+
+@pytest.mark.parametrize(
+    ("doi", "record_id"),
+    [
+        ("10.5281/zenodo.12584226", "12584226"),
+        ("10.5281/ZENODO.3242074", "3242074"),
+        ("10.5281/model-dependabot-fixture-does-not-exist", None),
+        ("10.5281/zenodo.12584226.v2", None),
+        ("10.1234/zenodo.12584226", None),
+    ],
+)
+def test_only_a_zenodo_doi_names_a_record_id(doi: str, record_id: str | None) -> None:
+    from model_dependabot.sources.zenodo import record_id_from_doi
+
+    assert record_id_from_doi(doi) == record_id

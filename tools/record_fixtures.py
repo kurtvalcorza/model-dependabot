@@ -6,6 +6,7 @@ Usage::
     uv run python tools/record_fixtures.py osv
     uv run python tools/record_fixtures.py hf-scan
     uv run python tools/record_fixtures.py upstream
+    uv run python tools/record_fixtures.py unregistered
 
 Requests are anonymous and carry only the generic User-Agent of ``UrlFetcher``; no token is sent.
 Each response is written in ``RecordedFetcher``'s format: ``NAME.meta.json`` beside the body file.
@@ -554,11 +555,57 @@ def record_upstream() -> None:
     _write_notes()
 
 
+# DOIs doi.org reports as not existing (fix of 2026-10-24): the deleted Zenodo record and a made-up
+# DOI. Their notes are appended to the NOTES.md files ``upstream`` wrote.
+DELETED_ZENODO_DOI = "10.5281/zenodo.12584226"
+MADE_UP_DOI = f"10.5281/{MISSING_SUFFIX}"
+
+
+def _append_notes() -> None:
+    for folder, lines in NOTES.items():
+        path = ROOT / "tests" / "fixtures" / folder / "NOTES.md"
+        text = path.read_text("utf-8") if path.exists() else f"# {folder} fixtures\n\n"
+        added = [f"- {line}\n" for line in lines if f"- {line}" not in text]
+        path.write_text(text.rstrip("\n") + "\n" + "".join(added), "utf-8")
+
+
+def record_unregistered() -> None:
+    fetcher = UrlFetcher()
+    day = datetime.now(UTC).strftime("%Y-%m-%d")
+    for name, doi in (
+        ("not-registered-zenodo", DELETED_ZENODO_DOI),
+        ("not-registered-made-up", MADE_UP_DOI),
+    ):
+        response = fetcher.get(f"https://doi.org/doiRA/{doi}")
+        _write_upstream("doi_ra", name, response, "doi-ra")
+        answer = response.body.decode("utf-8").strip()
+        line = f"{name} (recorded {day} by `unregistered`): doiRA for {doi} answered {answer}"
+        _note("doi_ra", line)
+    response = fetcher.get(f"{DATACITE}/dois/{DELETED_ZENODO_DOI}")
+    _write_upstream("datacite", "zenodo-deleted", response, "datacite")
+    _note(
+        "datacite",
+        f"zenodo-deleted (recorded {day} by `unregistered`): {DELETED_ZENODO_DOI}, the Zenodo"
+        f" record removed as a duplicate (zenodo/deleted), answered HTTP {response.status}",
+    )
+    live = fetcher.get(f"{ZENODO}/records/12584226")
+    kept_path = ROOT / "tests" / "fixtures" / "zenodo" / "deleted.meta.json"
+    kept = json.loads(kept_path.read_text("utf-8"))
+    body_sha256 = hashlib.sha256(redact("zenodo", live.body).body).hexdigest()
+    print(
+        f"zenodo/deleted live: HTTP {live.status}, original sha256 {live.original_sha256}"
+        f" (recorded {kept['original_sha256']}), body sha256 {body_sha256}"
+        f" (recorded {kept['body_sha256']})"
+    )
+    _append_notes()
+
+
 RECORDERS = {
     "hf": record_hf,
     "osv": record_osv,
     "hf-scan": record_hf_scan,
     "upstream": record_upstream,
+    "unregistered": record_unregistered,
 }
 
 

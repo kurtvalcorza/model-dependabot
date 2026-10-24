@@ -4,8 +4,9 @@
 moves retracted or unpublished content from ``findable`` to ``registered``, and registered DOIs
 leave the public API). The record's ``url`` routes the dataset to its repository: ``zenodo.org``
 to Zenodo, ``figshare.com`` or a ``*.figshare.com`` portal to Figshare, anything else to
-``other``. Only DOIs whose registration agency is DataCite are asked. Bodies arrive redacted
-(research U10).
+``other``. Only DOIs whose registration agency is DataCite are asked, and a check also asks a
+``10.5281/zenodo.<digits>`` DOI whose agency is unknown; for that one a 404 is supporting evidence
+only, never ``dataset_not_findable`` (research U1 exception). Bodies arrive redacted (research U10).
 """
 
 from __future__ import annotations

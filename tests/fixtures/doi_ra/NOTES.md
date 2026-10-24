@@ -15,3 +15,15 @@ Recorded 2026-10-24 by `tools/record_fixtures.py upstream`
     "RA": "Crossref"
   }
 ]
+- not-registered-zenodo (recorded 2026-10-24 by `unregistered`): doiRA for 10.5281/zenodo.12584226 answered [
+  {
+    "DOI": "10.5281/zenodo.12584226",
+    "status": "DOI does not exist"
+  }
+]
+- not-registered-made-up (recorded 2026-10-24 by `unregistered`): doiRA for 10.5281/model-dependabot-fixture-does-not-exist answered [
+  {
+    "DOI": "10.5281/model-dependabot-fixture-does-not-exist",
+    "status": "DOI does not exist"
+  }
+]
