@@ -1,0 +1,981 @@
+"""Check runs, package alerts, watch events and evidence (data-model.md; FR-006 to FR-010, FR-016).
+
+A check run reads each requested source in full before it changes anything. If a source fails
+anywhere in the run, nothing it would have changed is changed: it is recorded as ``failed`` in the
+run and every alert is left as it was (FR-016, SC-007).
+
+For OSV, a package alert opens only when OSV lists the advisory for the exact pinned version and the
+local PEP 440 evaluation of the record's ranges agrees (research R2); when the two disagree, a watch
+event of kind ``advisory_unmatched`` is recorded instead (FR-007). An open alert is carried forward
+rather than raised again (FR-010): its current version, severity and fixed versions follow the
+source, and a changed record is added as new evidence beside the earlier one. A withdrawn advisory
+closes its alerts as ``withdrawn`` with the withdrawn record as evidence (FR-009). OSV leaves
+withdrawn records out of query answers, so the advisory of every open alert is fetched by id on each
+run.
+
+Weight files (research R4, R5; FR-011 to FR-013, FR-021, FR-022): every pinned code-capable file
+gets a ``pickle_format`` watch event, and under the owner's ``strict`` format policy a
+``format_policy`` alert when no code-free file is beside it in the version. These two rules read
+only the inventory and the owner's recorded policy, and run whenever ``picklescan`` or ``hf-scan``
+is requested. ``picklescan`` scans the local files (never loading them): a ``dangerous`` global
+raises a ``weight_file_scan`` alert, a ``suspicious`` one a ``scan_suspicious`` watch event, and a
+scan that stopped early a ``scan_incomplete`` watch event. ``hf-scan`` reads the hub's verdict: only
+an explicit ``unsafe`` verdict for a file whose hub SHA-256 matches the inventory raises a
+``hub_scan`` alert; anything else it cannot confirm is a watch event.
+
+Closing (US4; FR-014, FR-015, FR-023, constitution III): registering a newer version closes an
+alert as ``fixed`` when the new inventory no longer has its cause and carries it forward when it
+does, consulting no source. A check closes an alert as ``cleared`` when the source that answered in
+that run no longer shows the cause: OSV and the local evaluation both agree the pinned version is
+unaffected, the hub gives an explicit ``safe`` verdict for the matching hash, or the owner's
+recorded format policy is no longer ``strict``. A person dismisses an alert with a listed reason.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from packaging.utils import canonicalize_name
+
+from model_dependabot.matching.severity import severity_of
+from model_dependabot.matching.versions import advisory_affects, affected_ranges, fixed_versions
+from model_dependabot.sources import hf as hub
+from model_dependabot.sources import pickle_scan
+from model_dependabot.sources.fetcher import Fetcher, SourceFailedError, source_of
+from model_dependabot.sources.osv import (
+    SOURCE,
+    BatchAnswer,
+    OsvClient,
+    VulnRecord,
+    aliases,
+    pinned_packages,
+    withdrawn,
+)
+from model_dependabot.store import DISMISSAL_REASONS, Store
+
+PACKAGE_ALERT = "package_advisory"
+UNMATCHED = "advisory_unmatched"
+
+WEIGHT_SCAN_ALERT = "weight_file_scan"
+HUB_SCAN_ALERT = "hub_scan"
+FORMAT_POLICY_ALERT = "format_policy"
+PICKLE_FORMAT = "pickle_format"
+SCAN_SUSPICIOUS = "scan_suspicious"
+SCAN_INCOMPLETE = "scan_incomplete"
+HUB_SCAN_UNKNOWN = "hub_scan_unknown"
+HASH_MISMATCH = "hash_mismatch"
+
+PICKLESCAN = "picklescan"
+HF_SCAN = "hf-scan"
+WEIGHT_SOURCES = (PICKLESCAN, HF_SCAN)
+FORMAT_RULE_SOURCE = "format-rule"
+FORMAT_POLICY_SOURCE = "format-policy"
+
+# data-model.md, Alert: fixed rules of this service, not values from a source.
+WEIGHT_SEVERITY = {
+    WEIGHT_SCAN_ALERT: "HIGH",
+    HUB_SCAN_ALERT: "HIGH",
+    FORMAT_POLICY_ALERT: "MODERATE",
+}
+POLICY_ORIGIN = "policy"
+PICKLE_REASON = "the format can run code when loaded"
+SUGGESTION = "use a format that cannot run code when loaded: safetensors, ONNX or GGUF"
+
+
+@dataclass
+class CheckOutcome:
+    """What a check run did: per source ``ok``, ``failed: reason`` or ``skipped``; per model the
+    alerts opened, carried forward and closed."""
+
+    run_id: int
+    sources: dict[str, str]
+    models: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def failed(self) -> bool:
+        return any(status.startswith("failed") for status in self.sources.values())
+
+
+def package_cause_key(advisory_id: str, package: str) -> str:
+    """``kind`` plus advisory id plus normalised package name (data-model.md, Alert)."""
+    return f"{PACKAGE_ALERT}:{advisory_id}:{canonicalize_name(package)}"
+
+
+@dataclass
+class _Target:
+    model_id: str
+    version: int
+    entries: list[dict[str, Any]]
+    summary: dict[str, Any]
+    base_dir: str | None = None
+
+
+@dataclass
+class _OsvRead:
+    batch: BatchAnswer
+    records: dict[str, VulnRecord]
+
+
+def run_check(
+    store: Store,
+    fetcher: Fetcher,
+    model_ids: Sequence[str],
+    sources: Sequence[str] = ("osv",),
+    *,
+    scope: str | None = None,
+) -> CheckOutcome:
+    """Check the current version of each model against the requested sources."""
+    run_id = store.start_check_run(scope=scope or ",".join(model_ids))
+    targets = []
+    for model_id in model_ids:
+        version = store.latest_version(model_id)
+        if version is None:
+            continue
+        summary: dict[str, Any] = {
+            "model_id": model_id,
+            "version": version,
+            "opened": [],
+            "carried_forward": [],
+            "closed": [],
+            "watch_events": [],
+        }
+        record = store.get_version(model_id, version) or {}
+        entries = store.entries(model_id, version)
+        targets.append(_Target(model_id, version, entries, summary, record.get("base_dir")))
+
+    statuses: dict[str, str] = {}
+    for source in sources:
+        if source == PICKLESCAN:
+            scans = _read_local_scans(store, targets)
+            for target in targets:
+                _apply_local_scans(store, run_id, target, scans)
+            statuses[source] = "ok"
+            continue
+        if source == HF_SCAN:
+            try:
+                verdicts = _read_hub(store, hub.HubSecurity(fetcher), targets)
+            except SourceFailedError as error:
+                statuses[source] = f"failed: {error.reason}"
+                continue
+            for target in targets:
+                _apply_hub(store, run_id, target, verdicts)
+            statuses[source] = "ok"
+            continue
+        if source != "osv":
+            statuses[source] = "skipped"
+            continue
+        try:
+            read = _read_osv(store, OsvClient(fetcher), targets)
+        except SourceFailedError as error:
+            statuses[source] = f"failed: {error.reason}"
+            continue
+        for target in targets:
+            _apply_osv(store, run_id, read, target)
+        statuses[source] = "ok"
+    if any(source in WEIGHT_SOURCES for source in sources):
+        for target in targets:
+            _apply_format_rules(store, run_id, target)
+    store.finish_check_run(run_id, statuses)
+    return CheckOutcome(run_id, statuses, [target.summary for target in targets])
+
+
+def _read_osv(store: Store, client: OsvClient, targets: list[_Target]) -> _OsvRead:
+    """Everything the run needs from OSV, read before anything changes (FR-016)."""
+    batch = client.query(entry for target in targets for entry in target.entries)
+    wanted = {advisory_id for ids in batch.matches.values() for advisory_id in ids}
+    for target in targets:
+        for alert in store.alerts_for(target.model_id, ["open"]):
+            if alert["kind"] == PACKAGE_ALERT:
+                wanted.add(alert["cause"]["advisory_id"])
+    records = {advisory_id: client.vuln(advisory_id) for advisory_id in sorted(wanted)}
+    return _OsvRead(batch, records)
+
+
+def _sha256(body: bytes) -> str:
+    return hashlib.sha256(body).hexdigest()
+
+
+def _evidence(
+    store: Store,
+    run_id: int,
+    record: VulnRecord,
+    identifier: str,
+    detail: Mapping[str, Any],
+    existing: Sequence[Mapping[str, Any]] = (),
+) -> tuple[int, bool]:
+    """The evidence id for this record, reusing an identical record already linked."""
+    digest = _sha256(record.response.body)
+    for evidence in existing:
+        if evidence["url"] == record.response.url and evidence["body_sha256"] == digest:
+            return int(evidence["evidence_id"]), False
+    evidence_id = store.add_evidence(
+        source=SOURCE,
+        url=record.response.url,
+        retrieved_at=record.response.retrieved_at,
+        matched_identifier=identifier,
+        body=record.response.body,
+        detail=detail,
+        run_id=run_id,
+    )
+    return evidence_id, True
+
+
+def _cache(store: Store, record: VulnRecord, evidence_id: int) -> None:
+    advisory = record.advisory
+    severity, origin = severity_of(advisory)
+    store.upsert_advisory(
+        source=SOURCE,
+        advisory_id=advisory["id"],
+        aliases=aliases(advisory),
+        modified=advisory.get("modified"),
+        withdrawn=withdrawn(advisory),
+        severity=severity,
+        severity_origin=origin,
+        affected=advisory.get("affected") or [],
+        evidence_id=evidence_id,
+    )
+
+
+def _apply_osv(store: Store, run_id: int, read: _OsvRead, target: _Target) -> None:
+    batch_detail: dict[str, Any] = {}
+    if read.batch.response is not None:
+        batch_detail = {
+            "query_url": read.batch.response.url,
+            "query_sha256": store.put_body(read.batch.response.body),
+        }
+    packages = {entry["identifier"]: entry for entry in pinned_packages(target.entries)}
+    handled: set[str] = set()
+
+    for identifier, entry in packages.items():
+        for advisory_id in read.batch.matches.get(identifier, []):
+            record = read.records[advisory_id]
+            if withdrawn(record.advisory):
+                continue  # closed below if an alert is open; never raised
+            local = advisory_affects(record.advisory, entry["name"], entry["version"])
+            match = {"osv_match": True, "local_match": local, **batch_detail}
+            if local:
+                handled.add(package_cause_key(advisory_id, entry["name"]))
+                _raise_or_carry(store, run_id, target, entry, record, match)
+            else:
+                _unmatched(store, run_id, target, identifier, record, match)
+
+    for alert in store.alerts_for(target.model_id, ["open"]):
+        if alert["kind"] != PACKAGE_ALERT or alert["cause_key"] in handled:
+            continue
+        advisory_id = alert["cause"]["advisory_id"]
+        record = read.records[advisory_id]
+        identifier = alert["cause"]["identifier"]
+        if withdrawn(record.advisory):
+            detail = {"withdrawn": withdrawn(record.advisory), **batch_detail}
+            evidence_id, _ = _evidence(store, run_id, record, identifier, detail)
+            store.link_alert_evidence(alert["alert_id"], evidence_id)
+            store.close_alert(alert["alert_id"], state="withdrawn")
+            _cache(store, record, evidence_id)
+            target.summary["closed"].append(alert["alert_id"])
+            continue
+        entry = packages.get(identifier)
+        if entry is None:
+            continue  # the package changed in this version: settled at registration
+        listed = advisory_id in read.batch.matches.get(identifier, [])
+        if listed:
+            continue  # OSV lists it, the local evaluation does not: recorded above as unmatched
+        if advisory_affects(record.advisory, entry["name"], entry["version"]):
+            match = {"osv_match": False, "local_match": True, **batch_detail}
+            _unmatched(store, run_id, target, identifier, record, match)
+            continue
+        # Both agree the pinned version is no longer affected: the source cleared it (FR-023).
+        detail = {"osv_match": False, "local_match": False, **batch_detail}
+        linked = store.alert_evidence(alert["alert_id"])
+        evidence_id, _ = _evidence(store, run_id, record, identifier, detail, linked)
+        _cache(store, record, evidence_id)
+        _close(store, target, alert, "cleared", [evidence_id])
+
+
+def _close(
+    store: Store,
+    target: _Target,
+    alert: Mapping[str, Any],
+    state: str,
+    evidence_ids: Sequence[int],
+) -> None:
+    """Close an alert on the source's own observation, kept as evidence (constitution III)."""
+    for evidence_id in evidence_ids:
+        store.link_alert_evidence(alert["alert_id"], evidence_id)
+    store.close_alert(alert["alert_id"], state=state)
+    target.summary["closed"].append(alert["alert_id"])
+
+
+def _raise_or_carry(
+    store: Store,
+    run_id: int,
+    target: _Target,
+    entry: Mapping[str, Any],
+    record: VulnRecord,
+    detail: Mapping[str, Any],
+) -> None:
+    advisory = record.advisory
+    name, version = entry["name"], entry["version"]
+    severity, origin = severity_of(advisory)
+    cause = {
+        "advisory_id": advisory["id"],
+        "aliases": aliases(advisory),
+        "source": SOURCE,
+        "package": name,
+        "version": version,
+        "identifier": entry["identifier"],
+        "affected": affected_ranges(advisory, name),
+        "fixed": fixed_versions(advisory, name),
+    }
+    cause_key = package_cause_key(advisory["id"], name)
+    existing = store.find_open_alert(target.model_id, cause_key)
+    if existing is None:
+        evidence_id, _ = _evidence(store, run_id, record, entry["identifier"], detail)
+        alert_id = store.insert_alert(
+            model_id=target.model_id,
+            kind=PACKAGE_ALERT,
+            cause_key=cause_key,
+            cause=cause,
+            severity=severity,
+            severity_origin=origin,
+            opened_in_version=target.version,
+            evidence_ids=[evidence_id],
+        )
+        target.summary["opened"].append(alert_id)
+    else:
+        alert_id = existing["alert_id"]
+        linked = store.alert_evidence(alert_id)
+        evidence_id, _ = _evidence(store, run_id, record, entry["identifier"], detail, linked)
+        store.link_alert_evidence(alert_id, evidence_id)
+        store.update_open_alert(
+            alert_id,
+            current_version=max(existing["current_version"], target.version),
+            severity=severity,
+            severity_origin=origin,
+            cause=cause,
+        )
+        target.summary["carried_forward"].append(alert_id)
+    _cache(store, record, evidence_id)
+
+
+def _unmatched(
+    store: Store,
+    run_id: int,
+    target: _Target,
+    identifier: str,
+    record: VulnRecord,
+    match: Mapping[str, Any],
+) -> None:
+    """OSV and the local evaluation disagree: a watch event, never an alert (FR-007)."""
+    existing = store.get_watch_event(target.model_id, target.version, identifier, UNMATCHED)
+    detail: dict[str, Any] = dict(existing["detail"]) if existing else {}
+    advisories = dict(detail.get("advisories") or {})
+    advisories[record.advisory["id"]] = {
+        "osv_match": match["osv_match"],
+        "local_match": match["local_match"],
+    }
+    detail["advisories"] = advisories
+    linked = existing["evidence"] if existing else []
+    evidence_id, _ = _evidence(store, run_id, record, identifier, match, linked)
+    watch_event_id = store.record_watch_event(
+        model_id=target.model_id,
+        version=target.version,
+        entry_identifier=identifier,
+        kind=UNMATCHED,
+        detail=detail,
+        evidence_ids=[evidence_id],
+    )
+    _cache(store, record, evidence_id)
+    if watch_event_id not in target.summary["watch_events"]:
+        target.summary["watch_events"].append(watch_event_id)
+
+
+# --- weight files (US3) --------------------------------------------------------------------------
+
+
+def weight_cause_key(kind: str, identifier: str) -> str:
+    """``kind`` plus the file's SHA-256 (data-model.md, Alert)."""
+    return f"{kind}:{identifier.removeprefix('sha256:')}"
+
+
+def _code_capable(entries: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """Pinned weight files whose format can run code; gaps are never scanned."""
+    return [
+        entry
+        for entry in entries
+        if entry["kind"] == "weight_file" and entry["pinned"] and entry["can_run_code"]
+    ]
+
+
+def _json_body(record: Mapping[str, Any]) -> bytes:
+    return json.dumps(record, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+@dataclass
+class _Observation:
+    """One piece of evidence about a weight file, before it is stored."""
+
+    source: str
+    url: str
+    retrieved_at: Any
+    body: bytes
+    detail: dict[str, Any]
+
+
+def _store_observations(
+    store: Store,
+    run_id: int,
+    identifier: str,
+    observations: Sequence[_Observation],
+    existing: Sequence[Mapping[str, Any]] = (),
+) -> list[int]:
+    """Evidence ids for the observations, reusing identical records already linked."""
+    ids = []
+    for item in observations:
+        digest = _sha256(item.body)
+        detail = json.loads(json.dumps(item.detail))
+        reused = next(
+            (
+                int(evidence["evidence_id"])
+                for evidence in existing
+                if evidence["source"] == item.source
+                and evidence["url"] == item.url
+                and evidence["body_sha256"] == digest
+                and evidence["detail"] == detail
+            ),
+            None,
+        )
+        if reused is None:
+            reused = store.add_evidence(
+                source=item.source,
+                url=item.url,
+                retrieved_at=item.retrieved_at,
+                matched_identifier=identifier,
+                body=item.body,
+                detail=item.detail,
+                run_id=run_id,
+            )
+        ids.append(reused)
+    return ids
+
+
+def _weight_alert(
+    store: Store,
+    run_id: int,
+    target: _Target,
+    kind: str,
+    entry: Mapping[str, Any],
+    cause: Mapping[str, Any],
+    observations: Sequence[_Observation],
+) -> None:
+    """Open a weight-file alert, or carry the open one forward (FR-010, FR-013)."""
+    identifier = entry["identifier"]
+    cause_key = weight_cause_key(kind, identifier)
+    severity = WEIGHT_SEVERITY[kind]
+    existing = store.find_open_alert(target.model_id, cause_key)
+    if existing is None:
+        evidence_ids = _store_observations(store, run_id, identifier, observations)
+        alert_id = store.insert_alert(
+            model_id=target.model_id,
+            kind=kind,
+            cause_key=cause_key,
+            cause=cause,
+            severity=severity,
+            severity_origin=POLICY_ORIGIN,
+            opened_in_version=target.version,
+            evidence_ids=evidence_ids,
+        )
+        target.summary["opened"].append(alert_id)
+        return
+    alert_id = existing["alert_id"]
+    linked = store.alert_evidence(alert_id)
+    for evidence_id in _store_observations(store, run_id, identifier, observations, linked):
+        store.link_alert_evidence(alert_id, evidence_id)
+    store.update_open_alert(
+        alert_id,
+        current_version=max(existing["current_version"], target.version),
+        severity=severity,
+        severity_origin=POLICY_ORIGIN,
+        cause=cause,
+    )
+    if alert_id not in target.summary["carried_forward"]:
+        target.summary["carried_forward"].append(alert_id)
+
+
+def _watch(
+    store: Store,
+    run_id: int,
+    target: _Target,
+    kind: str,
+    identifier: str,
+    detail: Mapping[str, Any],
+    observations: Sequence[_Observation],
+) -> None:
+    existing = store.get_watch_event(target.model_id, target.version, identifier, kind)
+    linked = existing["evidence"] if existing else []
+    evidence_ids = _store_observations(store, run_id, identifier, observations, linked)
+    watch_event_id = store.record_watch_event(
+        model_id=target.model_id,
+        version=target.version,
+        entry_identifier=identifier,
+        kind=kind,
+        detail=detail,
+        evidence_ids=evidence_ids,
+    )
+    if watch_event_id not in target.summary["watch_events"]:
+        target.summary["watch_events"].append(watch_event_id)
+
+
+def _where(entry: Mapping[str, Any]) -> str | None:
+    if entry.get("location"):
+        return str(entry["location"])
+    if entry.get("hub_repo"):
+        return f"hf:{entry['hub_repo']}/{entry['hub_file']}"
+    return None
+
+
+# --- format rules: pickle_format watch events and the strict format policy ------------------------
+
+
+def _apply_format_rules(store: Store, run_id: int, target: _Target) -> None:
+    capable = _code_capable(target.entries)
+    now = store.now()
+    for entry in capable:
+        detail = {
+            "format": entry["format"],
+            "reason": PICKLE_REASON,
+            "suggestion": SUGGESTION,
+            "location": _where(entry),
+        }
+        record = {"identifier": entry["identifier"], "can_run_code": True, **detail}
+        observation = _Observation(FORMAT_RULE_SOURCE, "", now, _json_body(record), detail)
+        _watch(store, run_id, target, PICKLE_FORMAT, entry["identifier"], detail, [observation])
+
+    model = store.get_model(target.model_id) or {}
+    if model.get("format_policy") != "strict":
+        _clear_format_policy(store, run_id, target, model, now)
+        return
+    code_free_beside = any(
+        entry["kind"] == "weight_file" and entry["can_run_code"] is False
+        for entry in target.entries
+    )
+    if code_free_beside:
+        return  # FR-021: a code-free file beside it suppresses the policy alert
+    policy = {
+        "model_id": target.model_id,
+        "format_policy": "strict",
+        "set_by": model.get("format_policy_set_by"),
+        "set_at": model.get("format_policy_set_at"),
+    }
+    body = _json_body(policy)  # the owner's recorded policy is the primary source (constitution I)
+    for entry in capable:
+        detail = {
+            "format": entry["format"],
+            "policy": "strict",
+            "set_by": policy["set_by"],
+            "set_at": policy["set_at"],
+            "location": _where(entry),
+        }
+        cause = {"identifier": entry["identifier"], **detail, "suggestion": SUGGESTION}
+        observation = _Observation(FORMAT_POLICY_SOURCE, "", now, body, detail)
+        _weight_alert(store, run_id, target, FORMAT_POLICY_ALERT, entry, cause, [observation])
+
+
+def _clear_format_policy(
+    store: Store, run_id: int, target: _Target, model: Mapping[str, Any], now: Any
+) -> None:
+    """The owner switched the policy away from ``strict``: the owner's recorded policy is the
+    source of a ``format_policy`` alert, so its change clears the alert (constitution III 1.0.2)."""
+    alerts = [
+        alert
+        for alert in store.alerts_for(target.model_id, ["open"])
+        if alert["kind"] == FORMAT_POLICY_ALERT
+    ]
+    if not alerts:
+        return
+    policy = {
+        "model_id": target.model_id,
+        "format_policy": model.get("format_policy"),
+        "set_by": model.get("format_policy_set_by"),
+        "set_at": model.get("format_policy_set_at"),
+    }
+    body = _json_body(policy)
+    for alert in alerts:
+        identifier = alert["cause"]["identifier"]
+        detail = {
+            "format": alert["cause"].get("format"),
+            "policy": policy["format_policy"],
+            "set_by": policy["set_by"],
+            "set_at": policy["set_at"],
+            "location": alert["cause"].get("location"),
+        }
+        observation = _Observation(FORMAT_POLICY_SOURCE, "", now, body, detail)
+        linked = store.alert_evidence(alert["alert_id"])
+        ids = _store_observations(store, run_id, identifier, [observation], linked)
+        _close(store, target, alert, "cleared", ids)
+
+
+# --- picklescan: static scans of local files ------------------------------------------------------
+
+
+@dataclass
+class _LocalScan:
+    path: Path
+    retrieved_at: Any
+    report: pickle_scan.ScanReport | None = None
+    actual_sha256: str | None = None
+    read_error: str | None = None
+
+
+def _local_path(target: _Target, location: str) -> Path:
+    path = Path(location)
+    if not path.is_absolute() and target.base_dir is not None:
+        path = Path(target.base_dir) / path
+    return path.resolve()
+
+
+def _read_local_scans(
+    store: Store, targets: Sequence[_Target]
+) -> dict[tuple[str, int, str], _LocalScan]:
+    """Scan every local code-capable file before anything changes; a file is never loaded."""
+    scans: dict[tuple[str, int, str], _LocalScan] = {}
+    for target in targets:
+        for entry in _code_capable(target.entries):
+            if entry.get("hub_repo") or not entry.get("location"):
+                continue
+            path = _local_path(target, entry["location"])
+            scan = _LocalScan(path, store.now())
+            try:
+                data = path.read_bytes()
+            except OSError as error:
+                scan.read_error = f"cannot read the file: {error.strerror or error}"
+            else:
+                scan.actual_sha256 = _sha256(data)
+                if f"sha256:{scan.actual_sha256}" == entry["identifier"]:
+                    scan.report = pickle_scan.scan(data, path.name)
+            scans[(target.model_id, target.version, entry["identifier"])] = scan
+    return scans
+
+
+def _apply_local_scans(
+    store: Store, run_id: int, target: _Target, scans: Mapping[tuple[str, int, str], _LocalScan]
+) -> None:
+    for entry in _code_capable(target.entries):
+        identifier = entry["identifier"]
+        scan = scans.get((target.model_id, target.version, identifier))
+        if scan is None:
+            continue
+        url = scan.path.as_uri()
+        location = entry["location"]
+        if scan.report is None and scan.read_error is None:
+            detail = {
+                "scanner": pickle_scan.SCANNER,
+                "location": location,
+                "inventory_sha256": identifier.removeprefix("sha256:"),
+                "actual_sha256": scan.actual_sha256,
+            }
+            observation = _Observation(
+                pickle_scan.SCANNER, url, scan.retrieved_at, _json_body(detail), detail
+            )
+            _watch(store, run_id, target, HASH_MISMATCH, identifier, detail, [observation])
+            continue
+        if scan.report is None:
+            detail = {
+                "scanner": pickle_scan.SCANNER,
+                "scanner_version": pickle_scan.SCANNER_VERSION,
+                "position": 0,
+                "size": entry.get("size"),
+                "reason": scan.read_error,
+                "location": location,
+            }
+            observation = _Observation(
+                pickle_scan.SCANNER, url, scan.retrieved_at, _json_body(detail), detail
+            )
+            _watch(store, run_id, target, SCAN_INCOMPLETE, identifier, detail, [observation])
+            continue
+
+        report = scan.report
+        body = _json_body(report.as_record())
+        base = {
+            "scanner": report.scanner,
+            "scanner_version": report.scanner_version,
+            "location": location,
+            "format": entry["format"],
+        }
+        if report.dangerous:
+            detail = {
+                **base,
+                "dangerous": report.dangerous,
+                "suspicious": report.suspicious,
+                "complete": report.complete,
+                "position": report.position,
+            }
+            cause = {"identifier": identifier, **detail}
+            observation = _Observation(report.scanner, url, scan.retrieved_at, body, detail)
+            _weight_alert(store, run_id, target, WEIGHT_SCAN_ALERT, entry, cause, [observation])
+        if report.suspicious:
+            detail = {**base, "suspicious": report.suspicious}
+            observation = _Observation(report.scanner, url, scan.retrieved_at, body, detail)
+            _watch(store, run_id, target, SCAN_SUSPICIOUS, identifier, detail, [observation])
+        if not report.complete:
+            detail = {
+                **base,
+                "position": report.position,
+                "size": report.size,
+                "reason": report.error,
+            }
+            observation = _Observation(report.scanner, url, scan.retrieved_at, body, detail)
+            _watch(store, run_id, target, SCAN_INCOMPLETE, identifier, detail, [observation])
+
+
+# --- hf-scan: the hub's verdicts ------------------------------------------------------------------
+
+
+def _hub_files(target: _Target) -> list[Mapping[str, Any]]:
+    return [
+        entry
+        for entry in target.entries
+        if entry["kind"] == "weight_file"
+        and entry["pinned"]
+        and entry.get("hub_repo")
+        and entry.get("hub_file")
+    ]
+
+
+def _read_hub(
+    store: Store, security: hub.HubSecurity, targets: Sequence[_Target]
+) -> dict[tuple[str, str], hub.FileVerdict]:
+    """Every verdict the run needs, read before anything changes (FR-016).
+
+    A file with an open ``hub_scan`` alert has its clean verdict confirmed against the tree, so an
+    explicit safe verdict for the matching hash can clear the alert (FR-023).
+    """
+    alerted = {
+        alert["cause"]["identifier"]
+        for target in targets
+        for alert in store.alerts_for(target.model_id, ["open"])
+        if alert["kind"] == HUB_SCAN_ALERT
+    }
+    statuses: dict[str, hub.SecurityStatus] = {}
+    verdicts: dict[tuple[str, str], hub.FileVerdict] = {}
+    for target in targets:
+        for entry in _hub_files(target):
+            repo, file = entry["hub_repo"], entry["hub_file"]
+            if repo not in statuses:
+                statuses[repo] = security.status(repo)
+            confirm = entry["identifier"] in alerted
+            known = verdicts.get((repo, file))
+            if known is None or (confirm and known.state == hub.CLEAN and not known.tree_response):
+                verdicts[(repo, file)] = security.verdict(statuses[repo], file, confirm=confirm)
+    return verdicts
+
+
+def _explicitly_safe(verdict: hub.FileVerdict, sha256: str) -> bool:
+    """The hub lists the file as ``safe`` for the matching hash; nothing less clears an alert."""
+    file_status = verdict.file_status or {}
+    return (
+        verdict.state == hub.CLEAN
+        and verdict.hub_sha256 == sha256
+        and file_status.get("status") == "safe"
+    )
+
+
+def _hub_observations(verdict: hub.FileVerdict, detail: dict[str, Any]) -> list[_Observation]:
+    found = []
+    for response in (verdict.status.response, verdict.tree_response):
+        if response is not None:
+            found.append(
+                _Observation(
+                    source_of(response.url),
+                    response.url,
+                    response.retrieved_at,
+                    response.body,
+                    detail,
+                )
+            )
+    return found
+
+
+def _apply_hub(
+    store: Store, run_id: int, target: _Target, verdicts: Mapping[tuple[str, str], hub.FileVerdict]
+) -> None:
+    for entry in _hub_files(target):
+        verdict = verdicts.get((entry["hub_repo"], entry["hub_file"]))
+        if verdict is None:
+            continue
+        identifier = entry["identifier"]
+        sha256 = identifier.removeprefix("sha256:")
+        if verdict.state == hub.CLEAN:
+            alert = store.find_open_alert(target.model_id, weight_cause_key(HUB_SCAN_ALERT, sha256))
+            if alert is not None and _explicitly_safe(verdict, sha256):
+                detail = {
+                    "scanner": HF_SCAN,
+                    "verdict": verdict.state,
+                    "file_status": "safe",
+                    "level": verdict.level,
+                    "scanners": verdict.scanners,
+                    "hub_repo": verdict.repo,
+                    "hub_file": verdict.file,
+                    "hub_commit": verdict.status.commit,
+                    "hub_sha256": verdict.hub_sha256,
+                    "location": _where(entry),
+                }
+                observations = _hub_observations(verdict, detail)
+                linked = store.alert_evidence(alert["alert_id"])
+                ids = _store_observations(store, run_id, identifier, observations, linked)
+                _close(store, target, alert, "cleared", ids)
+            continue
+        detail: dict[str, Any] = {
+            "scanner": HF_SCAN,
+            "verdict": verdict.state,
+            "level": verdict.level,
+            "scanners": verdict.scanners,
+            "hub_repo": verdict.repo,
+            "hub_file": verdict.file,
+            "hub_commit": verdict.status.commit,
+            "location": _where(entry),
+        }
+        if verdict.state in (hub.PENDING, hub.MISSING, hub.UNRECOGNISED):
+            detail["reason"] = verdict.reason
+            observations = _hub_observations(verdict, detail)
+            _watch(store, run_id, target, HUB_SCAN_UNKNOWN, identifier, detail, observations)
+            continue
+        if verdict.hub_sha256 != sha256:
+            detail |= {"inventory_sha256": sha256, "hub_sha256": verdict.hub_sha256}
+            observations = _hub_observations(verdict, detail)
+            _watch(store, run_id, target, HASH_MISMATCH, identifier, detail, observations)
+            continue
+        observations = _hub_observations(verdict, detail)
+        if verdict.state == hub.UNSAFE:
+            cause = {"identifier": identifier, **detail}
+            _weight_alert(store, run_id, target, HUB_SCAN_ALERT, entry, cause, observations)
+        else:  # caution: the hub's counterpart of a suspicious import
+            _watch(store, run_id, target, SCAN_SUSPICIOUS, identifier, detail, observations)
+
+
+# --- registration and dismissal (US4) -------------------------------------------------------------
+
+INVENTORY_SOURCE = "inventory"
+
+
+def _package_finding(
+    store: Store, alert: Mapping[str, Any], entries: Sequence[Mapping[str, Any]]
+) -> tuple[bool, Mapping[str, Any] | None]:
+    """Whether the new inventory still has the advisory's package at an affected version.
+
+    The advisory is evaluated from the copy cached at the last check, so no source is consulted.
+    An unpinned entry of the same package is not proof the cause is gone.
+    """
+    cause = alert["cause"]
+    name = canonicalize_name(cause["package"])
+    same = [
+        entry
+        for entry in entries
+        if entry["kind"] == "package" and canonicalize_name(entry.get("name") or "") == name
+    ]
+    pinned = [entry for entry in same if entry["pinned"]]
+    if not pinned:
+        return bool(same), None
+    for entry in pinned:
+        if entry["identifier"] == cause["identifier"]:
+            return True, entry
+    cached = store.get_advisory(cause.get("source", SOURCE), cause["advisory_id"])
+    for entry in pinned:
+        if cached is None or advisory_affects(
+            {"affected": cached["affected"] or []}, entry["name"], entry["version"]
+        ):
+            return True, entry
+    return False, pinned[0]
+
+
+def reevaluate_version(store: Store, model_id: str, version: int) -> dict[str, list[int]]:
+    """Settle the model's open alerts against a newly registered version (FR-014, SC-004).
+
+    A cause the new inventory no longer has closes its alert as ``fixed`` by that version, with
+    the new inventory as evidence; a cause it still has carries the alert forward. Only the two
+    inventories are compared: no source is consulted, so a failed source cannot affect it.
+    """
+    result: dict[str, list[int]] = {"fixed": [], "carried_forward": []}
+    record = store.get_version(model_id, version)
+    if record is None or version <= 1:
+        return result
+    entries = store.entries(model_id, version)
+    weights = {entry["identifier"]: entry for entry in entries if entry["kind"] == "weight_file"}
+    code_free = [
+        entry["identifier"]
+        for entry in entries
+        if entry["kind"] == "weight_file" and entry["can_run_code"] is False
+    ]
+    for alert in store.alerts_for(model_id, ["open"]):
+        if alert["current_version"] >= version:
+            continue
+        cause = dict(alert["cause"])
+        detail: dict[str, Any] = {"previous_version": alert["current_version"], "version": version}
+        if alert["kind"] == PACKAGE_ALERT:
+            present, entry = _package_finding(store, alert, entries)
+            if present and entry is None:
+                continue  # only an unpinned entry: neither fixed nor shown again
+            if present and entry is not None:
+                cause |= {"version": entry["version"], "identifier": entry["identifier"]}
+            detail["found"] = None if entry is None else entry["identifier"]
+        else:
+            entry = weights.get(cause["identifier"])
+            present = entry is not None and bool(entry["pinned"])
+            if present and entry is not None:
+                cause["location"] = _where(entry)
+            if alert["kind"] == FORMAT_POLICY_ALERT and present and code_free:
+                present = False
+                detail["code_free_beside"] = code_free
+            detail["found"] = cause["identifier"] if present else None
+        if present:
+            store.update_open_alert(
+                alert["alert_id"],
+                current_version=version,
+                severity=alert["severity"],
+                severity_origin=alert["severity_origin"],
+                cause=cause,
+            )
+            result["carried_forward"].append(alert["alert_id"])
+            continue
+        evidence_id = store.add_evidence(
+            source=INVENTORY_SOURCE,
+            url="",
+            retrieved_at=store.now(),
+            matched_identifier=alert["cause"]["identifier"],
+            body=_json_body(record["inventory"]),
+            detail=detail,
+        )
+        store.link_alert_evidence(alert["alert_id"], evidence_id)
+        store.close_alert(alert["alert_id"], state="fixed", closed_by_version=version)
+        result["fixed"].append(alert["alert_id"])
+    return result
+
+
+def dismiss_alert(
+    store: Store, alert_id: int, *, reason: str, by: str, note: str | None = None
+) -> dict[str, Any]:
+    """Dismiss an open alert with a listed reason, recording who and when (FR-015)."""
+    if reason not in DISMISSAL_REASONS:
+        listed = ", ".join(DISMISSAL_REASONS)
+        raise ValueError(f"dismissal reason must be one of {listed}, got {reason!r}")
+    if not by.strip():
+        raise ValueError("a dismissal needs the name of who dismissed it")
+    alert = store.get_alert(alert_id)
+    if alert is None:
+        raise ValueError(f"no alert {alert_id}")
+    if alert["state"] != "open":
+        raise ValueError(f"alert {alert_id} is not open (it is {alert['state']})")
+    store.close_alert(
+        alert_id,
+        state="dismissed",
+        dismissal_reason=reason,
+        dismissed_by=by.strip(),
+        note=note,
+    )
+    closed = store.get_alert(alert_id)
+    assert closed is not None
+    return closed

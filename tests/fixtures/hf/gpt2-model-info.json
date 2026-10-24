@@ -1,0 +1,131 @@
+{
+ "_id": "621ffdc036468d709f17434d",
+ "author": "openai-community",
+ "config": {
+  "architectures": [
+   "GPT2LMHeadModel"
+  ],
+  "model_type": "gpt2",
+  "tokenizer_config": {}
+ },
+ "createdAt": "2022-03-02T23:29:04.000Z",
+ "disabled": false,
+ "downloads": 18836643,
+ "gated": false,
+ "id": "openai-community/gpt2",
+ "lastModified": "2024-02-19T10:57:45.000Z",
+ "library_name": "transformers",
+ "likes": 3891,
+ "model-index": null,
+ "modelId": "openai-community/gpt2",
+ "pipeline_tag": "text-generation",
+ "private": false,
+ "safetensors": {
+  "parameters": {
+   "F32": 137022720
+  },
+  "total": 137022720
+ },
+ "sha": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+ "siblings": [
+  {
+   "rfilename": ".gitattributes"
+  },
+  {
+   "rfilename": "64-8bits.tflite"
+  },
+  {
+   "rfilename": "64-fp16.tflite"
+  },
+  {
+   "rfilename": "64.tflite"
+  },
+  {
+   "rfilename": "README.md"
+  },
+  {
+   "rfilename": "config.json"
+  },
+  {
+   "rfilename": "flax_model.msgpack"
+  },
+  {
+   "rfilename": "generation_config.json"
+  },
+  {
+   "rfilename": "merges.txt"
+  },
+  {
+   "rfilename": "model.safetensors"
+  },
+  {
+   "rfilename": "onnx/config.json"
+  },
+  {
+   "rfilename": "onnx/decoder_model.onnx"
+  },
+  {
+   "rfilename": "onnx/decoder_model_merged.onnx"
+  },
+  {
+   "rfilename": "onnx/decoder_with_past_model.onnx"
+  },
+  {
+   "rfilename": "onnx/generation_config.json"
+  },
+  {
+   "rfilename": "onnx/merges.txt"
+  },
+  {
+   "rfilename": "onnx/special_tokens_map.json"
+  },
+  {
+   "rfilename": "onnx/tokenizer.json"
+  },
+  {
+   "rfilename": "onnx/tokenizer_config.json"
+  },
+  {
+   "rfilename": "onnx/vocab.json"
+  },
+  {
+   "rfilename": "pytorch_model.bin"
+  },
+  {
+   "rfilename": "rust_model.ot"
+  },
+  {
+   "rfilename": "tf_model.h5"
+  },
+  {
+   "rfilename": "tokenizer.json"
+  },
+  {
+   "rfilename": "tokenizer_config.json"
+  },
+  {
+   "rfilename": "vocab.json"
+  }
+ ],
+ "tags": [
+  "transformers",
+  "pytorch",
+  "tf",
+  "jax",
+  "tflite",
+  "rust",
+  "onnx",
+  "safetensors",
+  "gpt2",
+  "text-generation",
+  "exbert",
+  "en",
+  "doi:10.57967/hf/0039",
+  "license:mit",
+  "text-generation-inference",
+  "endpoints_compatible",
+  "deploy:azure",
+  "region:us"
+ ],
+ "usedStorage": 11977009063
+}

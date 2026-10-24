@@ -1,0 +1,11 @@
+{
+  "method": "GET",
+  "url": "https://huggingface.co/api/models/mcpotato/42-eicar-street?securityStatus=true",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "etag": "W/\"3b9-453vy+MluGsLZcKCr5abndqNB7k\""
+  },
+  "retrieved_at": "2026-10-24T04:24:59Z",
+  "body_file": "eicar-security.json"
+}

@@ -20,7 +20,8 @@ alerts with that observation as evidence. Technical decisions: [research.md](res
 **Language/Version**: Python 3.12, type hints throughout
 
 **Primary Dependencies**: `packaging` 26.3 (PEP 440 versions, name normalisation), `jsonschema` 4.26.0
-(CycloneDX schema validation), `picklescan` 1.0.5 (static pickle scan); standard library for HTTP
+(CycloneDX schema validation), `picklescan` 1.0.5 (static pickle scan), `cvss` 3.6 (CVSS v3 and v4 base scores, research R3;
+LGPL-3.0-or-later, used as an ordinary import); standard library for HTTP
 (`urllib`), TOML (`tomllib`) and storage (`sqlite3`)
 
 **Storage**: SQLite file plus a content-addressed store of raw source responses (research R6)

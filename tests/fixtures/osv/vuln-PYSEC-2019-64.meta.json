@@ -1,0 +1,10 @@
+{
+  "method": "GET",
+  "url": "https://api.osv.dev/v1/vulns/PYSEC-2019-64",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "retrieved_at": "2026-10-24T03:54:35Z",
+  "body_file": "vuln-PYSEC-2019-64.json"
+}

@@ -1,0 +1,10 @@
+{
+  "method": "GET",
+  "url": "https://api.osv.dev/v1/vulns/GHSA-cp9v-662q-vvx9",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "retrieved_at": "2026-10-24T03:54:34Z",
+  "body_file": "vuln-GHSA-cp9v-662q-vvx9.json"
+}

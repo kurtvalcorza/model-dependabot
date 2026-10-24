@@ -9,7 +9,7 @@ Exports are validated against the official `bom-1.7.schema.json`; imports are re
 | Weight file | `components[]`, `type: "file"`, `name` (the path relative to the manifest, or the file's path in the hub repository), `hashes: [{alg: "SHA-256", content}]`; properties `model-dependabot:format`, `model-dependabot:can-run-code` and `model-dependabot:size`; a hub-hosted file also has `externalReferences[]` `type: "distribution"` with its download URL at the pinned revision, and properties `model-dependabot:hub-repo`, `model-dependabot:hub-revision` and `model-dependabot:hub-file` | the SHA-256 |
 | Package | `components[]`, `type: "library"`, `purl: "pkg:pypi/<name>@<version>"`, lock hashes in `hashes` | the purl |
 | Base model | `metadata.component.pedigree.ancestors[]`, `type: "machine-learning-model"`, `purl: "pkg:huggingface/<owner>/<name>@<commit>"` | the purl |
-| Dataset | `metadata.component.modelCard.modelParameters.datasets[]` (`type: "dataset"`), DOI in `externalReferences` and as `bom-ref: "doi:<doi>"`, optional SHA-256 in `hashes` | the DOI |
+| Dataset | a `components[]` entry, `type: "data"`, `bom-ref: "doi:<doi>"`, `data: [{"type": "dataset"}]`, the DOI URL `https://doi.org/<doi>` as an `externalReferences` entry of type `distribution`, optional SHA-256 in `hashes`; `metadata.component.modelCard.modelParameters.datasets[]` refers to it with `{"ref": "doi:<doi>"}` (the inline `componentData` form allows neither `hashes` nor `externalReferences` in CycloneDX 1.7; import reads both forms) | the DOI |
 | Gap | the entry is written with what is known plus property `model-dependabot:gap = "<reason>"` | none |
 
 Custom properties (the complete list; constitution II):

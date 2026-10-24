@@ -1,0 +1,40 @@
+[project]
+name = "model-dependabot"
+version = "0.1.0"
+description = "Dependency alerts for AI models: a pinned inventory checked against advisories and weight-file scans."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "packaging==26.3",
+    "jsonschema==4.26.0",
+    "picklescan==1.0.5",
+    "cvss==3.6",
+]
+
+[project.scripts]
+model-dependabot = "model_dependabot.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[build-system]
+requires = ["uv_build>=0.9,<0.14"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not live'"
+markers = [
+    "live: needs the real source over the network; excluded from the default run",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]

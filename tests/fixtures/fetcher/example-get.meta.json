@@ -1,0 +1,8 @@
+{
+  "method": "GET",
+  "url": "https://api.example.test/v1/items/EXAMPLE-0001",
+  "status": 200,
+  "headers": {"Content-Type": "application/json", "X-Example": "yes"},
+  "retrieved_at": "2026-10-23T08:00:00Z",
+  "body_file": "example-get.json"
+}

@@ -62,4 +62,30 @@ failures; scripts read the JSON instead.
 }
 ```
 
+`history ID --json` (closed alerts, oldest closure first; `outcome` is `fixed`, `dismissed`, `withdrawn`
+or `cleared`, with the fields that outcome needs and the others `null`):
+
+```json
+{
+  "model_id": "rice-pest-r50-v5",
+  "current_version": 2,
+  "history": [
+    {
+      "alert_id": 17,
+      "kind": "package_advisory",
+      "outcome": "fixed",
+      "severity": "HIGH",
+      "cause": {"advisory_id": "GHSA-xxxx-xxxx-xxxx", "package": "pillow", "version": "12.3.0"},
+      "opened_in_version": 1,
+      "closed_at": "2026-10-24T09:00:00Z",
+      "closed_by_version": 2,
+      "dismissal_reason": null,
+      "dismissed_by": null,
+      "note": null,
+      "evidence": [{"source": "inventory", "url": "", "retrieved_at": "2026-10-24T09:00:00Z", "matched_identifier": "pkg:pypi/pillow@12.3.0", "body_sha256": "…", "detail": {"previous_version": 1, "version": 2, "found": false}}]
+    }
+  ]
+}
+```
+
 Field names in the JSON are stable within a major version of the tool.

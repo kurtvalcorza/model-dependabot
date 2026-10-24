@@ -1,0 +1,9 @@
+# The same model with pillow at its fixed version 13.0.0, for the OSV tests.
+
+[model]
+id = "pillow-model"
+name = "Model pinning a fixed pillow, test fixture"
+owner = "Model owner"
+
+[environment]
+lock = "../locks/fixed.txt"

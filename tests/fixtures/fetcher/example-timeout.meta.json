@@ -1,0 +1,6 @@
+{
+  "method": "GET",
+  "url": "https://api.example.test/v1/slow",
+  "error": "timed out",
+  "retrieved_at": "2026-10-23T08:04:00Z"
+}
