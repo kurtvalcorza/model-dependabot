@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -44,8 +44,16 @@ from packaging.utils import canonicalize_name
 
 from model_dependabot.matching.severity import severity_of
 from model_dependabot.matching.versions import advisory_affects, affected_ranges, fixed_versions
+from model_dependabot.sources import (
+    crossref,
+    datacite,
+    figshare,
+    hf_takedowns,
+    pickle_scan,
+    zenodo,
+)
 from model_dependabot.sources import hf as hub
-from model_dependabot.sources import pickle_scan
+from model_dependabot.sources.doi_ra import ensure_agency
 from model_dependabot.sources.fetcher import Fetcher, SourceFailedError, source_of
 from model_dependabot.sources.osv import (
     SOURCE,
@@ -57,6 +65,7 @@ from model_dependabot.sources.osv import (
     withdrawn,
 )
 from model_dependabot.store import DISMISSAL_REASONS, Store
+from model_dependabot.upstream.observe import observe
 
 PACKAGE_ALERT = "package_advisory"
 UNMATCHED = "advisory_unmatched"
@@ -133,8 +142,9 @@ def run_check(
     """Check the current version of each model against the requested sources.
 
     ``trigger`` is ``scheduled`` for ``check --all --scheduled`` and ``on_demand`` otherwise. The
-    upstream sources of feature 002 are accepted here and reported as ``skipped`` until each is
-    wired in.
+    upstream sources of feature 002 (``hf-hub``, ``hf-takedowns``, ``crossref``, ``datacite``,
+    ``zenodo``, ``figshare``) are all read before any of them changes anything, and a source
+    that failed opens, changes or closes nothing (FR-018).
     """
     run_id = store.start_check_run(scope=scope or ",".join(model_ids), trigger=trigger)
     targets = []
@@ -155,7 +165,12 @@ def run_check(
         targets.append(_Target(model_id, version, entries, summary, record.get("base_dir")))
 
     statuses: dict[str, str] = {}
+    wanted = [source for source in sources if source in UPSTREAM_SOURCES]
+    upstream = _read_upstream(store, fetcher, targets, wanted) if wanted else None
     for source in sources:
+        if upstream is not None and source in UPSTREAM_SOURCES:
+            statuses[source] = upstream.statuses[source]
+            continue
         if source == PICKLESCAN:
             scans = _read_local_scans(store, targets)
             for target in targets:
@@ -186,6 +201,10 @@ def run_check(
     if any(source in WEIGHT_SOURCES for source in sources):
         for target in targets:
             _apply_format_rules(store, run_id, target)
+    if upstream is not None:
+        observed = _Observed(store, run_id)
+        for target in targets:
+            _apply_upstream(store, target, observed, upstream)
     store.finish_check_run(run_id, statuses)
     return CheckOutcome(run_id, statuses, [target.summary for target in targets])
 
@@ -928,6 +947,9 @@ def reevaluate_version(store: Store, model_id: str, version: int) -> dict[str, l
             if present and entry is not None:
                 cause |= {"version": entry["version"], "identifier": entry["identifier"]}
             detail["found"] = None if entry is None else entry["identifier"]
+        elif alert["kind"] in DATASET_ALERTS:
+            present = _dataset_present(cause, alert["kind"], entries)
+            detail["found"] = cause["identifier"] if present else None
         else:
             entry = weights.get(cause["identifier"])
             present = entry is not None and bool(entry["pinned"])
@@ -985,3 +1007,388 @@ def dismiss_alert(
     closed = store.get_alert(alert_id)
     assert closed is not None
     return closed
+
+
+# --- feature 002, US1: dataset retractions and removals (data-model.md, research U1 to U6) -----
+
+DATASET_RETRACTED = "dataset_retracted"
+PAPER_RETRACTED = "paper_retracted"
+DATASET_REMOVED = "dataset_removed"
+DATASET_NOT_FINDABLE = "dataset_not_findable"
+DATASET_ALERTS = (DATASET_RETRACTED, PAPER_RETRACTED, DATASET_REMOVED, DATASET_NOT_FINDABLE)
+DATASET_UNREACHABLE = "dataset_unreachable"
+DATASET_MOVED = "dataset_moved"
+UPSTREAM_NOTICE = "upstream_notice"
+# Research U9: every US1 alert is HIGH by policy.
+DATASET_SEVERITY = "HIGH"
+NO_REASON = "no reason given"
+
+HF_HUB = hub.DATASET_SOURCE
+HF_TAKEDOWNS = hf_takedowns.SOURCE
+CROSSREF = crossref.SOURCE
+DATACITE = datacite.SOURCE
+ZENODO = zenodo.SOURCE
+FIGSHARE = figshare.SOURCE
+UPSTREAM_SOURCES = (HF_HUB, HF_TAKEDOWNS, CROSSREF, DATACITE, ZENODO, FIGSHARE)
+DOI_SOURCES = (CROSSREF, DATACITE, ZENODO, FIGSHARE)
+
+
+def dataset_cause_key(kind: str, identifier: str, paper_doi: str | None = None) -> str:
+    """Cause keys of data-model.md: kind + dataset DOI or identifier (+ paper DOI)."""
+    return f"{kind}:{identifier}" if paper_doi is None else f"{kind}:{identifier}:{paper_doi}"
+
+
+@dataclass
+class _UpstreamRead:
+    """Every upstream answer the run needs, read before anything changes (FR-018)."""
+
+    statuses: dict[str, str]
+    reads: dict[str, Any]
+
+
+def _datasets(targets: Sequence[_Target]) -> list[dict[str, Any]]:
+    return [
+        entry
+        for target in targets
+        for entry in target.entries
+        if entry["kind"] == "dataset" and entry["pinned"]
+    ]
+
+
+def _agency(store: Store, doi: str) -> str | None:
+    routing = store.get_routing(doi)
+    return None if routing is None else routing["agency"]
+
+
+def _routed(store: Store, dois: Sequence[str], repository: str) -> dict[str, str]:
+    found = {}
+    for doi in dois:
+        routing = store.get_routing(doi)
+        if routing and routing["repository"] == repository and routing["repository_id"]:
+            found[doi] = str(routing["repository_id"])
+    return found
+
+
+def _read_upstream(
+    store: Store, fetcher: Fetcher, targets: Sequence[_Target], sources: Sequence[str]
+) -> _UpstreamRead:
+    """Read each requested upstream source in full; a failed one is recorded and not applied."""
+    entries = _datasets(targets)
+    hub_repos = list(dict.fromkeys(e["hub_repo"] for e in entries if e.get("hub_repo")))
+    dataset_dois = list(dict.fromkeys(e["identifier"] for e in entries if not e.get("hub_repo")))
+    paper_dois = [paper for entry in entries for paper in entry.get("paper_dois") or []]
+    all_dois = list(dict.fromkeys(dataset_dois + paper_dois))
+    if any(source in DOI_SOURCES for source in sources):
+        # A DOI whose agency lookup failed at registration is looked up again (research U1).
+        for doi in all_dois:
+            ensure_agency(store, fetcher, doi)
+
+    readers: dict[str, Callable[[], Any]] = {
+        DATACITE: lambda: {
+            doi: datacite.DataCite(fetcher).record(doi)
+            for doi in dataset_dois
+            if datacite.queried(_agency(store, doi))
+        },
+        ZENODO: lambda: {
+            doi: zenodo.Zenodo(fetcher).record(rid)
+            for doi, rid in _routed(store, dataset_dois, "zenodo").items()
+        },
+        FIGSHARE: lambda: {
+            doi: figshare.Figshare(fetcher).article(rid)
+            for doi, rid in _routed(store, dataset_dois, "figshare").items()
+        },
+        CROSSREF: lambda: {
+            doi: crossref.Crossref(fetcher).work(doi)
+            for doi in all_dois
+            if crossref.queried(_agency(store, doi))
+        },
+        HF_HUB: lambda: {repo: hub.read_dataset(fetcher, repo) for repo in hub_repos},
+        HF_TAKEDOWNS: lambda: hf_takedowns.TakedownIndex(fetcher).read() if hub_repos else None,
+    }
+    statuses: dict[str, str] = {}
+    reads: dict[str, Any] = {}
+    # In this order: DataCite's answers route DOIs to Zenodo and Figshare.
+    for source in UPSTREAM_SOURCES:
+        if source not in sources:
+            continue
+        try:
+            reads[source] = readers[source]()
+        except SourceFailedError as error:
+            statuses[source] = f"failed: {error.reason}"
+            continue
+        statuses[source] = "ok"
+        if source == DATACITE:
+            for record in reads[source].values():
+                datacite.remember_repository(store, record)
+        if source == HF_TAKEDOWNS and reads[source] is not None:
+            store.replace_takedown_notices(reads[source].notices)
+    return _UpstreamRead(statuses, reads)
+
+
+class _Observed:
+    """Observations already stored in this run: one per item per source (data-model.md)."""
+
+    def __init__(self, store: Store, run_id: int) -> None:
+        self.store = store
+        self.run_id = run_id
+        self._seen: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def __call__(self, source: str, item: str, response: Any, **fields: Any) -> dict[str, Any]:
+        key = (source, item)
+        if key not in self._seen:
+            observation = observe(self.store, self.run_id, source, item, response, **fields)
+            if observation is None:
+                raise ValueError(f"{source} HTTP {response.status} is not an answer")
+            self._seen[key] = observation
+        return self._seen[key]
+
+
+def _link_new(store: Store, alert_id: int, evidence_ids: Sequence[int]) -> None:
+    """Link evidence an alert does not already hold (same source, URL and stored body)."""
+    held = {(e["source"], e["url"], e["body_sha256"]) for e in store.alert_evidence(alert_id)}
+    for evidence_id in evidence_ids:
+        evidence = store.get_evidence(evidence_id)
+        if evidence is None:
+            continue
+        key = (evidence["source"], evidence["url"], evidence["body_sha256"])
+        if key not in held:
+            store.link_alert_evidence(alert_id, evidence_id)
+            held.add(key)
+
+
+def _upstream_alert(
+    store: Store,
+    target: _Target,
+    kind: str,
+    cause_key: str,
+    cause: dict[str, Any],
+    evidence_ids: Sequence[int],
+) -> None:
+    """Open an upstream alert, or carry the open one forward with any new evidence."""
+    existing = store.find_open_alert(target.model_id, cause_key)
+    if existing is None:
+        alert_id = store.insert_alert(
+            model_id=target.model_id,
+            kind=kind,
+            cause_key=cause_key,
+            cause=cause,
+            severity=DATASET_SEVERITY,
+            severity_origin=POLICY_ORIGIN,
+            opened_in_version=target.version,
+            evidence_ids=list(dict.fromkeys(evidence_ids)),
+        )
+        target.summary["opened"].append(alert_id)
+        return
+    alert_id = existing["alert_id"]
+    _link_new(store, alert_id, evidence_ids)
+    store.update_open_alert(
+        alert_id,
+        current_version=max(existing["current_version"], target.version),
+        severity=DATASET_SEVERITY,
+        severity_origin=POLICY_ORIGIN,
+        cause=cause,
+    )
+    if alert_id not in target.summary["carried_forward"]:
+        target.summary["carried_forward"].append(alert_id)
+
+
+def _upstream_watch(
+    store: Store,
+    target: _Target,
+    kind: str,
+    identifier: str,
+    detail: Mapping[str, Any],
+    evidence_ids: Sequence[int],
+) -> None:
+    watch_event_id = store.record_watch_event(
+        model_id=target.model_id,
+        version=target.version,
+        entry_identifier=identifier,
+        kind=kind,
+        detail=detail,
+        evidence_ids=evidence_ids,
+    )
+    if watch_event_id not in target.summary["watch_events"]:
+        target.summary["watch_events"].append(watch_event_id)
+
+
+def _apply_crossref(
+    store: Store,
+    target: _Target,
+    observed: _Observed,
+    dataset: str,
+    doi: str,
+    role: str,
+    work: crossref.CrossrefWork,
+) -> None:
+    updates = [u.as_dict() for u in work.updates] if work.outcome == "reachable" else None
+    evidence_id = observed(CROSSREF, doi, work.response, updates=updates)["evidence_ref"]
+    not_found = work.not_found_kind(role)
+    if not_found is not None:
+        detail = {"source": CROSSREF, "http_status": work.response.status}
+        detail |= {"dataset": dataset, "doi": doi}
+        _upstream_watch(store, target, not_found, doi, detail, [evidence_id])
+        return
+    cause: dict[str, Any] = {"identifier": dataset, "dataset": dataset}
+    if role == "dataset":
+        kind, cause_key = DATASET_RETRACTED, dataset_cause_key(DATASET_RETRACTED, doi)
+        cause["doi"] = doi
+    else:
+        kind, cause_key = PAPER_RETRACTED, dataset_cause_key(PAPER_RETRACTED, dataset, doi)
+        cause["paper_doi"] = doi
+    notices = [u.as_dict() for u in (*work.retractions, *work.notices)]
+    if work.retractions:
+        cause["notices"] = notices
+        _upstream_alert(store, target, kind, cause_key, cause, [evidence_id])
+        return
+    existing = store.find_open_alert(target.model_id, cause_key)
+    if existing is not None:
+        # Research U12: Crossref no longer lists a retraction, withdrawal or removal.
+        _close(store, target, existing, "withdrawn", [evidence_id])
+    if work.notices:
+        detail = {"source": CROSSREF, "dataset": dataset, "doi": doi, "notices": notices}
+        _upstream_watch(store, target, UPSTREAM_NOTICE, doi, detail, [evidence_id])
+
+
+def _apply_doi_dataset(
+    store: Store,
+    target: _Target,
+    observed: _Observed,
+    reads: Mapping[str, Any],
+    entry: Mapping[str, Any],
+) -> None:
+    doi = entry["identifier"]
+    base = {"identifier": doi, "dataset": doi}
+    record = (reads.get(DATACITE) or {}).get(doi)
+    if record is not None:
+        evidence_id = observed(DATACITE, doi, record.response)["evidence_ref"]
+        if record.outcome == "not_found":
+            cause = base | {"doi": doi, "source": DATACITE, "http_status": record.response.status}
+            key = dataset_cause_key(DATASET_NOT_FINDABLE, doi)
+            _upstream_alert(store, target, DATASET_NOT_FINDABLE, key, cause, [evidence_id])
+    removal = (reads.get(ZENODO) or {}).get(doi)
+    if removal is not None:
+        observation = observed(ZENODO, doi, removal.response, removal=removal.removal)
+        evidence_id = observation["evidence_ref"]
+        if removal.outcome == "removed":
+            tombstone = removal.removal or {}
+            cause = base | {
+                "host": "zenodo",
+                "record_id": removal.record_id,
+                "removal_date": tombstone.get("removal_date"),
+                "reason": tombstone.get("removal_reason") or NO_REASON,
+            }
+            key = dataset_cause_key(DATASET_REMOVED, doi)
+            _upstream_alert(store, target, DATASET_REMOVED, key, cause, [evidence_id])
+        elif removal.outcome == "not_found":
+            detail = {"source": ZENODO, "http_status": 404, "record_id": removal.record_id}
+            _upstream_watch(store, target, DATASET_UNREACHABLE, doi, detail, [evidence_id])
+    article = (reads.get(FIGSHARE) or {}).get(doi)
+    if article is not None:
+        evidence_id = observed(FIGSHARE, doi, article.response)["evidence_ref"]
+        kind = article.not_found_kind()
+        if kind is not None:
+            detail = {"source": FIGSHARE, "http_status": 404, "article_id": article.article_id}
+            _upstream_watch(store, target, kind, doi, detail, [evidence_id])
+    works = reads.get(CROSSREF) or {}
+    if doi in works:
+        _apply_crossref(store, target, observed, doi, doi, "dataset", works[doi])
+
+
+def _apply_hub_dataset(
+    store: Store,
+    target: _Target,
+    observed: _Observed,
+    reads: Mapping[str, Any],
+    entry: Mapping[str, Any],
+) -> None:
+    item, repo = entry["identifier"], entry["hub_repo"]
+    log = reads.get(HF_TAKEDOWNS)
+    notice: dict[str, str] | None = None
+    notice_evidence: list[int] = []
+    if log is not None:
+        found = sorted(log.find(repo), key=lambda found_notice: found_notice["notice_date"])
+        notice = found[-1] if found else None
+        detail = hf_takedowns.evidence_detail(notice) if notice else {"matched": None}
+        observation = observed(HF_TAKEDOWNS, item, log.response, detail=detail, removal=notice)
+        if notice is not None:
+            notice_evidence = [observation["evidence_ref"]]
+    dataset = (reads.get(HF_HUB) or {}).get(repo)
+    if dataset is None:
+        return
+    observation = observed(
+        HF_HUB,
+        item,
+        dataset.response,
+        disabled=dataset.disabled,
+        gated=dataset.gated,
+        head_revision=dataset.sha,
+    )
+    evidence_id = observation["evidence_ref"]
+    status = dataset.response.status
+    if dataset.outcome == "redirected":
+        detail = {"source": HF_HUB, "http_status": status, "from": repo, "to": dataset.moved_to}
+        detail["redirected_to"] = dataset.response.redirected_to
+        _upstream_watch(store, target, DATASET_MOVED, item, detail, [evidence_id])
+        return
+    if dataset.outcome == "refused":
+        detail = {"source": HF_HUB, "http_status": status}
+        _upstream_watch(store, target, DATASET_UNREACHABLE, item, detail, [evidence_id])
+        return
+    if not dataset.disabled:
+        return
+    key = dataset_cause_key(DATASET_REMOVED, item)
+    cause: dict[str, Any] = {
+        "identifier": item,
+        "dataset": item,
+        "host": "huggingface",
+        "disabled": True,
+        "notice_date": None,
+        "reason": NO_REASON,
+    }
+    if notice is not None:
+        cause |= {
+            "notice_date": notice["notice_date"],
+            "notice_label": hf_takedowns.NOTICE_LABEL,
+            "reported_content": notice["reported_content"],
+        }
+    elif log is None:
+        # The log was not read in this run, so what an open alert shows of it stays (FR-018).
+        existing = store.find_open_alert(target.model_id, key)
+        if existing is not None:
+            kept = ("notice_date", "notice_label", "reported_content")
+            cause |= {name: existing["cause"][name] for name in kept if name in existing["cause"]}
+    _upstream_alert(store, target, DATASET_REMOVED, key, cause, [evidence_id, *notice_evidence])
+
+
+def _apply_upstream(
+    store: Store, target: _Target, observed: _Observed, read: _UpstreamRead
+) -> None:
+    reads = {source: read.reads[source] for source in read.reads if read.statuses[source] == "ok"}
+    for entry in target.entries:
+        if entry["kind"] != "dataset" or not entry["pinned"]:
+            continue
+        if entry.get("hub_repo"):
+            _apply_hub_dataset(store, target, observed, reads, entry)
+        else:
+            _apply_doi_dataset(store, target, observed, reads, entry)
+        # Papers the owner ties to the dataset, whether it has a DOI or lives on the hub (FR-004).
+        works = reads.get(CROSSREF) or {}
+        for paper in entry.get("paper_dois") or []:
+            if paper in works:
+                dataset = entry["identifier"]
+                _apply_crossref(store, target, observed, dataset, paper, "paper", works[paper])
+
+
+def _dataset_present(
+    cause: Mapping[str, Any], kind: str, entries: Sequence[Mapping[str, Any]]
+) -> bool:
+    """Whether a new inventory still depends on the alert's dataset (and its tied paper)."""
+    for entry in entries:
+        if entry["kind"] != "dataset" or not entry["pinned"]:
+            continue
+        if entry["identifier"] != cause["identifier"]:
+            continue
+        if kind != PAPER_RETRACTED or cause.get("paper_doi") in (entry.get("paper_dois") or []):
+            return True
+    return False

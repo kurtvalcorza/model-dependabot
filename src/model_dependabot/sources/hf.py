@@ -14,7 +14,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from posixpath import dirname
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlsplit
 
 from model_dependabot.sources.fetcher import Fetcher, Response, SourceFailedError
 
@@ -97,6 +97,10 @@ class HuggingFace:
         except SourceFailedError as error:
             return None, f"hub not reachable: {error.reason}"
         return response, _refusal(response)
+
+    def dataset(self, repo: str) -> HubDataset:
+        """A hub dataset's info for the upstream watch (feature 002, research U5)."""
+        return read_dataset(self.fetcher, repo, self.endpoint)
 
     def tree(self, repo: str, revision: str, directory: str = "") -> TreeResult:
         """The files in one directory of a repository at a revision."""
@@ -304,3 +308,86 @@ class HubSecurity:
             file_status=file_status,
             tree_response=response,
         )
+
+
+# --- hub datasets (feature 002, research U5) ------------------------------------------------------
+
+DATASET_EXPAND = "expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha"
+DATASET_SOURCE = "hf-hub"
+
+
+def dataset_info_url(repo: str, endpoint: str = HF_ENDPOINT) -> str:
+    """Dataset info with the fields the upstream watch reads."""
+    return f"{endpoint}/api/datasets/{_path(repo)}?{DATASET_EXPAND}"
+
+
+def _declared_licence(card: object) -> str | None:
+    licence = card.get("license") if isinstance(card, dict) else None
+    if isinstance(licence, list):
+        names = [str(item) for item in licence if item]
+        return names[0] if len(names) == 1 else (" AND ".join(names) or None)
+    return str(licence) if licence else None
+
+
+def _gated(value: object) -> str | None:
+    if value is None:
+        return None
+    if value is False:
+        return "false"
+    return str(value).lower()
+
+
+@dataclass(frozen=True)
+class HubDataset:
+    """What the hub answered for one dataset: ``reachable``, ``refused`` or ``redirected``."""
+
+    repo: str
+    response: Response
+    outcome: str
+    disabled: bool | None = None
+    gated: str | None = None
+    sha: str | None = None
+    licence: str | None = None
+    moved_to: str | None = None
+
+
+def _moved_to(target: str | None) -> str | None:
+    if not target:
+        return None
+    path = urlsplit(target).path
+    prefix = "/api/datasets/"
+    return unquote(path[len(prefix) :]) if path.startswith(prefix) else None
+
+
+def parse_dataset(repo: str, response: Response) -> HubDataset:
+    status = response.status
+    if 300 <= status < 400:
+        target = _moved_to(response.redirected_to)
+        return HubDataset(repo, response, "redirected", moved_to=target)
+    if status in (401, 403, 404):
+        return HubDataset(repo, response, "refused")
+    if status != 200:
+        raise SourceFailedError(DATASET_SOURCE, f"HTTP {status} for dataset {repo}")
+    try:
+        info = json.loads(response.body)
+    except ValueError as error:
+        raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}: {error}") from None
+    if not isinstance(info, dict):
+        raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}")
+    sha = info.get("sha")
+    return HubDataset(
+        repo,
+        response,
+        "reachable",
+        disabled=bool(info.get("disabled", False)),
+        gated=_gated(info.get("gated", False)),
+        sha=sha if isinstance(sha, str) else None,
+        licence=_declared_licence(info.get("cardData")),
+    )
+
+
+def read_dataset(fetcher: Fetcher, repo: str, endpoint: str = HF_ENDPOINT) -> HubDataset:
+    """One dataset's info; a move is returned as it is, never followed (research U5)."""
+    return parse_dataset(
+        repo, fetcher.get(dataset_info_url(repo, endpoint), follow_redirects=False)
+    )

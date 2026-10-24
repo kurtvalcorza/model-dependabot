@@ -165,3 +165,82 @@ def derive_hf(tmp_path: Path) -> Callable[..., Path]:
         return root
 
     return derive
+
+
+UPSTREAM_DIRS = (
+    "crossref",
+    "datacite",
+    "zenodo",
+    "figshare",
+    "doi_ra",
+    "hf_upstream",
+    "hf_takedowns",
+)
+UPSTREAM_TIME = "2026-10-24T06:00:00Z"
+TextChange = Callable[[Any], Any]
+
+
+@pytest.fixture
+def derive_upstream(tmp_path: Path) -> Callable[..., Path]:
+    """Recordings for the upstream sources, from the real ones under ``tests/fixtures``.
+
+    The recordings of ``UPSTREAM_DIRS`` are copied into a new directory. ``changes`` maps a
+    recording name (``crossref/retracted``) to a function from its parsed body (JSON, or text for
+    any other body) to the new body; ``errors`` maps a name to a failure reason, so
+    ``RecordedFetcher`` replays a failed request (FR-018); ``extra`` adds recordings, each
+    ``{"url", "status", "body"}`` plus an optional ``redirected_to``, for states no recording has
+    (a recorded body moved to another identifier). Every derived state is written out in the test
+    that uses it.
+    """
+    counter = iter(range(1000))
+
+    def derive(
+        changes: dict[str, TextChange] | None = None,
+        errors: dict[str, str] | None = None,
+        extra: dict[str, dict[str, Any]] | None = None,
+    ) -> Path:
+        root = tmp_path / f"upstream-derived-{next(counter)}"
+        for name in UPSTREAM_DIRS:
+            shutil.copytree(FIXTURES / name, root / name, ignore=shutil.ignore_patterns("*.md"))
+        for name, change in (changes or {}).items():
+            meta_path = root / f"{name}.meta.json"
+            meta = json.loads(meta_path.read_text("utf-8"))
+            body = meta_path.parent / meta["body_file"]
+            text = body.read_text("utf-8")
+            if body.suffix == ".json":
+                body.write_text(json.dumps(change(json.loads(text))), "utf-8")
+            else:
+                body.write_text(change(text), "utf-8")
+            for key in ("original_sha256", "body_sha256"):
+                meta.pop(key, None)
+            meta_path.write_text(json.dumps(meta), "utf-8")
+        for name, reason in (errors or {}).items():
+            meta_path = root / f"{name}.meta.json"
+            meta = json.loads(meta_path.read_text("utf-8"))
+            for key in ("status", "headers", "body_file", "trimmed"):
+                meta.pop(key, None)
+            meta["error"] = reason
+            meta_path.write_text(json.dumps(meta), "utf-8")
+        for name, spec in (extra or {}).items():
+            path = root / "extra" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            body = spec["body"]
+            if not isinstance(body, (str, bytes)):
+                body = json.dumps(body)
+            raw = body.encode("utf-8") if isinstance(body, str) else body
+            (path.parent / f"{path.name}.body").write_bytes(raw)
+            meta = {"method": "GET", "url": spec["url"], "status": spec["status"], "headers": {}}
+            meta |= {"retrieved_at": spec.get("retrieved_at", UPSTREAM_TIME)}
+            meta |= {"body_file": f"{path.name}.body"}
+            if spec.get("redirected_to"):
+                meta["redirected_to"] = spec["redirected_to"]
+            (path.parent / f"{path.name}.meta.json").write_text(json.dumps(meta), "utf-8")
+        return root
+
+    return derive
+
+
+def fixture_json(name: str) -> Any:
+    """The parsed body of a recording under ``tests/fixtures`` (``crossref/retracted``)."""
+    meta = json.loads((FIXTURES / f"{name}.meta.json").read_text("utf-8"))
+    return json.loads((FIXTURES / name).parent.joinpath(meta["body_file"]).read_text("utf-8"))

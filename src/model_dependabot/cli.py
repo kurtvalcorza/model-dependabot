@@ -31,6 +31,7 @@ from model_dependabot.reports import (
     history_report,
     history_text,
 )
+from model_dependabot.sources.datacite import ensure_repository
 from model_dependabot.sources.doi_ra import ensure_agency
 from model_dependabot.sources.fetcher import Fetcher, SourceFailedError, UrlFetcher
 from model_dependabot.store import DISMISSAL_REASONS, Store
@@ -331,6 +332,7 @@ def _route_dois(store: Store, fetcher: Fetcher, entries: Sequence[Mapping[str, A
             dois.insert(0, entry["identifier"])
         for doi in dois:
             ensure_agency(store, fetcher, doi)
+            ensure_repository(store, fetcher, doi)
 
 
 def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
