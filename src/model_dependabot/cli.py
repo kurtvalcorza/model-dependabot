@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from model_dependabot.inventory.build import build_entries
+from model_dependabot.inventory.build import build_entries, record_licences
 from model_dependabot.inventory.cyclonedx import InventoryError, export_bom, import_bom, validate
 from model_dependabot.lifecycle import dismiss_alert, reevaluate_version, run_check
 from model_dependabot.manifest import ManifestError, load_manifest
@@ -356,6 +356,7 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
             fetcher_ = _fetcher()
             entries = build_entries(manifest, fetcher_)
             _route_dois(store, fetcher_, entries)
+            record_licences(entries, fetcher_, store.get_routing)
             version = _record(
                 store,
                 model_id,

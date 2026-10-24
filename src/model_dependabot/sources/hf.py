@@ -391,3 +391,55 @@ def read_dataset(fetcher: Fetcher, repo: str, endpoint: str = HF_ENDPOINT) -> Hu
     return parse_dataset(
         repo, fetcher.get(dataset_info_url(repo, endpoint), follow_redirects=False)
     )
+
+
+MODEL_EXPAND = DATASET_EXPAND + "&expand[]=lastModified"
+
+
+def model_info_url(repo: str, endpoint: str = HF_ENDPOINT) -> str:
+    """Model info with the fields the upstream watch reads."""
+    return f"{endpoint}/api/models/{_path(repo)}?{MODEL_EXPAND}"
+
+
+@dataclass(frozen=True)
+class HubModel:
+    """What the hub answered for a base model: ``reachable``, ``refused`` or ``redirected``."""
+
+    repo: str
+    response: Response
+    outcome: str
+    disabled: bool | None = None
+    gated: str | None = None
+    sha: str | None = None
+    licence: str | None = None
+
+
+def parse_model(repo: str, response: Response) -> HubModel:
+    status = response.status
+    if 300 <= status < 400:
+        return HubModel(repo, response, "redirected")
+    if status in (401, 403, 404):
+        return HubModel(repo, response, "refused")
+    if status != 200:
+        raise SourceFailedError(DATASET_SOURCE, f"HTTP {status} for model {repo}")
+    try:
+        info = json.loads(response.body)
+    except ValueError as error:
+        raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}: {error}") from None
+    if not isinstance(info, dict):
+        raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}")
+    sha = info.get("sha")
+    return HubModel(
+        repo,
+        response,
+        "reachable",
+        disabled=bool(info.get("disabled", False)),
+        gated=_gated(info.get("gated", False)),
+        sha=sha if isinstance(sha, str) else None,
+        licence=_declared_licence(info.get("cardData")),
+    )
+
+
+def read_model(fetcher: Fetcher, repo: str, endpoint: str = HF_ENDPOINT) -> HubModel:
+    """A base model's info; a redirect is returned as it is, never followed."""
+    return parse_model(repo, fetcher.get(model_info_url(repo, endpoint), follow_redirects=False))

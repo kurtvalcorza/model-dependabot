@@ -43,6 +43,17 @@ class ZenodoRecord:
     response: Response
     outcome: str
     removal: dict[str, Any] | None = None
+    licence: str | None = None
+
+
+def _licence(body: bytes) -> str | None:
+    """``metadata.license.id`` of a record."""
+    try:
+        licence = (json.loads(body).get("metadata") or {}).get("license")
+    except (ValueError, AttributeError):
+        return None
+    value = licence.get("id") if isinstance(licence, dict) else licence
+    return value if isinstance(value, str) and value.strip() else None
 
 
 def _removal(body: bytes) -> dict[str, Any]:
@@ -59,7 +70,7 @@ def _removal(body: bytes) -> dict[str, Any]:
 
 def parse_record(record_id: str, response: Response) -> ZenodoRecord:
     if response.status == 200:
-        return ZenodoRecord(record_id, response, "reachable")
+        return ZenodoRecord(record_id, response, "reachable", licence=_licence(response.body))
     if response.status == 410:
         return ZenodoRecord(record_id, response, "removed", _removal(response.body))
     if response.status == 404:

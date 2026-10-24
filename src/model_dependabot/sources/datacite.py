@@ -79,6 +79,26 @@ class DataciteRecord:
     url: str | None = None
     repository: str | None = None
     repository_id: str | None = None
+    licence: str | None = None
+
+
+# rightsList entries under this URI prefix state access rights (``Open Access``), not a licence.
+ACCESS_RIGHTS = "info:eu-repo/semantics/"
+
+
+def declared_licence(attributes: object) -> str | None:
+    """The first licence in ``rightsList``: its ``rightsIdentifier``, else its ``rights`` text."""
+    rights = attributes.get("rightsList") if isinstance(attributes, dict) else None
+    for item in rights if isinstance(rights, list) else []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("rightsUri") or "").startswith(ACCESS_RIGHTS):
+            continue
+        for name in ("rightsIdentifier", "rights"):
+            value = item.get(name)
+            if isinstance(value, str) and value.strip():
+                return value
+    return None
 
 
 def parse_record(doi: str, response: Response) -> DataciteRecord:
@@ -91,10 +111,11 @@ def parse_record(doi: str, response: Response) -> DataciteRecord:
     except (ValueError, KeyError, TypeError) as error:
         raise SourceFailedError(SOURCE, f"unreadable answer for {doi}: {error}") from None
     url = attributes.get("url") if isinstance(attributes, dict) else None
+    licence = declared_licence(attributes)
     if not isinstance(url, str) or not url:
-        return DataciteRecord(doi, response, "reachable", None, "other", None)
+        return DataciteRecord(doi, response, "reachable", None, "other", None, licence)
     repository, repository_id = route(url)
-    return DataciteRecord(doi, response, "reachable", url, repository, repository_id)
+    return DataciteRecord(doi, response, "reachable", url, repository, repository_id, licence)
 
 
 class DataCite:

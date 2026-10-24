@@ -8,3 +8,9 @@
 #   source = "figshare"        # the repository whose responses use this spelling
 #
 # Only spellings seen in recorded fixtures are added (tasks T039).
+
+# Seen in tests/fixtures/figshare/cc-by-4.0.json (license.name of article 34763127, 2026-10-24).
+[[alias]]
+alias = "CC BY 4.0"
+spdx = "CC-BY-4.0"
+source = "figshare"

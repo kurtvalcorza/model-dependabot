@@ -35,9 +35,9 @@ class SpyFetcher:
         self.inner = inner
         self.log: list[tuple[str, str]] = []
 
-    def get(self, url: str) -> Response:
+    def get(self, url: str, *, follow_redirects: bool = True) -> Response:
         self.log.append(("GET", url))
-        return self.inner.get(url)
+        return self.inner.get(url, follow_redirects=follow_redirects)
 
     def post(self, url: str, body: bytes) -> Response:
         self.log.append(("POST", url))
@@ -71,6 +71,8 @@ def test_no_command_writes_to_a_model_or_its_repository(
     recordings = tmp_path / "recordings"
     shutil.copytree(FIXTURES / "hf", recordings)
     shutil.copytree(FIXTURES / "osv", recordings, dirs_exist_ok=True)
+    # The upstream watch asks the hub about the base model (its licence, FR-008).
+    shutil.copytree(FIXTURES / "hf_upstream", recordings, dirs_exist_ok=True)
     spy = SpyFetcher(RecordedFetcher(recordings))
     handlers = make_handlers(fetcher=spy)
     db = tmp_path / "db" / "md.db"

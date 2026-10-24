@@ -53,7 +53,7 @@ from model_dependabot.sources import (
     zenodo,
 )
 from model_dependabot.sources import hf as hub
-from model_dependabot.sources.doi_ra import NOT_REGISTERED, refresh_agency
+from model_dependabot.sources.doi_ra import NOT_REGISTERED, ask_agency, refresh_agency
 from model_dependabot.sources.doi_ra import SOURCE as DOI_RA
 from model_dependabot.sources.doi_ra import unknown as agency_unknown
 from model_dependabot.sources.fetcher import Fetcher, Response, SourceFailedError, source_of
@@ -67,6 +67,8 @@ from model_dependabot.sources.osv import (
     withdrawn,
 )
 from model_dependabot.store import DISMISSAL_REASONS, Store
+from model_dependabot.upstream.changes import LICENCE_SOURCES, compare_licence, licence_reference
+from model_dependabot.upstream.licences import normalise
 from model_dependabot.upstream.observe import observe
 
 PACKAGE_ALERT = "package_advisory"
@@ -952,6 +954,11 @@ def reevaluate_version(store: Store, model_id: str, version: int) -> dict[str, l
         elif alert["kind"] in DATASET_ALERTS:
             present = _dataset_present(cause, alert["kind"], entries)
             detail["found"] = cause["identifier"] if present else None
+        elif alert["kind"] == LICENCE_CHANGED:
+            present = any(
+                entry["pinned"] and entry["identifier"] == cause["identifier"] for entry in entries
+            )
+            detail["found"] = cause["identifier"] if present else None
         else:
             entry = weights.get(cause["identifier"])
             present = entry is not None and bool(entry["pinned"])
@@ -1022,6 +1029,9 @@ DATASET_UNREACHABLE = "dataset_unreachable"
 PAPER_NOT_FOUND = "paper_not_found"
 DATASET_MOVED = "dataset_moved"
 UPSTREAM_NOTICE = "upstream_notice"
+LICENCE_CHANGED = "licence_changed"
+LICENCE_UNRECOGNISED = "licence_unrecognised"
+LICENCE_MISSING = "licence_missing"
 # Research U9: every US1 alert is HIGH by policy.
 DATASET_SEVERITY = "HIGH"
 NO_REASON = "no reason given"
@@ -1052,6 +1062,11 @@ class _UpstreamRead:
     agency_answers: dict[str, Response] = field(default_factory=dict)
     # Dataset DOIs asked at Zenodo by their own record id, not routed by DataCite (research U4).
     zenodo_by_doi: frozenset[str] = frozenset()
+
+
+def _licence_fields(licence: str | None) -> dict[str, Any]:
+    """An observation's declared licence and its normalised form (research U8)."""
+    return {"declared_licence": licence, "licence_form": normalise(licence).form}
 
 
 def _datasets(targets: Sequence[_Target]) -> list[dict[str, Any]]:
@@ -1108,6 +1123,14 @@ def _read_upstream(
     dataset_dois = list(dict.fromkeys(e["identifier"] for e in entries if not e.get("hub_repo")))
     paper_dois = [paper for entry in entries for paper in entry.get("paper_dois") or []]
     all_dois = list(dict.fromkeys(dataset_dois + paper_dois))
+    base_models = list(
+        dict.fromkeys(
+            entry["name"]
+            for target in targets
+            for entry in target.entries
+            if entry["kind"] == "base_model" and entry["pinned"]
+        )
+    )
     agency_answers: dict[str, Response] = {}
     if any(source in DOI_SOURCES for source in sources):
         # A DOI whose agency lookup failed at registration is looked up again, and one doi.org
@@ -1116,6 +1139,12 @@ def _read_upstream(
             answer = refresh_agency(store, fetcher, doi, recheck_unregistered=True)
             if answer is not None and answer.response is not None:
                 agency_answers[doi] = answer.response
+            elif doi in paper_dois and datacite.queried(_agency(store, doi)):
+                # No retraction source reads a DataCite paper DOI, so doi.org's answer in this
+                # run is the evidence of the watch event that says so (constitution IV).
+                asked = ask_agency(fetcher, doi)
+                if asked.response is not None:
+                    agency_answers[doi] = asked.response
 
     def asked_at_datacite(doi: str) -> bool:
         agency = _agency(store, doi)
@@ -1146,7 +1175,10 @@ def _read_upstream(
             for doi in all_dois
             if crossref.queried(_agency(store, doi))
         },
-        HF_HUB: lambda: {repo: hub.read_dataset(fetcher, repo) for repo in hub_repos},
+        HF_HUB: lambda: (
+            {("dataset", repo): hub.read_dataset(fetcher, repo) for repo in hub_repos}
+            | {("model", repo): hub.read_model(fetcher, repo) for repo in base_models}
+        ),
         HF_TAKEDOWNS: lambda: hf_takedowns.TakedownIndex(fetcher).read() if hub_repos else None,
     }
     statuses: dict[str, str] = {}
@@ -1188,6 +1220,10 @@ class _Observed:
                 response, source=DOI_RA, matched_identifier=doi, run_id=self.run_id
             )
         return [self._agency[doi]]
+
+    def of_item(self, item: str) -> list[dict[str, Any]]:
+        """The observations of ``item`` stored in this run, in the order they were stored."""
+        return [observation for (_, seen), observation in self._seen.items() if seen == item]
 
     def __call__(self, source: str, item: str, response: Any, **fields: Any) -> dict[str, Any]:
         key = (source, item)
@@ -1312,10 +1348,16 @@ NOT_ASKED_REASONS = {
 }
 
 
-def _not_asked_reason(agency: str | None) -> str | None:
+DATACITE_PAPER_REASON = "registered with DataCite, which no retraction source reads"
+
+
+def _not_asked_reason(agency: str | None, paper: bool = False) -> str | None:
     """Why no source can be asked about a DOI of this agency, or ``None`` if one can."""
     if agency in NOT_ASKED_REASONS:
         return NOT_ASKED_REASONS[agency]
+    if paper and datacite.queried(agency):
+        # Retractions are read at Crossref only; DataCite holds no retraction notices (U2).
+        return DATACITE_PAPER_REASON
     if datacite.queried(agency) or crossref.queried(agency):
         return None
     return f"registered with {agency}, which no source reads"
@@ -1333,7 +1375,7 @@ def _not_asked(
     if not any(source in DOI_SOURCES for source in read.sources):
         return
     agency = _agency(store, doi)
-    reason = _not_asked_reason(agency)
+    reason = _not_asked_reason(agency, paper=dataset is not None)
     if reason is None:
         return
     by_record_id = zenodo.record_id_from_doi(doi) is not None and agency_unknown(agency)
@@ -1359,7 +1401,8 @@ def _apply_doi_dataset(
     record = (reads.get(DATACITE) or {}).get(doi)
     supporting: list[int] = []
     if record is not None:
-        evidence_id = observed(DATACITE, doi, record.response)["evidence_ref"]
+        fields = _licence_fields(record.licence) if record.outcome == "reachable" else {}
+        evidence_id = observed(DATACITE, doi, record.response, **fields)["evidence_ref"]
         supporting.append(evidence_id)
         # FR-006: a DataCite 404 alerts only for a DOI DataCite registered; for a DOI whose agency
         # is unknown it is supporting evidence only.
@@ -1369,7 +1412,8 @@ def _apply_doi_dataset(
             _upstream_alert(store, target, DATASET_NOT_FINDABLE, key, cause, [evidence_id])
     removal = (reads.get(ZENODO) or {}).get(doi)
     if removal is not None:
-        observation = observed(ZENODO, doi, removal.response, removal=removal.removal)
+        fields = _licence_fields(removal.licence) if removal.outcome == "reachable" else {}
+        observation = observed(ZENODO, doi, removal.response, removal=removal.removal, **fields)
         evidence_id = observation["evidence_ref"]
         # Asked by its own record id: doi.org's and DataCite's answers support Zenodo's.
         support = supporting + observed.agency(read, doi) if doi in read.zenodo_by_doi else []
@@ -1389,7 +1433,8 @@ def _apply_doi_dataset(
             _upstream_watch(store, target, DATASET_UNREACHABLE, doi, detail, evidence)
     article = (reads.get(FIGSHARE) or {}).get(doi)
     if article is not None:
-        evidence_id = observed(FIGSHARE, doi, article.response)["evidence_ref"]
+        fields = _licence_fields(article.licence) if article.outcome == "reachable" else {}
+        evidence_id = observed(FIGSHARE, doi, article.response, **fields)["evidence_ref"]
         kind = article.not_found_kind()
         if kind is not None:
             detail = {"source": FIGSHARE, "http_status": 404, "article_id": article.article_id}
@@ -1418,7 +1463,7 @@ def _apply_hub_dataset(
         observation = observed(HF_TAKEDOWNS, item, log.response, detail=detail, removal=notice)
         if notice is not None:
             notice_evidence = [observation["evidence_ref"]]
-    dataset = (reads.get(HF_HUB) or {}).get(repo)
+    dataset = (reads.get(HF_HUB) or {}).get(("dataset", repo))
     if dataset is None:
         return
     observation = observed(
@@ -1428,6 +1473,7 @@ def _apply_hub_dataset(
         disabled=dataset.disabled,
         gated=dataset.gated,
         head_revision=dataset.sha,
+        **(_licence_fields(dataset.licence) if dataset.outcome == "reachable" else {}),
     )
     evidence_id = observation["evidence_ref"]
     status = dataset.response.status
@@ -1466,17 +1512,104 @@ def _apply_hub_dataset(
     _upstream_alert(store, target, DATASET_REMOVED, key, cause, [evidence_id, *notice_evidence])
 
 
+def _apply_base_model(
+    observed: _Observed, reads: Mapping[str, Any], entry: Mapping[str, Any]
+) -> None:
+    """Observe the base model on the hub (its licence; availability comes with US3)."""
+    model = (reads.get(HF_HUB) or {}).get(("model", entry["name"]))
+    if model is None:
+        return
+    fields = _licence_fields(model.licence) if model.outcome == "reachable" else {}
+    observed(
+        HF_HUB,
+        entry["identifier"],
+        model.response,
+        disabled=model.disabled,
+        gated=model.gated,
+        head_revision=model.sha,
+        **fields,
+    )
+
+
+def _apply_licence(
+    store: Store, target: _Target, observed: _Observed, entry: Mapping[str, Any]
+) -> None:
+    """Compare this run's declared licences of one item with its reference (FR-009, FR-010).
+
+    The reference is the recorded licence, or the first stored observation that declared one
+    (the baseline). One alert per item: a further change updates it, and a return to the
+    reference closes it as ``cleared`` (research U8, U12).
+    """
+    item = entry["identifier"]
+    seen = [o for o in observed.of_item(item) if o["source"] in LICENCE_SOURCES]
+    seen = [o for o in seen if o["outcome"] == "reachable"]
+    reference = licence_reference(store, entry) if seen else None
+    if reference is None:
+        return
+    declared_any = any(o["declared_licence"] for o in seen)
+    changed: list[dict[str, Any]] = []
+    same: list[dict[str, Any]] = []
+    for observation in seen:
+        finding = compare_licence(reference, observation)
+        detail = {
+            "source": observation["source"],
+            "declared_licence": observation["declared_licence"],
+            "recorded_licence": reference.licence.normalised,
+            "recorded_from": reference.origin,
+        }
+        evidence = [observation["evidence_ref"]]
+        if finding == "missing":
+            # "No longer declares": the source declared one before, or, seen for the first time,
+            # no source in this run declares one.
+            before = store.previous_observation(
+                item, observation["source"], observation["observation_id"]
+            )
+            if (before is not None and before["declared_licence"]) or (
+                before is None and not declared_any
+            ):
+                _upstream_watch(store, target, LICENCE_MISSING, item, detail, evidence)
+        elif finding == "unrecognised":
+            _upstream_watch(store, target, LICENCE_UNRECOGNISED, item, detail, evidence)
+        elif finding == "changed":
+            changed.append(observation)
+        elif finding == "same":
+            same.append(observation)
+    key = dataset_cause_key(LICENCE_CHANGED, item)
+    if changed:
+        latest = changed[-1]
+        cause = {
+            "identifier": item,
+            "item": item,
+            "recorded_licence": reference.licence.normalised,
+            "recorded_from": reference.origin,
+            "declared_licence": latest["declared_licence"],
+            "declared_normalised": normalise(latest["declared_licence"]).normalised,
+            "source": latest["source"],
+        }
+        evidence_ids = [o["evidence_ref"] for o in changed]
+        _upstream_alert(store, target, LICENCE_CHANGED, key, cause, evidence_ids)
+        return
+    existing = store.find_open_alert(target.model_id, key) if same else None
+    if existing is not None:
+        _close(store, target, existing, "cleared", [o["evidence_ref"] for o in same])
+
+
 def _apply_upstream(
     store: Store, target: _Target, observed: _Observed, read: _UpstreamRead
 ) -> None:
     reads = {source: read.reads[source] for source in read.reads if read.statuses[source] == "ok"}
     for entry in target.entries:
+        if entry["kind"] == "base_model" and entry["pinned"]:
+            _apply_base_model(observed, reads, entry)
+            _apply_licence(store, target, observed, entry)
+            continue
         if entry["kind"] != "dataset" or not entry["pinned"]:
             continue
         if entry.get("hub_repo"):
             _apply_hub_dataset(store, target, observed, reads, entry)
         else:
             _apply_doi_dataset(store, target, observed, read, reads, entry)
+        _apply_licence(store, target, observed, entry)
         # Papers the owner ties to the dataset, whether it has a DOI or lives on the hub (FR-004).
         works = reads.get(CROSSREF) or {}
         dataset = entry["identifier"]

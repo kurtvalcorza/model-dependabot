@@ -147,7 +147,7 @@ New `kind` values (FR-007, FR-010, FR-013, U5 to U8):
 | `dataset_replaced` | DataCite lists `IsObsoletedBy` |
 | `dataset_moved` | The hub redirects the dataset to another namespace |
 | `dataset_unreachable` | The hub refuses a dataset, Figshare answers 404, Crossref answers 404 for a Crossref-registered dataset DOI, Zenodo answers 404 for a record asked by its DOI (U4), or no source can be asked about a dataset DOI (constitution IV: its agency is unknown, `none` or one no source reads, and the Zenodo exception of U1 does not apply); `detail.reason` names why (for example `doi.org reports the DOI does not exist`) and doi.org's answer in the run is the evidence |
-| `paper_not_found` | Crossref answers 404 for a Crossref-registered paper DOI tied to a dataset, or no source can be asked about a tied paper DOI (its agency is unknown, `none` or one no source reads), with `detail.reason` as above |
+| `paper_not_found` | Crossref answers 404 for a Crossref-registered paper DOI tied to a dataset, or no source can be asked about a tied paper DOI (its agency is unknown, `none`, DataCite, whose DOIs no retraction source reads, or one no source reads), with `detail.reason` as above (for a DataCite paper DOI `registered with DataCite, which no retraction source reads`, with doi.org's answer in the run as the evidence) |
 | `licence_unrecognised` | A declared licence cannot be normalised |
 | `licence_missing` | A source no longer declares a licence that was recorded |
 | `upstream_notice` | Crossref lists a correction or expression of concern and no retraction alert is open |

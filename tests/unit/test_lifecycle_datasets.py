@@ -420,3 +420,30 @@ def test_a_paper_tied_to_a_hub_dataset_is_checked_too(
     check(store, derive_upstream(), "m", sources=("crossref",))
     (alert,) = alerts(store, "m")
     assert alert["cause_key"] == f"paper_retracted:{MUXUE}:{RETRACTED}"
+
+
+# An obviously fictional paper DOI under arXiv's DataCite prefix; doi.org's answer is derived.
+DATACITE_PAPER = "10.48550/model-dependabot-fixture-paper"
+
+
+def test_a_paper_doi_registered_with_datacite_records_paper_not_found_never_an_alert(
+    store: Store, derive_upstream: Callable[..., Path]
+) -> None:
+    """Constitution IV: no retraction source reads DataCite DOIs, so the paper is not skipped."""
+    from model_dependabot.sources.doi_ra import doi_ra_url
+
+    register(store, "m", [doi_dataset(ZENODO_FINDABLE, [DATACITE_PAPER])])
+    datacite(store, ZENODO_FINDABLE, "zenodo", "3242074")
+    datacite(store, DATACITE_PAPER)
+    answer = [{"DOI": DATACITE_PAPER, "RA": "DataCite"}]
+    extra = {"paper-ra": {"url": doi_ra_url(DATACITE_PAPER), "status": 200, "body": answer}}
+    outcome = check(store, derive_upstream(extra=extra), "m")
+    assert outcome.sources == dict.fromkeys(ALL, "ok")
+    assert alerts(store, "m") == []
+    events = {(e["kind"], e["entry_identifier"]): e for e in store.watch_events("m")}
+    event = events[("paper_not_found", DATACITE_PAPER)]
+    assert event["detail"]["reason"] == "registered with DataCite, which no retraction source reads"
+    assert event["detail"]["dataset"] == ZENODO_FINDABLE
+    assert [e["source"] for e in event["evidence"]] == ["doi-ra"]
+    # The dataset DOI itself is read at DataCite, so it is not reported as not asked.
+    assert ("dataset_unreachable", ZENODO_FINDABLE) not in events
