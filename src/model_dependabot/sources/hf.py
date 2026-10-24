@@ -262,19 +262,21 @@ class HubSecurity:
             self._trees[key] = self.fetcher.get(url + "?expand=true")
         return self._trees[key]
 
-    def verdict(self, status: SecurityStatus, file: str) -> FileVerdict:
-        """The verdict for one file; a listed file's hash and scanners come from the tree."""
+    def verdict(self, status: SecurityStatus, file: str, *, confirm: bool = False) -> FileVerdict:
+        """The verdict for one file; a listed file's hash and scanners come from the tree.
+
+        A clean verdict is read from the tree too when ``confirm`` is set, so that an explicit
+        ``safe`` file status for the matching hash can clear an alert (FR-023).
+        """
         if status.state != "answered":
             return FileVerdict(status.repo, file, status.state, status, reason=status.reason)
         level = status.levels.get(file)
-        if level is None:
-            return FileVerdict(status.repo, file, CLEAN, status)
-        state = LISTED_LEVELS.get(level)
+        state = CLEAN if level is None else LISTED_LEVELS.get(level)
         if state is None:
             return FileVerdict(
                 status.repo, file, UNRECOGNISED, status, level, reason=f"level {level!r}"
             )
-        if state == CLEAN:
+        if state == CLEAN and not confirm:
             return FileVerdict(status.repo, file, CLEAN, status, level)
         assert status.commit is not None
         response = self._tree(status.repo, status.commit, dirname(file))

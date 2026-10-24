@@ -145,16 +145,16 @@ Single project: `src/model_dependabot/` and `tests/` at the repository root (pla
 
 ### Tests for User Story 4
 
-- [ ] T043 [P] [US4] Write failing tests in `tests/unit/test_lifecycle_versions.py` for the data-model.md state transitions: a new version without the cause closes the alert as `fixed` with `closed_by_version`; a new version with the cause moves `current_version` forward; a cause found again after closing opens a new alert and keeps the old one in history; this re-evaluation happens at `register` by comparing the two inventories and makes no source request (the recorded fetcher sees no call), so a failed source cannot affect it (FR-014, SC-004)
-- [ ] T043a [P] [US4] Write failing tests in `tests/unit/test_lifecycle_cleared.py` for the `cleared` transitions (FR-023): a recorded advisory response whose affected ranges are narrowed so the pinned version is no longer affected, with OSV's match and the local evaluation both agreeing, closes the alert as `cleared` with the new response as evidence; if only one of the two agrees, the alert stays open and an `advisory_unmatched` watch event is recorded; a hub verdict for the matching hash that changes from unsafe to an explicit safe verdict closes the `hub_scan` alert as `cleared` with the new verdict as evidence; a missing, pending or unrecognised later verdict changes nothing; a source that failed in the run clears nothing (FR-016); a withdrawn advisory still closes as `withdrawn`, not `cleared`
-- [ ] T044 [P] [US4] Write failing tests in `tests/unit/test_dismiss.py`: dismissal needs a reason from "`not_used_at_runtime`, `risk_accepted`, `false_positive`, `fix_not_available`" plus an optional note, and records who and when (FR-015); any other reason is invalid input (exit 1)
-- [ ] T045 [US4] Write a failing integration test in `tests/integration/test_autoclose.py` following quickstart.md section 5
+- [X] T043 [P] [US4] Write failing tests in `tests/unit/test_lifecycle_versions.py` for the data-model.md state transitions: a new version without the cause closes the alert as `fixed` with `closed_by_version`; a new version with the cause moves `current_version` forward; a cause found again after closing opens a new alert and keeps the old one in history; this re-evaluation happens at `register` by comparing the two inventories and makes no source request (the recorded fetcher sees no call), so a failed source cannot affect it (FR-014, SC-004)
+- [X] T043a [P] [US4] Write failing tests in `tests/unit/test_lifecycle_cleared.py` for the `cleared` transitions (FR-023): a recorded advisory response whose affected ranges are narrowed so the pinned version is no longer affected, with OSV's match and the local evaluation both agreeing, closes the alert as `cleared` with the new response as evidence; if only one of the two agrees, the alert stays open and an `advisory_unmatched` watch event is recorded; a hub verdict for the matching hash that changes from unsafe to an explicit safe verdict closes the `hub_scan` alert as `cleared` with the new verdict as evidence; a missing, pending or unrecognised later verdict changes nothing; a source that failed in the run clears nothing (FR-016); a withdrawn advisory still closes as `withdrawn`, not `cleared`
+- [X] T044 [P] [US4] Write failing tests in `tests/unit/test_dismiss.py`: dismissal needs a reason from "`not_used_at_runtime`, `risk_accepted`, `false_positive`, `fix_not_available`" plus an optional note, and records who and when (FR-015); any other reason is invalid input (exit 1)
+- [X] T045 [US4] Write a failing integration test in `tests/integration/test_autoclose.py` following quickstart.md section 5
 
 ### Implementation for User Story 4
 
-- [ ] T046 [US4] Implement version re-evaluation on `register` in `src/model_dependabot/lifecycle.py` until T043 passes
-- [ ] T046a [US4] Implement the `cleared` state and its transitions in `src/model_dependabot/lifecycle.py` (and the state in `src/model_dependabot/store.py`) until T043a passes
-- [ ] T047 [US4] Add `alert dismiss` to `src/model_dependabot/cli.py` until T044 and T045 pass
+- [X] T046 [US4] Implement version re-evaluation on `register` in `src/model_dependabot/lifecycle.py` until T043 passes
+- [X] T046a [US4] Implement the `cleared` state and its transitions in `src/model_dependabot/lifecycle.py` (and the state in `src/model_dependabot/store.py`) until T043a passes
+- [X] T047 [US4] Add `alert dismiss` to `src/model_dependabot/cli.py` until T044 and T045 pass
 
 **Checkpoint**: User Stories 1 to 4 work on their own
 

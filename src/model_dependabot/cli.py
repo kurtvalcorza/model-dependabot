@@ -19,7 +19,7 @@ from typing import Any
 
 from model_dependabot.inventory.build import build_entries
 from model_dependabot.inventory.cyclonedx import InventoryError, export_bom, import_bom, validate
-from model_dependabot.lifecycle import run_check
+from model_dependabot.lifecycle import dismiss_alert, reevaluate_version, run_check
 from model_dependabot.manifest import ManifestError, load_manifest
 from model_dependabot.matching.severity import severity_rank
 from model_dependabot.sources.fetcher import Fetcher, SourceFailedError, UrlFetcher
@@ -304,6 +304,9 @@ def _alert_view(store: Store, alert: Mapping[str, Any]) -> dict[str, Any]:
         "opened_at": alert["opened_at"],
         "closed_at": alert["closed_at"],
         "closed_by_version": alert["closed_by_version"],
+        "dismissal_reason": alert["dismissal_reason"],
+        "dismissed_by": alert["dismissed_by"],
+        "note": alert["note"],
         "evidence": [_evidence_view(e) for e in store.alert_evidence(alert["alert_id"])],
     }
 
@@ -391,6 +394,7 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
                 base_dir=Path(args.manifest).parent,
             )
             payload = _inventory_payload(model_id, version, store.entries(model_id, version))
+            payload["alerts"] = reevaluate_version(store, model_id, version)
         return CommandResult(payload, _inventory_text(payload, f"Registered {model_id} v{version}"))
 
     def import_inventory(args: argparse.Namespace) -> CommandResult:
@@ -413,6 +417,7 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
                 base_dir=Path(args.bom).parent,
             )
             payload = _inventory_payload(model_id, version, store.entries(model_id, version))
+            payload["alerts"] = reevaluate_version(store, model_id, version)
         return CommandResult(payload, _inventory_text(payload, f"Imported {model_id} v{version}"))
 
     def show(args: argparse.Namespace) -> CommandResult:
@@ -500,6 +505,21 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
             payload = {"model_id": alert["model_id"], **_alert_view(store, alert)}
         return CommandResult(payload, _alert_text(payload))
 
+    def alert_dismiss(args: argparse.Namespace) -> CommandResult:
+        with Store(args.db) as store:
+            try:
+                alert = dismiss_alert(
+                    store, args.alert_id, reason=args.reason, by=args.by, note=args.note
+                )
+            except ValueError as error:
+                raise InvalidInputError(str(error)) from None
+            payload = {"model_id": alert["model_id"], **_alert_view(store, alert)}
+        text = (
+            f"Dismissed alert {alert['alert_id']} ({alert['dismissal_reason']}) by"
+            f" {alert['dismissed_by']} at {alert['closed_at']}"
+        )
+        return CommandResult(payload, text)
+
     return {
         "register": register,
         "import": import_inventory,
@@ -509,6 +529,7 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
         "policy": policy,
         "alerts": alerts,
         "alert show": alert_show,
+        "alert dismiss": alert_dismiss,
     }
 
 
