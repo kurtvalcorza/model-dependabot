@@ -1,0 +1,13 @@
+{
+  "method": "GET",
+  "url": "https://doi.org/doiRA/10.5281/zenodo.3242074",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json;charset=UTF-8"
+  },
+  "retrieved_at": "2026-10-24T05:47:08Z",
+  "body_file": "datacite.json",
+  "original_sha256": "f70a6237e740a0d688af5daec1e16a686454392fdfeb68bfdf9747e1299efec8",
+  "body_sha256": "f70a6237e740a0d688af5daec1e16a686454392fdfeb68bfdf9747e1299efec8",
+  "redacted_fields": []
+}

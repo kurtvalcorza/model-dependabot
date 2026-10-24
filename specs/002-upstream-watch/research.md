@@ -62,7 +62,8 @@ Figshare dataset.
 `tombstone` raises the removal alert (FR-005) with `tombstone.removal_date` and `tombstone.removal_reason.id`
 as evidence. HTTP 200 gives the licence (`metadata.license.id`) and, through `links.latest`, a newer version
 (watch event, FR-007). Before the response is stored, `tombstone.removed_by`, `tombstone.note` and
-`tombstone.citation_text` are removed (U10).
+`tombstone.citation_text` are removed, and so are the record's `metadata.creators`,
+`metadata.contributors` and `owners` (U10).
 
 **Rationale**: **Live-tested**: a record listed as deleted returned `410` with
 `{"status":410,"message":"Record deleted","tombstone":{"removal_date":…,"removal_reason":{"id":…},…}}`.
@@ -81,8 +82,8 @@ needed once the record API answers).
 **Decision**: For each hub dataset, `GET /api/datasets/{owner}/{name}?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha`.
 `disabled: true` raises the dataset removal alert (FR-005). Once per check run, if any hub dataset is in
 scope, the public takedown log `huggingface-legal/takedown-notices` `index.csv` is fetched (cached by ETag)
-and searched for the dataset's path; a match adds the entry's `date` (labelled `notice_date`) and its `file`
-to the evidence. A 307 redirect to another namespace (such as `defunct-datasets/`) records a `dataset_moved`
+and searched for the dataset's path; a match adds the entry's `date` (labelled `notice_date`) and its `reported_content`
+to the evidence, which points to the log by its URL and the notice date. A 307 redirect to another namespace (such as `defunct-datasets/`) records a `dataset_moved`
 watch event, never an alert. HTTP 401, 403 or 404 records a `dataset_unreachable` watch event.
 
 **Rationale**: **Live-tested** (landscape §9, re-checked 2026-10-24): `yavon/muxue` returns 200 with
@@ -92,11 +93,22 @@ watch event, never an alert. HTTP 401, 403 or 404 records a `dataset_unreachable
 records notices received, not confirmed disablements, so a log entry alone never raises an alert; it only
 enriches one already raised by `disabled: true`.
 
-**Consequence for 001's fetcher**: urllib follows redirects silently. The `Fetcher` interface gains a
-`redirected_from` field so a move is visible; this is an addition, not a change to 001's behaviour.
+**Consequence for 001's fetcher**: urllib follows redirects silently. The fetcher now follows them itself (at
+most five hops) and marks the final answer with `redirected_from`, so 001's adapters behave as before; a call
+that must see a move (hub dataset and model info) passes `follow_redirects=False` and gets the 3xx with
+`redirected_from` and `redirected_to`. This is an addition, not a change to 001's behaviour.
 
-**To confirm when recording fixtures**: the exact form of `reported_content` (full URL or path), so the
-match rule is written against real rows. Rows reading `Multiple` never match.
+**Confirmed when recording fixtures** (2026-10-24, `tests/fixtures/hf_takedowns/`, 67 data rows from
+2022-06-28 to 2026-09-04): `reported_content` is a bare repository path `owner/name` (51 rows, for example
+`pytorch/silero_tts`), with no host, no scheme and no `datasets/` or `spaces/` prefix, so a row cannot say
+whether it names a model, a dataset or a Space. The other 16 rows read `Multiple` in three spellings
+(`Multiple` 12, `multiple` 3, ` Multiple` with a leading space 1). The match rule is therefore: the row's
+value, with surrounding spaces removed, equals the hub dataset's `owner/name`; a value that reads
+`multiple` ignoring case and surrounding spaces never matches. The `/resolve/main/index.csv` URL answers
+307 to `/api/resolve-cache/datasets/huggingface-legal/takedown-notices/<commit>/index.csv?…`; the redaction
+rule matches the log's repository anywhere in a hub path, so the redirect target is redacted too. The `file`
+column (notice file names such as `2024/2024-04-08-<name>.pdf`) often embeds the requesting party's name, so
+U10 removes it with `requesting_entity` (owner ruling, 2026-10-24).
 
 ## U6. Figshare: watch events only
 
@@ -139,9 +151,12 @@ pair and never open the alert.
 `check --all --scheduled` is what the host scheduler runs; any other `check` is `on_demand`
 ([CLI contract](contracts/cli.md)).
 
-**To confirm when recording fixtures**: that a disabled **model** answers like a disabled dataset (200 with
-`disabled: true`). If it does not, the adapter fails safe to a watch event and the fixture records what the
-hub returned (tested in T042).
+**Confirmed when recording fixtures** (2026-10-24, `tests/fixtures/hf_upstream/model-disabled`): a
+disabled **model** answers like a disabled dataset. `sd-concepts-library/dyoudim-style`, found as the
+first of the takedown log's model-like `owner/name` paths whose model info has `disabled: true`, returned
+HTTP 200 with `{"disabled": true, "gated": false, "private": false, "cardData": {"license": "mit"},
+"sha": …, "lastModified": …}` under the `expand[]` request above, the same shape as `yavon/muxue`. The
+fail-safe to a watch event (T042) stays for any other shape.
 
 ## U8. Licence normalisation: the SPDX licence list, vendored, plus a small documented alias table
 
@@ -185,9 +200,14 @@ change `HIGH`, base model disabled `MODERATE`, base model no longer publicly ava
 personal data, the stored body is a redacted copy with the listed fields removed; the evidence record keeps the
 SHA-256 of the original body, the SHA-256 of the stored body and the list of fields removed. Fields removed:
 
-- takedown log `index.csv`: the `requesting_entity` column;
-- Zenodo tombstone: `removed_by`, `note` and `citation_text`;
-- Crossref and DataCite records: `author`, `creators`, `contributors` and `editor`;
+- takedown log `index.csv`: the `requesting_entity` and `file` columns (a notice's file name can name the
+  requesting party), leaving `date` and `reported_content`;
+- Zenodo: the tombstone's `removed_by`, `note` and `citation_text`, the record's `metadata.creators` and
+  `metadata.contributors` and its `owners`;
+- Figshare articles: `authors` and `citation`;
+- Crossref and DataCite records: `author`, `creators`, `contributors` and `editor`, wherever they appear (so a
+  Crossref `reference[].author` goes too); Crossref also loses each reference's free-text `unstructured`,
+  keeping the rest of the reference;
 - Hugging Face model and dataset info: nothing (`author` is the repository namespace, already part of the
   identifier).
 

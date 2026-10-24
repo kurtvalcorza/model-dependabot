@@ -31,6 +31,7 @@ from model_dependabot.reports import (
     history_report,
     history_text,
 )
+from model_dependabot.sources.doi_ra import ensure_agency
 from model_dependabot.sources.fetcher import Fetcher, SourceFailedError, UrlFetcher
 from model_dependabot.store import DISMISSAL_REASONS, Store
 
@@ -40,7 +41,8 @@ EXIT_SOURCE_FAILED = 2
 EXIT_UNEXPECTED = 3
 
 DEFAULT_DB = "./model-dependabot.db"
-CHECK_SOURCES = ("osv", "picklescan", "hf-scan")
+UPSTREAM_SOURCES = ("hf-hub", "hf-takedowns", "crossref", "datacite", "zenodo", "figshare")
+CHECK_SOURCES = ("osv", "picklescan", "hf-scan", *UPSTREAM_SOURCES)
 
 COMMANDS = (
     "register",
@@ -142,6 +144,11 @@ def build_parser() -> argparse.ArgumentParser:
     check = leaf(commands, "check", "check", "run the checks now")
     check.add_argument("model_id", metavar="ID", nargs="?")
     check.add_argument("--all", action="store_true", help="check every model's current version")
+    check.add_argument(
+        "--scheduled",
+        action="store_true",
+        help="mark the run as scheduled (with --all; what the host scheduler runs)",
+    )
     check.add_argument(
         "--source",
         dest="sources",
@@ -310,6 +317,22 @@ def _alert_text(payload: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _route_dois(store: Store, fetcher: Fetcher, entries: Sequence[Mapping[str, Any]]) -> None:
+    """Look up the registration agency of every dataset and tied paper DOI (research U1).
+
+    A failed lookup is recorded with an empty agency and tried again later; it never fails the
+    registration.
+    """
+    for entry in entries:
+        if entry["kind"] != "dataset":
+            continue
+        dois = list(entry.get("paper_dois") or [])
+        if entry["pinned"] and entry.get("hub_repo") is None:
+            dois.insert(0, entry["identifier"])
+        for doi in dois:
+            ensure_agency(store, fetcher, doi)
+
+
 def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
     """The built command handlers; ``fetcher`` replaces the real sources in tests."""
 
@@ -328,7 +351,9 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
                     f"model {model_id!r} is already registered; pass --model-id {model_id} to"
                     " register a new version"
                 )
-            entries = build_entries(manifest, _fetcher())
+            fetcher_ = _fetcher()
+            entries = build_entries(manifest, fetcher_)
+            _route_dois(store, fetcher_, entries)
             version = _record(
                 store,
                 model_id,
@@ -391,10 +416,15 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
             else:
                 _version_of(store, args.model_id, None)
                 model_ids, scope = [args.model_id], args.model_id
-            outcome = run_check(store, _fetcher(), model_ids, args.sources, scope=scope)
+            # contracts/cli.md: only ``check --all --scheduled`` is a scheduled run (FR-012).
+            trigger = "scheduled" if args.all and args.scheduled else "on_demand"
+            outcome = run_check(
+                store, _fetcher(), model_ids, args.sources, scope=scope, trigger=trigger
+            )
         payload = {
             "run_id": outcome.run_id,
             "scope": scope,
+            "trigger": trigger,
             "sources": outcome.sources,
             "models": outcome.models,
         }

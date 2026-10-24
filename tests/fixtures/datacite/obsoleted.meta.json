@@ -1,0 +1,17 @@
+{
+  "method": "GET",
+  "url": "https://api.datacite.org/dois/10.1594/pangaea.958394",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "etag": "W/\"37a6b1a23460294f0ff49938f1b352d3\""
+  },
+  "retrieved_at": "2026-10-24T05:47:21Z",
+  "body_file": "obsoleted.json",
+  "original_sha256": "37a6b1a23460294f0ff49938f1b352d3b817ece25353ac8c932925e8c52b3f3b",
+  "body_sha256": "1434ed424d2f8212f1cc7eb6d92bf9a631073a0a7251fc2beb3e86b6c4ad94cb",
+  "redacted_fields": [
+    "contributors",
+    "creators"
+  ]
+}

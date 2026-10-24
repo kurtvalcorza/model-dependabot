@@ -54,7 +54,7 @@ A failed request writes no observation (FR-018).
 | `card_hash` | Base model: SHA-256 of canonical `cardData` without licence fields and `new_version` (U7) |
 | `new_version_pointer` | Base model: `cardData.new_version` |
 | `updates` | Crossref: the `updated-by` entries (type, source, notice DOI, date) |
-| `removal` | Zenodo: `removal_date` and `removal_reason`; hub datasets: the matched takedown-log `notice_date` and `file` |
+| `removal` | Zenodo: `removal_date` and `removal_reason`; hub datasets: the matched takedown-log `notice_date` and `reported_content`, with the log's URL as evidence |
 | `evidence_ref` | The stored (redacted where U10 applies) response |
 
 Changes are found by comparing an observation with the previous observation of the same item from the same
@@ -66,9 +66,10 @@ source; the first observation is the baseline and raises nothing by itself.
 | :-- | :-- |
 | `date` | As published, labelled a **notice date**, never a removal date |
 | `reported_content` | As published; matched against hub dataset paths (U5) |
-| `file` | The notice file's path in the log repository |
 
-The `requesting_entity` column is dropped when the log is read and is never stored (FR-005, U10).
+The `requesting_entity` and `file` columns are dropped when the log is read and are never stored (FR-005,
+U10): a notice's file name can name the requesting party. A match yields only `notice_date` and
+`reported_content`; its evidence points to the log by its URL and the notice date.
 
 ## Evidence (extended)
 

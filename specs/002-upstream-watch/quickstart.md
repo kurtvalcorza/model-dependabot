@@ -64,9 +64,11 @@ closes because of that source; the check run records the source as failed.
 
 ## 7. Privacy
 
-After the suites above, search the evidence store and database for the fixtures' `requesting_entity` values,
-the Zenodo `citation_text` and `removed_by` values and the Crossref author names. Expected: none found; the
-evidence records list those fields in `redacted_fields`.
+After the suites above, search the evidence store and database for the fixtures' takedown-log
+`requesting_entity` and `file` values, the Zenodo `citation_text`, `removed_by`, `metadata.creators`,
+`metadata.contributors` and `owners` values, the Figshare `authors` and `citation` values and the Crossref and
+DataCite person names (including Crossref `reference[].author` and `reference[].unstructured`). Expected: none
+found; the evidence records list those fields in `redacted_fields`.
 
 ## 8. Live smoke tests (optional, marked `live`)
 

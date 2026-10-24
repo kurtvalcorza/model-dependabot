@@ -128,9 +128,15 @@ def run_check(
     sources: Sequence[str] = ("osv",),
     *,
     scope: str | None = None,
+    trigger: str = "on_demand",
 ) -> CheckOutcome:
-    """Check the current version of each model against the requested sources."""
-    run_id = store.start_check_run(scope=scope or ",".join(model_ids))
+    """Check the current version of each model against the requested sources.
+
+    ``trigger`` is ``scheduled`` for ``check --all --scheduled`` and ``on_demand`` otherwise. The
+    upstream sources of feature 002 are accepted here and reported as ``skipped`` until each is
+    wired in.
+    """
+    run_id = store.start_check_run(scope=scope or ",".join(model_ids), trigger=trigger)
     targets = []
     for model_id in model_ids:
         version = store.latest_version(model_id)

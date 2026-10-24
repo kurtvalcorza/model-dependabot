@@ -1,0 +1,16 @@
+{
+  "method": "GET",
+  "url": "https://api.figshare.com/v2/articles/34763127",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "retrieved_at": "2026-10-24T05:47:32Z",
+  "body_file": "cc-by-4.0.json",
+  "original_sha256": "488c02c45cd6d04e7c8b2f04211a4da90da2c55b6eed2c8b4cf2f24e302a7900",
+  "body_sha256": "4be47c313e998dc13e7fe566ffdff2802233277e39493331819ff3f90cf27398",
+  "redacted_fields": [
+    "authors",
+    "citation"
+  ]
+}

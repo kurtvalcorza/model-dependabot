@@ -1,0 +1,17 @@
+{
+  "method": "GET",
+  "url": "https://api.datacite.org/dois/10.6084/m9.figshare.29500136.v2",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "etag": "W/\"d59e91045256ce00e2d3c1020ecebb0c\""
+  },
+  "retrieved_at": "2026-10-24T05:47:24Z",
+  "body_file": "previous-version.json",
+  "original_sha256": "d59e91045256ce00e2d3c1020ecebb0ca54454fc3628eb3c31ea61eeda1c3f51",
+  "body_sha256": "fac7c46b661b615aa2f83b22ad99eb2ceff6ed39f21f4af8138605605b030a08",
+  "redacted_fields": [
+    "contributors",
+    "creators"
+  ]
+}

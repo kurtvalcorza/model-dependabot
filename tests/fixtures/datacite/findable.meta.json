@@ -1,0 +1,17 @@
+{
+  "method": "GET",
+  "url": "https://api.datacite.org/dois/10.5281/zenodo.3242074",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "etag": "W/\"cf7eb94e7307477b8219eab4f33c4c18\""
+  },
+  "retrieved_at": "2026-10-24T05:47:17Z",
+  "body_file": "findable.json",
+  "original_sha256": "cf7eb94e7307477b8219eab4f33c4c1885e44a6ab567b160dfd14b403418b305",
+  "body_sha256": "631c672487e21282e07d85d55b43e05742cdadf21e0e516ee4f3fa69a1429454",
+  "redacted_fields": [
+    "contributors",
+    "creators"
+  ]
+}

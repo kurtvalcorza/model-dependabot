@@ -1,0 +1,13 @@
+{
+  "method": "GET",
+  "url": "https://api.figshare.com/v2/articles/1",
+  "status": 404,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "retrieved_at": "2026-10-24T05:47:45Z",
+  "body_file": "not-found.json",
+  "original_sha256": "f7e6bb0b4b710635b66a37138ed96a4908b4779256389a982a9462b0f6c4bde2",
+  "body_sha256": "f7e6bb0b4b710635b66a37138ed96a4908b4779256389a982a9462b0f6c4bde2",
+  "redacted_fields": []
+}

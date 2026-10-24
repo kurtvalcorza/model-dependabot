@@ -15,7 +15,8 @@ revision = "0123abcd…"                       # exact commit; required for a pi
 
 ## Rules
 
-- A `[[datasets]]` table has either `doi` or `hub`, not both; both or neither is an error (exit code 1).
+- A `[[datasets]]` table has either `doi` or `hub`, not both. Both is an error (exit code 1). Neither is the
+  gap "no DOI", as in feature 001: registration never fails because of a gap.
 - `paper_doi` is a list of DOIs. The service checks them for retractions (FR-004) and never infers them.
 - A `hub` dataset without `revision` is a gap ("no revision") and is not checked, as for 001's hub weight files.
 - Licences are not written in the manifest: the service records what each source declares (FR-008).

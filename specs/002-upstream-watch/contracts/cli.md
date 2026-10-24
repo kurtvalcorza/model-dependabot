@@ -36,7 +36,7 @@ source.
       "cause": {"dataset": "hf-dataset:owner/name@0123abcd…", "host": "huggingface", "disabled": true, "notice_date": "2026-09-04", "reason": "no reason given"},
       "evidence": [
         {"source": "hf-hub", "url": "https://huggingface.co/api/datasets/owner/name?expand[]=disabled", "retrieved_at": "2026-10-24T02:15:00Z", "matched_identifier": "hf-dataset:owner/name@0123abcd…", "original_sha256": "…", "body_sha256": "…", "redacted_fields": []},
-        {"source": "hf-takedowns", "url": "https://huggingface.co/datasets/huggingface-legal/takedown-notices/resolve/main/index.csv", "retrieved_at": "2026-10-24T02:15:01Z", "matched_identifier": "hf-dataset:owner/name@0123abcd…", "original_sha256": "…", "body_sha256": "…", "redacted_fields": ["requesting_entity"], "detail": {"notice_date": "2026-09-04", "label": "notice date, not removal date"}}
+        {"source": "hf-takedowns", "url": "https://huggingface.co/datasets/huggingface-legal/takedown-notices/resolve/main/index.csv", "retrieved_at": "2026-10-24T02:15:01Z", "matched_identifier": "hf-dataset:owner/name@0123abcd…", "original_sha256": "…", "body_sha256": "…", "redacted_fields": ["file", "requesting_entity"], "detail": {"notice_date": "2026-09-04", "reported_content": "owner/name", "label": "notice date, not removal date"}}
       ]
     },
     {

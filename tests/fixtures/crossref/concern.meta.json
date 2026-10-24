@@ -1,0 +1,18 @@
+{
+  "method": "GET",
+  "url": "https://api.crossref.org/works/10.1016/j.lungcan.2003.10.006",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "x-rate-limit-limit": "5",
+    "x-rate-limit-interval": "1s",
+    "x-concurrency-limit": "1"
+  },
+  "retrieved_at": "2026-10-24T05:47:15Z",
+  "body_file": "concern.json",
+  "original_sha256": "6bc27b6697f5ac87ad0fbdc34d6911fe64c4f878b4a0da9f7e34823f3b5137fb",
+  "body_sha256": "d37563ec294e52bd6b4fc174f2f66040d389f4526e2febf09a588dfb4a412754",
+  "redacted_fields": [
+    "author"
+  ]
+}
