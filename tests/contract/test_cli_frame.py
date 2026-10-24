@@ -185,9 +185,9 @@ def test_an_unexpected_error_exits_3_without_a_traceback(
     assert "Traceback" not in err
 
 
-def test_a_command_not_built_yet_exits_3(capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_command_without_a_handler_exits_3(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(INVOCATIONS["history"], handlers={}) == EXIT_UNEXPECTED
-    assert "history" in capsys.readouterr().err
+    assert "no handler for the history command" in capsys.readouterr().err
 
 
 def test_help_exits_0(capsys: pytest.CaptureFixture[str]) -> None:

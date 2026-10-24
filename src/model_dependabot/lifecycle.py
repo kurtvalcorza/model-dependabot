@@ -1,8 +1,9 @@
 """Check runs, package alerts, watch events and evidence (data-model.md; FR-006 to FR-010, FR-016).
 
 A check run reads each requested source in full before it changes anything. If a source fails
-anywhere in the run, nothing it would have changed is changed: it is recorded as ``failed`` in the
-run and every alert is left as it was (FR-016, SC-007).
+anywhere in the run, nothing that depends on it is changed: it is recorded as ``failed`` in the run
+and every alert that depends on it is left as it was, while the sources that answered are applied
+as usual (FR-016, SC-007).
 
 For OSV, a package alert opens only when OSV lists the advisory for the exact pinned version and the
 local PEP 440 evaluation of the record's ranges agrees (research R2); when the two disagree, a watch
@@ -929,12 +930,45 @@ def _package_finding(
     return False, pinned[0]
 
 
+def _file_keys(item: Mapping[str, Any]) -> set[tuple[str, str]]:
+    """The hub repository and file, and the location, that name a weight file or a cause."""
+    keys: set[tuple[str, str]] = set()
+    if item.get("hub_repo") and item.get("hub_file"):
+        keys.add(("hub", f"{item['hub_repo']}/{item['hub_file']}"))
+    if item.get("location"):
+        keys.add(("location", str(item["location"])))
+    return keys
+
+
+def _unpinned_at(
+    cause: Mapping[str, Any],
+    earlier: Sequence[Mapping[str, Any]],
+    entries: Sequence[Mapping[str, Any]],
+) -> bool:
+    """Whether the new inventory has an unpinned entry for the file the cause was found in.
+
+    The file is named by the cause and by the earlier version's entry with the cause's
+    identifier. A gap (the hub was not reachable, say) is not proof the cause is gone.
+    """
+    wanted = _file_keys(cause)
+    for entry in earlier:
+        if entry["kind"] == "weight_file" and entry["identifier"] == cause["identifier"]:
+            wanted |= _file_keys(entry)
+    return any(
+        bool(_file_keys(entry) & wanted)
+        for entry in entries
+        if entry["kind"] == "weight_file" and not entry["pinned"]
+    )
+
+
 def reevaluate_version(store: Store, model_id: str, version: int) -> dict[str, list[int]]:
     """Settle the model's open alerts against a newly registered version (FR-014, SC-004).
 
     A cause the new inventory no longer has closes its alert as ``fixed`` by that version, with
-    the new inventory as evidence; a cause it still has carries the alert forward. Only the two
-    inventories are compared: no source is consulted, so a failed source cannot affect it.
+    the new inventory as evidence; a cause it still has carries the alert forward. An unpinned
+    entry for the same package or weight file is not proof the cause is gone, so the alert is
+    left as it was. Only the two inventories are compared: no source is consulted, so a failed
+    source cannot affect it.
     """
     result: dict[str, list[int]] = {"fixed": [], "carried_forward": []}
     record = store.get_version(model_id, version)
@@ -970,6 +1004,10 @@ def reevaluate_version(store: Store, model_id: str, version: int) -> dict[str, l
         else:
             entry = weights.get(cause["identifier"])
             present = entry is not None and bool(entry["pinned"])
+            if not present and _unpinned_at(
+                cause, store.entries(model_id, alert["current_version"]), entries
+            ):
+                continue  # only an unpinned entry for the file: neither fixed nor shown again
             if present and entry is not None:
                 cause["location"] = _where(entry)
             if alert["kind"] == FORMAT_POLICY_ALERT and present and code_free:

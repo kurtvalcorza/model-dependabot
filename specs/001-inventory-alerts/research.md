@@ -87,7 +87,8 @@ the inventory raises a `hub_scan` alert with severity `HIGH` (origin `policy`). 
 unrecognised responses become watch events. If a later verdict for the same hash is an explicit safe
 verdict, the alert closes as `cleared` with the new verdict as evidence (FR-023); a missing, pending or
 unrecognised later verdict changes nothing. Per-file hashes come from the tree API's `lfs.oid` and the
-revision from `X-Repo-Commit`.
+revision from the model-info `sha` at that revision (`X-Repo-Commit` wins when a response carries
+one; neither the tree nor the model-info API sent it on 2026-10-24, see `tests/fixtures/hf/NOTES.md`).
 
 **Rationale**: the hub scans with several engines (landscape §2); using it adds coverage at no cost. Because
 the interface is undocumented, failing safe to watch events keeps a format change from producing false

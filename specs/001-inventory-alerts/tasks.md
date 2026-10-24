@@ -12,7 +12,7 @@ description: "Task list for feature 001: model inventory with library and weight
 **Tests**: Required. Constitution principle V: tests are written before the code they test and must fail
 first; feed tests use recorded responses only, and the default test run makes no network calls.
 
-**Organization**: Tasks are grouped by user story so each story can be built and tested on its own.
+**Organisation**: Tasks are grouped by user story so each story can be built and tested on its own.
 
 ## Format: `[ID] [P?] [Story] Description`
 

@@ -102,7 +102,9 @@ Rules:
 - An alert closes as `cleared` (FR-023) when the source itself no longer shows the cause, with that
   observation as evidence: an advisory whose affected ranges are narrowed so the pinned version is no
   longer affected (OSV's match and the local evaluation both agree it is unaffected), or a hub verdict
-  for the matching hash that changes from unsafe to an explicit safe verdict. A missing, pending or
+  for the matching hash that changes from unsafe to an explicit safe verdict, or the owner changing
+  the model's format policy from strict to default, which clears its `format_policy` alerts at the
+  next check with the recorded policy (who set it and when) as evidence (constitution 1.0.2). A missing, pending or
   unrecognised hub verdict changes nothing, and nor does a source that failed in the run (FR-016).
   `withdrawn` stays for withdrawn advisories.
 
@@ -115,6 +117,7 @@ Rules:
  open ── advisory withdrawn ────────────────────▶ withdrawn  (withdrawal kept as evidence)
  open ── advisory ranges narrowed past the pinned version (OSV and local agree) ──▶ cleared  (new response kept as evidence)
  open ── hub verdict for the matching hash changes from unsafe to explicit safe ──▶ cleared  (new verdict kept as evidence)
+ open ── format policy changed from strict to default ──▶ cleared  (recorded policy kept as evidence)
  open ── person dismisses with a listed reason ─▶ dismissed  (reason, person, time recorded)
  open ── new version still has the cause ───────▶ open       (current_version moves forward)
  open ── advisory updated (severity, fixed version) ──▶ open (new values shown; earlier evidence kept)

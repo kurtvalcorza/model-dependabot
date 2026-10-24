@@ -16,7 +16,8 @@ from typing import Any
 
 import pytest
 
-from model_dependabot.lifecycle import reevaluate_version, run_check
+from model_dependabot.inventory.build import new_entry
+from model_dependabot.lifecycle import reevaluate_version, run_check, weight_cause_key
 from model_dependabot.sources.fetcher import RecordedFetcher
 from model_dependabot.store import Store
 
@@ -205,3 +206,68 @@ def test_a_code_free_sibling_in_a_new_version_fixes_the_format_policy_alert(
 def test_the_first_version_has_nothing_to_reevaluate(store: Store) -> None:
     version = store.add_version("m", {}, "0" * 64, VULNERABLE)
     assert reevaluate_version(store, "m", version) == {"fixed": [], "carried_forward": []}
+
+
+HUB_SHA = "a" * 64
+HUB_REVISION = "b" * 40
+HUB_FIELDS = {
+    "format": "pickle",
+    "can_run_code": True,
+    "hub_repo": "owner/repo",
+    "hub_file": "pytorch_model.bin",
+    "location": f"https://huggingface.co/owner/repo/resolve/{HUB_REVISION}/pytorch_model.bin",
+}
+
+
+def _hub_file(**fields: Any) -> dict[str, Any]:
+    return new_entry("weight_file", **(HUB_FIELDS | fields))
+
+
+def _open_weight_alert(store: Store, kind: str) -> int:
+    evidence_id = store.add_evidence(
+        source="huggingface.co",
+        url="",
+        retrieved_at=store.now(),
+        matched_identifier=f"sha256:{HUB_SHA}",
+        body=b"{}",
+        detail={},
+        run_id=None,
+    )
+    return store.insert_alert(
+        model_id="m",
+        kind=kind,
+        cause_key=weight_cause_key(kind, HUB_SHA),
+        cause={"identifier": f"sha256:{HUB_SHA}", **HUB_FIELDS},
+        severity="HIGH",
+        severity_origin="policy",
+        opened_in_version=1,
+        evidence_ids=[evidence_id],
+    )
+
+
+@pytest.mark.parametrize("kind", ["hub_scan", "format_policy"])
+def test_a_hub_file_the_hub_could_not_pin_is_not_proof_the_cause_is_gone(
+    store: Store, kind: str
+) -> None:
+    pinned = _hub_file(identifier=f"sha256:{HUB_SHA}", pinned=True, hub_revision=HUB_REVISION)
+    register(store, [pinned])
+    alert_id = _open_weight_alert(store, kind)
+
+    unreachable = _hub_file(pinned=False, gap_reason="hub not reachable: HTTP 503")
+    version = store.add_version("m", {"bomFormat": "CycloneDX"}, "1" * 64, [unreachable])
+    assert reevaluate_version(store, "m", version) == {"fixed": [], "carried_forward": []}
+    alert = store.get_alert(alert_id)
+    assert (alert["state"], alert["current_version"]) == ("open", 1)
+
+
+def test_a_hub_file_gone_from_the_new_version_still_closes_as_fixed(store: Store) -> None:
+    pinned = _hub_file(identifier=f"sha256:{HUB_SHA}", pinned=True, hub_revision=HUB_REVISION)
+    register(store, [pinned])
+    alert_id = _open_weight_alert(store, "hub_scan")
+
+    other = _hub_file(
+        pinned=False, gap_reason="hub not reachable", hub_file="other.bin", location=None
+    )
+    register(store, [other])
+    alert = store.get_alert(alert_id)
+    assert (alert["state"], alert["closed_by_version"]) == ("fixed", 2)

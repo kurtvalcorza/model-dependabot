@@ -133,3 +133,25 @@ def test_hub_verdicts_alert_only_for_unsafe_with_matching_hash(
     assert alert["kind"] == "hub_scan"
     assert alert["cause"]["verdict"] == "unsafe"
     assert alert["cause"]["identifier"].startswith("sha256:f9343d7d")
+
+
+def test_a_hub_that_fails_at_registration_leaves_the_hub_alert_open(
+    cli: Callable[..., tuple[int, Any]], tmp_path: Path, derive_hf: Callable[..., Path]
+) -> None:
+    path = manifest(tmp_path / "hub", "hub-model", [HUB_WEIGHT])
+    assert cli("register", str(path), recordings=derive_hf())[0] == EXIT_OK
+    unsafe = derive_hf(security=_flag_bin)
+    assert cli("check", "hub-model", "--source", "hf-scan", recordings=unsafe)[0] == EXIT_OK
+    [alert] = cli("alerts", "hub-model")[1]["alerts"]
+
+    down = tmp_path / "down"
+    down.mkdir()
+    for number, meta_path in enumerate(sorted(unsafe.glob("*.meta.json"))):
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        failed = {"method": meta["method"], "url": meta["url"], "error": "HTTP 503 after 4 tries"}
+        (down / f"{number}.meta.json").write_text(json.dumps(failed), encoding="utf-8")
+    code, registered = cli("register", str(path), "--model-id", "hub-model", recordings=down)
+    assert (code, registered["version"]) == (EXIT_OK, 2)
+
+    [kept] = cli("alerts", "hub-model")[1]["alerts"]
+    assert (kept["alert_id"], kept["state"]) == (alert["alert_id"], "open")

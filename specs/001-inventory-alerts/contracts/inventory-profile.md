@@ -20,7 +20,7 @@ Custom properties (the complete list; constitution II):
 | `model-dependabot:can-run-code` | weight file | `true` or `false` (FR-002) |
 | `model-dependabot:size` | weight file | Size in bytes, as a decimal string (FR-002); CycloneDX has no file-size field |
 | `model-dependabot:hub-repo` | hub-hosted weight file | The hub repository, `owner/name` |
-| `model-dependabot:hub-revision` | hub-hosted weight file | The full commit the file is pinned to (`X-Repo-Commit`, research R5) |
+| `model-dependabot:hub-revision` | hub-hosted weight file | The full commit the file is pinned to (the model-info `sha`, or `X-Repo-Commit` when a response carries one; research R5) |
 | `model-dependabot:hub-file` | hub-hosted weight file | The file's path in the repository, the key for the hub scan verdict (research R5) |
 | `model-dependabot:gap` | any entry | The gap reason (FR-003) |
 
