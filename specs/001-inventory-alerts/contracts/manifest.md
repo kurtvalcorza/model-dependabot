@@ -5,12 +5,12 @@ built-in `tomllib` and computes every hash itself; values in the manifest are in
 
 ```toml
 [model]
-id = "rice-pest-r50-v5"
-name = "Rice pest detector, RT-DETR r50 v5"
+id = "example-detector-v1"
+name = "Example object detector"
 owner = "Model owner"
 
 [[weights]]
-path = "runs/run-r50v5/best.pt"            # local file: hashed by the service
+path = "runs/train/best.pt"            # local file: hashed by the service
 
 [[weights]]
 hub = "hf:owner/model-repo"                 # a file on a model hub
@@ -18,15 +18,15 @@ revision = "0123abcd…"                       # exact commit; required for a pi
 file = "best.pt"
 
 [environment]
-lock = "requirements-kaggle.lock.txt"       # hash-locked: name==version with --hash lines
+lock = "requirements.lock.txt"       # hash-locked: name==version with --hash lines
 
 [base_model]
-hub = "hf:PekingU/rtdetr_r50vd"
-revision = "df939e661d8c52e80608d1ec566561aabd25a4e7"
+hub = "hf:example-org/example-base-model"
+revision = "0123456789abcdef0123456789abcdef01234567"
 
 [[datasets]]
-doi = "10.5281/zenodo.20066074"
-sha256 = "f4a0409977e0615e34f3cf2b936a5ca9dd3a91b153d239e314334ea40c2537f7"   # optional
+doi = "10.5281/zenodo.1234567"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"   # optional
 ```
 
 ## Rules

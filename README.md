@@ -68,7 +68,9 @@ manifest: `register` records the licence each source declares for the base model
 Only `model.id` is required. Anything missing or inexact is recorded as a gap with a reason (a hub file
 without a revision, a lock line without `==` or without a hash) and registration still succeeds.
 Unknown keys are an error, so a typo cannot silently drop a dependency. A hash-locked lock file can be
-produced with `uv export --format requirements-txt` or `pip-compile --generate-hashes`.
+produced with `uv export --format requirements-txt` or `pip-compile --generate-hashes`. Environment
+markers (`; sys_platform == "win32"` and the like) are not evaluated: every locked package is checked,
+so a platform-only package can raise an alert even where it is never installed.
 
 The full rules are in [`specs/001-inventory-alerts/contracts/manifest.md`](specs/001-inventory-alerts/contracts/manifest.md)
 and, for `paper_doi` and hub datasets, [`specs/002-upstream-watch/contracts/manifest.md`](specs/002-upstream-watch/contracts/manifest.md).

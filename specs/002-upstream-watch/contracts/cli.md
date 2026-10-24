@@ -45,7 +45,7 @@ source.
       "state": "open",
       "severity": "HIGH",
       "severity_origin": "policy",
-      "cause": {"item": "pkg:huggingface/owner/base@df939e66…", "recorded_licence": "Apache-2.0", "recorded_from": "inventory", "declared_licence": "cc-by-nc-4.0", "declared_normalised": "CC-BY-NC-4.0", "source": "hf-hub"},
+      "cause": {"item": "pkg:huggingface/owner/base@01234567…", "recorded_licence": "Apache-2.0", "recorded_from": "inventory", "declared_licence": "cc-by-nc-4.0", "declared_normalised": "CC-BY-NC-4.0", "source": "hf-hub"},
       "evidence": [{"source": "hf-hub", "…": "…"}]
     },
     {
@@ -54,12 +54,12 @@ source.
       "state": "open",
       "severity": "LOW",
       "severity_origin": "policy",
-      "cause": {"item": "pkg:huggingface/owner/base@df939e66…", "statement": "no longer publicly available (deleted or made private)", "refusals": ["2026-10-22T02:15:00Z", "2026-10-23T02:15:00Z"]},
+      "cause": {"item": "pkg:huggingface/owner/base@01234567…", "statement": "no longer publicly available (deleted or made private)", "refusals": ["2026-10-22T02:15:00Z", "2026-10-23T02:15:00Z"]},
       "evidence": [{"source": "hf-hub", "…": "…"}, {"source": "hf-hub", "…": "…"}]
     }
   ],
   "watch_events": [
-    {"kind": "base_model_new_revision", "identifier": "pkg:huggingface/owner/base@df939e66…", "detail": {"pinned": "df939e66…", "newest": "7a1c02b4…"}},
+    {"kind": "base_model_new_revision", "identifier": "pkg:huggingface/owner/base@01234567…", "detail": {"pinned": "01234567…", "newest": "7a1c02b4…"}},
     {"kind": "dataset_unreachable", "identifier": "10.6084/m9.figshare.0000000", "detail": {"source": "figshare", "http_status": 404}}
   ],
   "last_check": {"run_id": 57, "trigger": "scheduled", "sources": {"hf-hub": "ok", "hf-takedowns": "ok", "crossref": "ok", "datacite": "ok", "zenodo": "failed: timeout", "figshare": "skipped"}}

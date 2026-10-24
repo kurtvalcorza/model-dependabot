@@ -64,7 +64,7 @@ The service checks each weight file in a model's inventory for unsafe serialisat
 
 ### User Story 4 - Alerts close when a new model version fixes the cause (Priority: P2)
 
-When the owner registers a newer version of a model whose inventory no longer contains an alert's cause (the package is upgraded past the fixed version, or the weights are re-exported to a safe format), the alert closes automatically as fixed, naming the version that fixed it. Otherwise the owner or another authorised person can dismiss an alert with a recorded reason.
+When the owner registers a newer version of a model whose inventory no longer contains an alert's cause (the package is upgraded past the fixed version, or the weights are re-exported to a safe format), the alert closes automatically as fixed, naming the version that fixed it. Otherwise a person can dismiss an alert with a reason from the list, and the tool records the name they give.
 
 **Why this priority**: without automatic closure, alerts pile up and owners stop reading them.
 
@@ -135,7 +135,7 @@ For each model, the owner sees open alerts ordered by severity, watch events and
 **Lifecycle**
 
 - **FR-014**: The service MUST close an alert as fixed, naming the fixing version, when the owner registers a newer version of the model whose inventory no longer contains the alert's cause. This closure happens at registration by comparing the two inventories and consults no source.
-- **FR-015**: The service MUST let an authorised person dismiss an alert only with a reason from a fixed list and MUST record who, when and why.
+- **FR-015**: The service MUST let a person dismiss an alert only with a reason from a fixed list and MUST record who (the name given), when and why; the service does not authenticate people, so access to the database is the access control.
 - **FR-016**: The service MUST NOT close any alert because a source was unreachable or returned no data.
 - **FR-017**: The service MUST NOT change, delete, retrain, re-export or unpublish any model or file, and MUST NOT write to any model's repository.
 

@@ -5,7 +5,7 @@ two optional dataset keys.
 
 ```toml
 [[datasets]]
-doi = "10.5281/zenodo.20066074"
+doi = "10.5281/zenodo.1234567"
 paper_doi = ["10.1177/1758835919874651"]   # optional: papers the owner ties to this dataset
 
 [[datasets]]

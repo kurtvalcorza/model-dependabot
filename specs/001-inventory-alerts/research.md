@@ -153,6 +153,9 @@ records anything missing as a gap. An existing CycloneDX inventory can be import
 **Decision**: Read pip and uv hash-locked requirements files (`name==version` lines with `--hash=sha256:`
 options and backslash continuations). An entry is pinned only with an exact `==` version and at least one
 hash; anything else is a gap (FR-003). Names are normalised with `packaging.utils.canonicalize_name`.
+Environment markers (for example `; sys_platform == "win32"`) are not evaluated: every locked entry is
+checked, whatever platform the model runs on, so a platform-only package can raise an alert on a host
+that never installs it (a deliberate over-approximation, tested in `tests/unit/test_lockfile.py`).
 
 **Rationale**: the worked example's lock is uv-generated in this format; normalisation handles the
 spec's naming edge case.
