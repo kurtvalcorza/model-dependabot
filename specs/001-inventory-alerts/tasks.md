@@ -168,13 +168,13 @@ Single project: `src/model_dependabot/` and `tests/` at the repository root (pla
 
 ### Tests for User Story 5
 
-- [ ] T048 [P] [US5] Write failing tests in `tests/unit/test_reports.py`: ordering by severity (`CRITICAL`, `HIGH`, `MODERATE`, `LOW`, `UNKNOWN`), watch events listed separately, history shows `fixed`, `dismissed`, `withdrawn` or `cleared` with time and evidence (FR-018, FR-019)
-- [ ] T049 [P] [US5] Write failing contract tests in `tests/contract/test_cli_json.py` checking `alerts --json` and `history --json` against the shapes in contracts/cli.md
+- [X] T048 [P] [US5] Write failing tests in `tests/unit/test_reports.py`: ordering by severity (`CRITICAL`, `HIGH`, `MODERATE`, `LOW`, `UNKNOWN`), watch events listed separately, history shows `fixed`, `dismissed`, `withdrawn` or `cleared` with time and evidence (FR-018, FR-019)
+- [X] T049 [P] [US5] Write failing contract tests in `tests/contract/test_cli_json.py` checking `alerts --json` and `history --json` against the shapes in contracts/cli.md
 
 ### Implementation for User Story 5
 
-- [ ] T050 [US5] Implement `src/model_dependabot/reports.py` until T048 passes
-- [ ] T051 [US5] Wire `alerts` text and JSON output and `history` in `src/model_dependabot/cli.py` until T049 passes
+- [X] T050 [US5] Implement `src/model_dependabot/reports.py` until T048 passes
+- [X] T051 [US5] Wire `alerts` text and JSON output and `history` in `src/model_dependabot/cli.py` until T049 passes
 
 **Checkpoint**: all user stories work on their own
 
@@ -182,12 +182,12 @@ Single project: `src/model_dependabot/` and `tests/` at the repository root (pla
 
 ## Phase 8: Polish & Cross-Cutting Concerns
 
-- [ ] T052 [P] Add `live`-marked smoke tests in `tests/live/test_live_sources.py` that query OSV.dev and the Hugging Face API once each, to catch format changes; excluded from the default run
-- [ ] T053 [P] Write `README.md` usage (install, manifest, commands, scheduling with cron, a systemd timer and Windows Task Scheduler) and update `research/` links; British spelling, no serial comma, no institution names
-- [ ] T054a [P] Write a test in `tests/integration/test_never_writes.py` proving the service never writes (FR-017, constitution III): over `register`, `check`, `policy`, `alert dismiss` and `inventory export` on the worked example, a spying fetcher records every request and none is `PUT`, `PATCH` or `DELETE`; the only `POST` is to OSV's read-only `/v1/querybatch`; the SHA-256 and modification time of every registered local weight file, the manifest and the lock file are unchanged after `register` and after `check`
-- [ ] T054 Run the full suite with the network blocked and ruff with no findings; record the commands, counts and exit codes in `specs/001-inventory-alerts/validation.md`
+- [X] T052 [P] Add `live`-marked smoke tests in `tests/live/test_live_sources.py` that query OSV.dev and the Hugging Face API once each, to catch format changes; excluded from the default run
+- [X] T053 [P] Write `README.md` usage (install, manifest, commands, scheduling with cron, a systemd timer and Windows Task Scheduler) and update `research/` links; British spelling, no serial comma, no institution names
+- [X] T054a [P] Write a test in `tests/integration/test_never_writes.py` proving the service never writes (FR-017, constitution III): over `register`, `check`, `policy`, `alert dismiss` and `inventory export` on the worked example, a spying fetcher records every request and none is `PUT`, `PATCH` or `DELETE`; the only `POST` is to OSV's read-only `/v1/querybatch`; the SHA-256 and modification time of every registered local weight file, the manifest and the lock file are unchanged after `register` and after `check`
+- [X] T054 Run the full suite with the network blocked and ruff with no findings; record the commands, counts and exit codes in `specs/001-inventory-alerts/validation.md`
 - [ ] T055 Walk through quickstart.md sections 1 to 7 on a real model inventory (owner-provided), record each section's result in `specs/001-inventory-alerts/validation.md`, including the wall-clock time of `register` on the worked example (target under 5 minutes, SC-001) and of `check` on a model with about 100 locked packages (target under 60 seconds, plan.md Performance Goals), and fix anything it misses
-- [ ] T056 Neutrality and privacy check across `src/`, `tests/`, docs and commit messages: no institution names, no personal data in fixtures, generic User-Agent only
+- [X] T056 Neutrality and privacy check across `src/`, `tests/`, docs and commit messages: no institution names, no personal data in fixtures, generic User-Agent only
 
 ---
 

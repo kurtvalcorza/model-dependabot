@@ -10,6 +10,7 @@ import importlib.util
 import json
 import shutil
 import socket
+import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -36,6 +37,25 @@ def _block_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(socket.socket, "connect_ex", _blocked)
     monkeypatch.setattr(socket, "create_connection", _blocked)
     monkeypatch.setattr(socket, "getaddrinfo", _blocked)
+
+
+_connect = sqlite3.connect
+
+
+def _connect_unsynced(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+    connection = _connect(*args, **kwargs)
+    connection.execute("PRAGMA synchronous = OFF")
+    return connection
+
+
+@pytest.fixture(autouse=True)
+def _unsynced_sqlite(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test speed only: the store's database skips the disk sync on each commit in tests.
+
+    Production opens it with SQLite's default (``synchronous = FULL``); nothing the tests assert
+    depends on durability across a power loss.
+    """
+    monkeypatch.setattr(sqlite3, "connect", _connect_unsynced)
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"

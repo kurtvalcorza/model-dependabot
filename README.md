@@ -1,7 +1,224 @@
 # model-dependabot
 
-Dependency alerts for AI models: a Dependabot-style service that watches what a model depends on (code libraries, its weight files, the base model it was fine-tuned from, its training data, known model-family weaknesses) and raises an alert when one of them becomes vulnerable, changes or is withdrawn.
+Dependency alerts for AI models. You describe a model in a small manifest; the tool records a pinned
+inventory of what the model depends on (its weight files, the packages locked in its environment, the
+base model it was fine-tuned from and its training data) and then checks that inventory against
+published advisories and weight-file scans. When something it depends on becomes vulnerable or unsafe it
+raises an alert, and it closes the alert when a new version of the model fixes the cause or the source
+withdraws or clears it.
 
-Status: research. Nothing is built yet.
+It only reads. It never changes, deletes, retrains, re-exports or unpublishes a model or a file, and it
+never writes to a model's repository (see [What it never does](#what-it-never-does)).
 
-- `research/landscape.md`: the existing tools, standards and data feeds, each checked against primary sources.
+## Install
+
+You need Python 3.12 or later and [uv](https://docs.astral.sh/uv/).
+
+```bash
+git clone <this repository> model-dependabot
+cd model-dependabot
+uv sync
+uv run model-dependabot --help
+```
+
+`uv sync` creates a virtual environment in `.venv` with the pinned dependencies from `uv.lock`
+(`packaging`, `jsonschema`, `picklescan` and `cvss`) and the test tools.
+
+## The manifest
+
+A model is registered from a TOML manifest. Paths are resolved relative to the manifest file.
+
+```toml
+[model]
+id = "example-detector"            # required
+name = "Example detector"
+owner = "Model owner"
+
+[[weights]]
+path = "weights/best.pt"           # a local file: the tool hashes it
+
+[[weights]]
+hub = "hf:owner/model-repo"        # a file on the Hugging Face Hub
+revision = "0123abcd..."           # the exact commit; without it the file is a gap
+file = "model.safetensors"
+
+[environment]
+lock = "requirements.lock.txt"     # name==version lines with --hash options
+
+[base_model]
+hub = "hf:owner/base-model"
+revision = "0123abcd..."
+
+[[datasets]]
+doi = "10.5555/example-dataset"
+sha256 = "..."                     # optional
+```
+
+Only `model.id` is required. Anything missing or inexact is recorded as a gap with a reason (a hub file
+without a revision, a lock line without `==` or without a hash) and registration still succeeds.
+Unknown keys are an error, so a typo cannot silently drop a dependency. A hash-locked lock file can be
+produced with `uv export --format requirements-txt` or `pip-compile --generate-hashes`.
+
+The full rules are in [`specs/001-inventory-alerts/contracts/manifest.md`](specs/001-inventory-alerts/contracts/manifest.md).
+
+## Commands
+
+Every command takes `--db PATH` (default `./model-dependabot.db`) and `--json` for machine-readable
+output; both may go before or after the command name.
+
+| Command | What it does |
+| :-- | :-- |
+| `register MANIFEST.toml [--model-id ID]` | Registers a model, or with `--model-id` a new version of it. Hashes local files, pins hub files to their commit and records gaps. A new version re-evaluates the previous version's open alerts straight away: alerts whose cause is gone close as `fixed`, the rest carry forward |
+| `import BOM.json --model-id ID` | Registers a version from an existing CycloneDX inventory |
+| `inventory show ID [--version N]` | Lists the entries with their identifiers and the gaps with their reasons |
+| `inventory export ID [--version N] -o FILE` | Writes the stored CycloneDX 1.7 inventory, validated against the official schema |
+| `check (ID \| --all) [--source osv,picklescan,hf-scan]` | Runs the checks now and records a check run |
+| `policy ID --format (default\|strict) --by NAME` | Sets the model's weight-format policy, recording who set it and when. Under `default` a format that can run code when loaded is a watch event; under `strict` a code-capable weight file with no code-free file beside it in the same version raises an alert. Takes effect at the next check |
+| `alerts ID [--state open\|closed\|all]` | Lists alerts by severity (`CRITICAL`, `HIGH`, `MODERATE`, `LOW`, `UNKNOWN`), then the watch events, each with its evidence |
+| `alert show ALERT_ID` | One alert with all its evidence |
+| `alert dismiss ALERT_ID --reason REASON [--note TEXT] --by NAME` | Dismisses an alert; `REASON` is `not_used_at_runtime`, `risk_accepted`, `false_positive` or `fix_not_available` |
+| `history ID` | Closed alerts with how they closed (`fixed`, `dismissed`, `withdrawn` or `cleared`), when and on what evidence |
+
+Watch events are things worth knowing that are not alerts: a weight file in a format that can run code,
+a scan that could not finish, a hub file whose hash no longer matches what was registered. They never
+turn into alerts by repetition.
+
+A first session:
+
+```bash
+uv run model-dependabot register model.toml
+uv run model-dependabot inventory show example-detector
+uv run model-dependabot check example-detector
+uv run model-dependabot alerts example-detector
+uv run model-dependabot alert show 1
+```
+
+The JSON shapes are in [`specs/001-inventory-alerts/contracts/cli.md`](specs/001-inventory-alerts/contracts/cli.md).
+
+### Exit codes
+
+| Code | Meaning |
+| :-- | :-- |
+| 0 | Success. For `check`: the check completed, whether or not it found anything |
+| 1 | Invalid input (manifest, inventory or arguments) |
+| 2 | `check` finished but at least one source failed; alerts that depend on it were left unchanged |
+| 3 | Unexpected error |
+
+`check` never exits non-zero just because alerts exist, so a scheduler does not mistake findings for
+failures. Scripts read the `--json` output instead.
+
+## Scheduling
+
+Run `check --all` once a day; a new advisory then shows up as an alert within a day. Use absolute paths,
+because schedulers do not start in the repository. The examples assume the repository is at
+`/opt/model-dependabot` (or `C:\model-dependabot`) and the database at `/var/lib/model-dependabot/md.db`
+(or `C:\model-dependabot\md.db`).
+
+### cron
+
+```cron
+# m h dom mon dow  command
+15 6 * * *  cd /opt/model-dependabot && uv run model-dependabot check --all --db /var/lib/model-dependabot/md.db --json >> /var/log/model-dependabot.log 2>&1
+```
+
+### systemd timer
+
+`/etc/systemd/system/model-dependabot.service`:
+
+```ini
+[Unit]
+Description=model-dependabot daily check
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/model-dependabot
+ExecStart=/usr/local/bin/uv run model-dependabot check --all --db /var/lib/model-dependabot/md.db --json
+```
+
+`/etc/systemd/system/model-dependabot.timer`:
+
+```ini
+[Unit]
+Description=Run model-dependabot once a day
+
+[Timer]
+OnCalendar=*-*-* 06:15:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Then `systemctl daemon-reload && systemctl enable --now model-dependabot.timer`. The output goes to the
+journal (`journalctl -u model-dependabot`). Exit code 2 marks the run as failed in `systemctl status`,
+which is what you want when a source could not be reached.
+
+### Windows Task Scheduler
+
+From PowerShell:
+
+```powershell
+$action = New-ScheduledTaskAction -Execute "uv.exe" `
+    -Argument "run model-dependabot check --all --db C:\model-dependabot\md.db --json" `
+    -WorkingDirectory "C:\model-dependabot"
+$trigger = New-ScheduledTaskTrigger -Daily -At 6:15am
+Register-ScheduledTask -TaskName "model-dependabot" -Action $action -Trigger $trigger
+```
+
+The task's "Last Run Result" shows the exit code (0, 1, 2 or 3 as above).
+
+## Sources
+
+All requests are anonymous: no account, no token and no personal data. The User-Agent is the generic
+`model-dependabot/<version>`, and the tool refuses a User-Agent that carries an email address. Requests
+have timeouts, back off and retry on `429` and `5xx`, honour `Retry-After` and stay within each source's
+published limits.
+
+| Source | Used for | Requests |
+| :-- | :-- | :-- |
+| [OSV.dev](https://osv.dev) | Advisories for the locked PyPI packages | `POST /v1/querybatch` (a read-only query) and `GET /v1/vulns/{id}` |
+| [Hugging Face Hub API](https://huggingface.co/docs/hub/api) | Pinning hub files and base models to a commit; the hub's own security scan of hosted weight files | `GET /api/models/...` only |
+| [picklescan](https://github.com/mmaitre314/picklescan) | Scanning local pickle-based weight files for dangerous imports | None: runs locally and never loads the file |
+
+Severity comes from the advisory's own rating, else from its CVSS v3 or v4 vector (scored with the
+`cvss` package), else `UNKNOWN`; the alert says which.
+
+## The evidence store
+
+Every alert and watch event links to its evidence: the source, the URL, when it was retrieved, the exact
+identifier matched (for example `pkg:pypi/pillow@12.3.0` or `sha256:...`) and the SHA-256 of the raw
+response. The database is one SQLite file (`--db`); the raw responses are kept as files in an `evidence/`
+folder beside it, each named by its SHA-256, so any alert can be traced back to exactly what a source
+said at the time. A recorded model version and its inventory are immutable. Back up the database and the
+`evidence/` folder together.
+
+## What it never does
+
+- It never changes, deletes, retrains, re-exports or unpublishes a model or any file, and never writes
+  to a model's repository. Registering and checking leave every weight file, the manifest and the lock
+  file byte-for-byte unchanged (a test checks their SHA-256 and modification times).
+- It never sends `PUT`, `PATCH` or `DELETE`. The only `POST` is OSV's read-only query.
+- It never loads a weight file to inspect it: pickles are scanned as data, without running them.
+- It never sends a token, an account name or personal data to a source.
+- It never closes an alert because a source failed to answer; missing data leaves alerts as they were.
+
+The only files it writes are its own database, its `evidence/` folder and, when asked, the file named by
+`inventory export -o`.
+
+## Development
+
+```bash
+uv run pytest            # the offline suite; the network is blocked in tests
+uv run pytest -m live    # a few smoke tests against the real sources
+uv run ruff check
+```
+
+Tests run against recorded source responses in `tests/fixtures/`; `tools/record_fixtures.py` re-records
+them. The live tests are left out of the default run.
+
+## Background
+
+- [`research/landscape.md`](research/landscape.md): the existing tools, standards and data feeds, each
+  checked against primary sources.
+- [`specs/001-inventory-alerts/`](specs/001-inventory-alerts/): the specification, plan, data model,
+  contracts and validation record for this first feature.

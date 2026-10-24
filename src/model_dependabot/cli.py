@@ -21,7 +21,16 @@ from model_dependabot.inventory.build import build_entries
 from model_dependabot.inventory.cyclonedx import InventoryError, export_bom, import_bom, validate
 from model_dependabot.lifecycle import dismiss_alert, reevaluate_version, run_check
 from model_dependabot.manifest import ManifestError, load_manifest
-from model_dependabot.matching.severity import severity_rank
+from model_dependabot.reports import (
+    SCOPE_ALL,
+    alert_line,
+    alert_view,
+    alerts_report,
+    alerts_text,
+    evidence_line,
+    history_report,
+    history_text,
+)
 from model_dependabot.sources.fetcher import Fetcher, SourceFailedError, UrlFetcher
 from model_dependabot.store import DISMISSAL_REASONS, Store
 
@@ -280,58 +289,7 @@ def _record(
     return version
 
 
-# --- checks and alerts (US2) --------------------------------------------------------------------
-
-SCOPE_ALL = "all"
-CLOSED_STATES = ("fixed", "dismissed", "withdrawn", "cleared")
-EVIDENCE_FIELDS = ("source", "url", "retrieved_at", "matched_identifier", "body_sha256", "detail")
-
-
-def _evidence_view(evidence: Mapping[str, Any]) -> dict[str, Any]:
-    return {key: evidence[key] for key in EVIDENCE_FIELDS}
-
-
-def _alert_view(store: Store, alert: Mapping[str, Any]) -> dict[str, Any]:
-    return {
-        "alert_id": alert["alert_id"],
-        "kind": alert["kind"],
-        "state": alert["state"],
-        "severity": alert["severity"],
-        "severity_origin": alert["severity_origin"],
-        "cause": alert["cause"],
-        "opened_in_version": alert["opened_in_version"],
-        "current_version": alert["current_version"],
-        "opened_at": alert["opened_at"],
-        "closed_at": alert["closed_at"],
-        "closed_by_version": alert["closed_by_version"],
-        "dismissal_reason": alert["dismissal_reason"],
-        "dismissed_by": alert["dismissed_by"],
-        "note": alert["note"],
-        "evidence": [_evidence_view(e) for e in store.alert_evidence(alert["alert_id"])],
-    }
-
-
-def _watch_view(event: Mapping[str, Any]) -> dict[str, Any]:
-    return {
-        "kind": event["kind"],
-        "version": event["version"],
-        "identifier": event["entry_identifier"],
-        "detail": event["detail"],
-        "first_seen": event["first_seen"],
-        "last_seen": event["last_seen"],
-        "evidence": [_evidence_view(e) for e in event["evidence"]],
-    }
-
-
-def _alert_line(alert: Mapping[str, Any]) -> str:
-    cause = alert["cause"]
-    head = f"  #{alert['alert_id']} {alert['severity']:<8} {alert['state']:<9}"
-    if alert["kind"] == "package_advisory":
-        fixed = ", ".join(cause.get("fixed") or []) or "none published"
-        return (
-            f"{head} {cause['advisory_id']} {cause['package']}=={cause['version']} (fixed: {fixed})"
-        )
-    return f"{head} {alert['kind']} {cause.get('location')} ({cause.get('identifier')})"
+# --- checks and alerts (US2; the views are in reports.py, US5) ---------------------------------
 
 
 def _check_text(payload: Mapping[str, Any]) -> str:
@@ -346,22 +304,9 @@ def _check_text(payload: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _alerts_text(payload: Mapping[str, Any]) -> str:
-    lines = [f"{payload['model_id']} v{payload['current_version']}"]
-    lines.append(f"Alerts ({len(payload['alerts'])}):")
-    lines += [_alert_line(alert) for alert in payload["alerts"]]
-    lines.append(f"Watch events ({len(payload['watch_events'])}):")
-    lines += [f"  {event['kind']} {event['identifier']}" for event in payload["watch_events"]]
-    return "\n".join(lines)
-
-
 def _alert_text(payload: Mapping[str, Any]) -> str:
-    lines = [_alert_line(payload).strip(), f"Model: {payload['model_id']}"]
-    for evidence in payload["evidence"]:
-        lines.append(
-            f"  {evidence['source']} {evidence['url']} at {evidence['retrieved_at']}"
-            f" for {evidence['matched_identifier']} (sha256 {evidence['body_sha256']})"
-        )
+    lines = [alert_line(payload).strip(), f"Model: {payload['model_id']}"]
+    lines += [f"  {evidence_line(evidence)}" for evidence in payload["evidence"]]
     return "\n".join(lines)
 
 
@@ -476,33 +421,23 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
         return CommandResult(payload, text)
 
     def alerts(args: argparse.Namespace) -> CommandResult:
-        states = {"open": ["open"], "closed": list(CLOSED_STATES), "all": None}[args.state]
         with Store(args.db) as store:
-            version = _version_of(store, args.model_id, None)
-            listed = sorted(
-                store.alerts_for(args.model_id, states),
-                key=lambda alert: (severity_rank(alert["severity"]), alert["alert_id"]),
-            )
-            run = store.latest_check_run([args.model_id, SCOPE_ALL])
-            payload = {
-                "model_id": args.model_id,
-                "current_version": version,
-                "alerts": [_alert_view(store, alert) for alert in listed],
-                "watch_events": [
-                    _watch_view(event) for event in store.watch_events(args.model_id, version)
-                ],
-                "last_check": None
-                if run is None
-                else {"run_id": run["run_id"], "sources": run["sources"]},
-            }
-        return CommandResult(payload, _alerts_text(payload))
+            _version_of(store, args.model_id, None)
+            payload = alerts_report(store, args.model_id, state=args.state)
+        return CommandResult(payload, alerts_text(payload))
+
+    def history(args: argparse.Namespace) -> CommandResult:
+        with Store(args.db) as store:
+            _version_of(store, args.model_id, None)
+            payload = history_report(store, args.model_id)
+        return CommandResult(payload, history_text(payload))
 
     def alert_show(args: argparse.Namespace) -> CommandResult:
         with Store(args.db) as store:
             alert = store.get_alert(args.alert_id)
             if alert is None:
                 raise InvalidInputError(f"no alert {args.alert_id}")
-            payload = {"model_id": alert["model_id"], **_alert_view(store, alert)}
+            payload = {"model_id": alert["model_id"], **alert_view(store, alert)}
         return CommandResult(payload, _alert_text(payload))
 
     def alert_dismiss(args: argparse.Namespace) -> CommandResult:
@@ -513,7 +448,7 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
                 )
             except ValueError as error:
                 raise InvalidInputError(str(error)) from None
-            payload = {"model_id": alert["model_id"], **_alert_view(store, alert)}
+            payload = {"model_id": alert["model_id"], **alert_view(store, alert)}
         text = (
             f"Dismissed alert {alert['alert_id']} ({alert['dismissal_reason']}) by"
             f" {alert['dismissed_by']} at {alert['closed_at']}"
@@ -530,6 +465,7 @@ def make_handlers(fetcher: Fetcher | None = None) -> dict[str, Handler]:
         "alerts": alerts,
         "alert show": alert_show,
         "alert dismiss": alert_dismiss,
+        "history": history,
     }
 
 
