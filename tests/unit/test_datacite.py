@@ -49,6 +49,9 @@ def test_a_404_is_not_found() -> None:
     [
         ("https://zenodo.org/records/12584226", ("zenodo", "12584226")),
         ("https://zenodo.org/record/3242074", ("zenodo", "3242074")),
+        # DataCite's landing URL for Zenodo DOIs, seen live for 10.5281/zenodo.20066074 (T061).
+        ("https://zenodo.org/doi/10.5281/zenodo.20066074", ("zenodo", "20066074")),
+        ("https://zenodo.org/doi/10.5281/zenodo.x", ("zenodo", None)),
         ("https://figshare.com/articles/dataset/name/29500136/2", ("figshare", "29500136")),
         ("https://figshare.com/articles/dataset/name/29500136", ("figshare", "29500136")),
         ("https://springernature.figshare.com/articles/dataset/x/7104383", ("figshare", "7104383")),

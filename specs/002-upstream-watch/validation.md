@@ -71,3 +71,25 @@ Pattern `P = (the list itself is kept outside the repository)`
 | Privacy end to end | `tests/integration/test_privacy.py`: canary values put back into derived takedown-log, Zenodo, Figshare, Crossref and DataCite answers are found in no file under the database directory after `register` and `check --all --scheduled`, and the evidence lists the removed fields |
 
 No change was needed.
+
+## T061: walk-through on a real inventory
+
+Run 2026-10-24 by the orchestrator on the owner's choice of model, the rice pest detector (RT-DETR
+r50 v5), with every source live and anonymous. The manifest and databases lived in a temporary
+folder outside the repository; the model's own repositories were only read.
+
+| Step | Result | Exit |
+| :-- | :-- | :-- |
+| `register` | 3.5 s; licences recorded in the CycloneDX inventory: base model `PekingU/rtdetr_r50vd` `Apache-2.0`, dataset `10.5281/zenodo.20066074` `CC-BY-4.0`; DOI routed by doi.org to DataCite | 0 |
+| `check --all --scheduled` | 3.4 s; all nine sources ok, trigger `scheduled`; 0 alerts; 1 watch event (`pickle_format` for `best.pt`, as in 001) | 0 |
+| hub head revision | live head `df939e661d8c52e80608d1ec566561aabd25a4e7` equals the pinned revision, so no `base_model_new_revision` (correct) | n/a |
+
+**Defect found and fixed in this walk-through.** DataCite gives this Zenodo DOI the landing URL
+`https://zenodo.org/doi/10.5281/zenodo.20066074`. The router read only `/records/<id>` and
+`/record/<id>`, so it stored "Zenodo, no record id" and Zenodo was never asked: a silent skip. Fixed in
+`datacite.route` (reads the `/doi/…/zenodo.<id>` form; tested with the live URL) and in
+`lifecycle._routed` (a Zenodo routing stored without an id falls back to the DOI's own record id; the
+test fails without the fix). Re-running the check on the same database then asked Zenodo, which
+answered 200 for record 20066074 (`reachable`).
+
+Suite after the fix: `uv run pytest -q` 817 passed, 12 deselected, exit 0; `uv run ruff check` exit 0.

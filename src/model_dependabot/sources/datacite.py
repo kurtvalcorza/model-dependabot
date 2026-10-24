@@ -44,6 +44,12 @@ def _zenodo_id(segments: list[str]) -> str | None:
             index = segments.index(marker)
             if index + 1 < len(segments) and segments[index + 1].isdigit():
                 return segments[index + 1]
+    # DataCite's landing URL for Zenodo DOIs is https://zenodo.org/doi/10.5281/zenodo.<id>.
+    if segments and segments[0] == "doi":
+        last = segments[-1]
+        prefix = "zenodo."
+        if last.startswith(prefix) and last[len(prefix) :].isdigit():
+            return last[len(prefix) :]
     return None
 
 

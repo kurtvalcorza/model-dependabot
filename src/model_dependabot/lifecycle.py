@@ -1109,8 +1109,13 @@ def _routed(store: Store, dois: Sequence[str], repository: str) -> dict[str, str
     found = {}
     for doi in dois:
         routing = store.get_routing(doi)
-        if routing and routing["repository"] == repository and routing["repository_id"]:
+        if not routing or routing["repository"] != repository:
+            continue
+        if routing["repository_id"]:
             found[doi] = str(routing["repository_id"])
+        elif repository == "zenodo" and (record_id := zenodo.record_id_from_doi(doi)):
+            # Routed to Zenodo but the landing URL gave no id: never skip it silently (T061).
+            found[doi] = record_id
     return found
 
 
