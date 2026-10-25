@@ -13,7 +13,7 @@ import io
 import zipfile
 from collections.abc import Callable, Mapping
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, BinaryIO
 from urllib.parse import quote
 
 from model_dependabot.doi import normalise_doi
@@ -78,48 +78,62 @@ def check_entry(entry: dict[str, Any]) -> None:
         raise ValueError("an entry that is not pinned needs a gap_reason")
 
 
-def _is_pytorch_zip(head: bytes) -> bool:
+def _starts_like_zip(content: bytes | Path) -> bool:
+    if isinstance(content, Path):
+        with content.open("rb") as handle:
+            return handle.read(_HEAD_BYTES) == _ZIP_MAGIC
+    return content.startswith(_ZIP_MAGIC)
+
+
+def _is_pytorch_zip(content: bytes | Path) -> bool:
+    # A path is opened by zipfile itself, which reads only the central directory, never the
+    # whole file.
+    source = content if isinstance(content, Path) else io.BytesIO(content)
     try:
-        with zipfile.ZipFile(io.BytesIO(head)) as archive:
+        with zipfile.ZipFile(source) as archive:
             names = archive.namelist()
     except zipfile.BadZipFile:
         return False
     return any(PurePosixPath(name).name == "data.pkl" for name in names)
 
 
-def classify(name: str, head: bytes | None) -> tuple[str, bool | None]:
+def classify(name: str, head: bytes | Path | None) -> tuple[str, bool | None]:
     """A file's format and whether loading it can run code (research R4, FR-002).
 
-    ``head`` is the file's content when it is at hand (for a zip it must be the whole file) and
-    ``None`` for a hub file, which is then classified by its extension alone.
+    ``head`` is the local file's path, or its content when it is at hand (for a zip the content
+    must be the whole file), and ``None`` for a hub file, which is then classified by its
+    extension alone.
     """
     suffix = PurePosixPath(name).suffix.lower()
     if suffix in CODE_FREE_FORMATS:
         return CODE_FREE_FORMATS[suffix], False
-    if head is not None and head.startswith(_ZIP_MAGIC) and _is_pytorch_zip(head):
+    if head is not None and _starts_like_zip(head) and _is_pytorch_zip(head):
         return "pytorch-zip", True
     if suffix in PICKLE_FORMATS:
         return PICKLE_FORMATS[suffix], True
     return UNKNOWN_FORMAT, None
 
 
-def _hash_file(path: Path) -> tuple[str, int]:
+def hash_file(path: Path) -> tuple[str, int]:
+    """A file's SHA-256 and size, read in chunks so a large file is never held in memory."""
+    with path.open("rb") as handle:
+        return hash_stream(handle)
+
+
+def hash_stream(handle: BinaryIO) -> tuple[str, int]:
+    """The SHA-256 and size of what ``handle`` reads from where it is to its end, in chunks."""
     digest = hashlib.sha256()
     size = 0
-    with path.open("rb") as handle:
-        while chunk := handle.read(_CHUNK):
-            digest.update(chunk)
-            size += len(chunk)
+    while chunk := handle.read(_CHUNK):
+        digest.update(chunk)
+        size += len(chunk)
     return digest.hexdigest(), size
 
 
 def _local_weight(spec: WeightSpec) -> dict[str, Any]:
     assert spec.path is not None
-    sha256, size = _hash_file(spec.path)
-    with spec.path.open("rb") as handle:
-        is_zip = handle.read(_HEAD_BYTES) == _ZIP_MAGIC
-    head = spec.path.read_bytes() if is_zip else b""
-    file_format, can_run_code = classify(spec.path.name, head)
+    sha256, size = hash_file(spec.path)
+    file_format, can_run_code = classify(spec.path.name, spec.path)
     return new_entry(
         "weight_file",
         identifier=f"sha256:{sha256}",
@@ -181,9 +195,11 @@ def _packages(lock: Path) -> list[dict[str, Any]]:
     return entries
 
 
-def huggingface_purl(repo: str, commit: str) -> str:
+def huggingface_purl(repo: str, commit: str | None) -> str:
+    """The base model's purl at ``commit``; without one, the repository's versionless purl."""
     owner, name = repo.split("/", 1)
-    return f"pkg:huggingface/{quote(owner, safe='')}/{quote(name, safe='')}@{commit}"
+    purl = f"pkg:huggingface/{quote(owner, safe='')}/{quote(name, safe='')}"
+    return purl if commit is None else f"{purl}@{commit}"
 
 
 def _base_model(spec: BaseModelSpec) -> dict[str, Any]:

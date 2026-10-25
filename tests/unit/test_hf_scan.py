@@ -208,3 +208,70 @@ def test_a_failed_hub_changes_nothing(store: Store, derive_hf: Callable[..., Pat
     assert outcome.sources["hf-scan"] == "failed: timed out"
     assert store.alerts_for("m") == []
     assert set(kinds(store)) == {"pickle_format"}  # from the inventory, not from the hub
+
+
+# --- a clean verdict describes the hub's head commit only (review Gemini F3, phase B3) ------------
+
+OLD_PIN = "f" * 40
+
+
+def _pinned_at(file: str, sha256: str, revision: str | None) -> dict[str, Any]:
+    entry = hub_entry(file, sha256)
+    entry["hub_revision"] = revision
+    return entry
+
+
+def _tree_requests(fetcher: RecordedFetcher) -> list[str]:
+    return [url for _, url, _ in fetcher.requests if "/tree/" in url]
+
+
+def _check_with(store: Store, root: Path, entries: list[dict[str, Any]]) -> RecordedFetcher:
+    store.add_version("m", {}, "0" * 64, entries)
+    fetcher = RecordedFetcher(root)
+    run_check(store, fetcher, ["m"], ["hf-scan"])
+    return fetcher
+
+
+def test_a_clean_verdict_at_the_pinned_revision_needs_no_tree(
+    store: Store, derive_hf: Callable[..., Path]
+) -> None:
+    fetcher = _check_with(store, derive_hf(), [BIN])
+    assert _tree_requests(fetcher) == []
+    assert set(kinds(store)) == {"pickle_format"}
+
+
+def test_a_clean_head_verdict_stands_when_the_head_file_has_the_pinned_hash(
+    store: Store, derive_hf: Callable[..., Path]
+) -> None:
+    fetcher = _check_with(
+        store, derive_hf(), [_pinned_at("pytorch_model.bin", EICAR_BIN_SHA256, OLD_PIN)]
+    )
+    assert _tree_requests(fetcher) == [
+        f"https://huggingface.co/api/models/{EICAR_REPO}/tree/{EICAR_COMMIT}?expand=true"
+    ]
+    assert store.alerts_for("m") == []
+    assert set(kinds(store)) == {"pickle_format"}
+
+
+def test_a_clean_head_verdict_for_a_different_file_is_a_hash_mismatch(
+    store: Store, derive_hf: Callable[..., Path]
+) -> None:
+    _check_with(store, derive_hf(), [_pinned_at("pytorch_model.bin", "ab" * 32, OLD_PIN)])
+    assert store.alerts_for("m") == []
+    event = kinds(store)["hash_mismatch"]
+    detail = event["detail"]
+    assert detail["verdict"] == "clean"
+    assert detail["hub_commit"] == EICAR_COMMIT
+    assert detail["pinned_revision"] == OLD_PIN
+    assert detail["inventory_sha256"] == "ab" * 32
+    assert detail["hub_sha256"] == EICAR_BIN_SHA256
+
+
+def test_a_clean_head_verdict_for_a_file_absent_at_head_is_hub_scan_unknown(
+    store: Store, derive_hf: Callable[..., Path]
+) -> None:
+    _check_with(store, derive_hf(), [_pinned_at("absent.bin", "cd" * 32, OLD_PIN)])
+    assert store.alerts_for("m") == []
+    event = kinds(store)["hub_scan_unknown"]
+    assert event["detail"]["pinned_revision"] == OLD_PIN
+    assert "not at the hub's head commit" in event["detail"]["reason"]

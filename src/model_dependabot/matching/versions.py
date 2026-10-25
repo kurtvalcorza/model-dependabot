@@ -1,16 +1,25 @@
 """Local evaluation of OSV affected ranges under PEP 440 (research R2).
 
-OSV's own match is the first opinion; this module is the second. A version is affected when it is
-listed in ``affected[].versions`` or falls inside an ``ECOSYSTEM`` range of ``affected[].ranges``:
-events are walked in version order, ``introduced`` opening an interval, ``fixed`` closing it
-(exclusive) and ``last_affected`` closing it (inclusive). Other range types (``GIT``,
-``SEMVER``) do not describe PyPI versions and are ignored. Versions compare under PEP 440 with
-``packaging``, so pre-releases sort before their release.
+This is a consistency check on the OSV record that OSV itself matched, not a second source: it
+re-reads the same record's ranges locally. A version is affected when it is listed in
+``affected[].versions`` or falls inside an ``ECOSYSTEM`` range of ``affected[].ranges``, following
+the OSV schema's evaluation rules: events are walked in version order, ``introduced`` opening an
+interval (``"0"`` meaning before every version), ``fixed`` closing it (exclusive) and
+``last_affected`` closing it (inclusive); a version is inside the range only if it is also below
+at least one ``limit`` (exclusive; ``"*"`` means infinity, and no ``limit`` means an implicit
+``"*"``). Other range types (``GIT``, ``SEMVER``) do not describe PyPI versions and are ignored.
+Versions compare under PEP 440 with ``packaging``, so pre-releases sort before their release.
+
+A range that cannot be evaluated (an event value that is not a PEP 440 version, an unknown event
+kind, no ``introduced`` event or both ``fixed`` and ``last_affected`` events, which the OSV schema
+forbids in one range) and a pinned version that is not a PEP 440 version are reported as
+unevaluated, with the reason, rather than as "not affected".
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from packaging.utils import canonicalize_name
@@ -47,11 +56,43 @@ def _event_key(event: Mapping[str, str]) -> tuple[int, Version, int]:
     return (1, parsed, _EVENT_ORDER.get(kind, 9))
 
 
+def _range_problem(events: list[Mapping[str, str]]) -> str | None:
+    """Why the range cannot be evaluated, or ``None`` when it can."""
+    if not any(len(event) == 1 and "introduced" in event for event in events):
+        return "range has no introduced event"
+    for event in events:
+        if len(event) != 1:
+            return f"event {dict(event)!r} does not name exactly one kind"
+        kind, value = next(iter(event.items()))
+        if kind not in _EVENT_ORDER:
+            return f"unknown event kind {kind!r}"
+        if not isinstance(value, str):
+            return f"{kind} value {value!r} is not a string"
+        if kind == "introduced" and value == "0":
+            continue
+        if kind == "limit" and value == "*":
+            continue
+        if _version(value) is None:
+            return f"{kind} value {value!r} is not a PEP 440 version"
+    kinds = {kind for event in events for kind in event}
+    if {"fixed", "last_affected"} <= kinds:
+        # The OSV schema forbids the two in one range, so its meaning is not defined.
+        return "range has both fixed and last_affected events"
+    return None
+
+
+def _before_limits(parsed: Version, events: list[Mapping[str, str]]) -> bool:
+    limits = [event["limit"] for event in events if "limit" in event]
+    if not limits:
+        return True  # an implicit "*"
+    return any(limit == "*" or parsed < Version(limit) for limit in limits)
+
+
 def _in_range(parsed: Version, events: list[Mapping[str, str]]) -> bool:
-    try:
-        ordered = sorted(events, key=_event_key)
-    except InvalidVersion:
+    """OSV ``IncludedInRanges`` for one evaluable range (checked by ``_range_problem`` first)."""
+    if not _before_limits(parsed, events):
         return False
+    ordered = sorted((event for event in events if "limit" not in event), key=_event_key)
     affected = False
     for event in ordered:
         kind, value = next(iter(event.items()))
@@ -66,17 +107,48 @@ def _in_range(parsed: Version, events: list[Mapping[str, str]]) -> bool:
     return affected
 
 
-def version_affected(version: str, affected: Mapping[str, Any]) -> bool:
-    """Whether ``version`` is inside one ``affected[]`` entry of an OSV record."""
+@dataclass(frozen=True)
+class Evaluation:
+    """The local reading of an OSV record for one pinned version.
+
+    ``affected`` is true when some entry lists or covers the version. When it is false,
+    ``evaluated`` says whether every range that could cover the version was read: false means
+    "cannot say", with ``reasons`` naming why, not "not affected".
+    """
+
+    affected: bool
+    evaluated: bool
+    reasons: tuple[str, ...] = ()
+
+
+def evaluate_affected(version: str, affected: Mapping[str, Any]) -> Evaluation:
+    """Evaluate ``version`` against one ``affected[]`` entry of an OSV record."""
     parsed = _version(version)
     if _listed(version, parsed, list(affected.get("versions") or [])):
-        return True
+        return Evaluation(affected=True, evaluated=True)
+    ranges = [r for r in affected.get("ranges") or [] if r.get("type") == "ECOSYSTEM"]
     if parsed is None:
-        return False
-    for range_ in affected.get("ranges") or []:
-        if range_.get("type") == "ECOSYSTEM" and _in_range(parsed, range_.get("events") or []):
-            return True
-    return False
+        if not ranges:
+            return Evaluation(affected=False, evaluated=True)
+        return Evaluation(
+            affected=False,
+            evaluated=False,
+            reasons=(f"pinned version {version!r} is not a PEP 440 version",),
+        )
+    reasons: list[str] = []
+    for range_ in ranges:
+        events = list(range_.get("events") or [])
+        problem = _range_problem(events)
+        if problem is not None:
+            reasons.append(problem)
+        elif _in_range(parsed, events):
+            return Evaluation(affected=True, evaluated=True)
+    return Evaluation(affected=False, evaluated=not reasons, reasons=tuple(reasons))
+
+
+def version_affected(version: str, affected: Mapping[str, Any]) -> bool:
+    """Whether ``version`` is inside one ``affected[]`` entry of an OSV record."""
+    return evaluate_affected(version, affected).affected
 
 
 def _entries(advisory: Mapping[str, Any], name: str) -> list[Mapping[str, Any]]:
@@ -89,9 +161,20 @@ def _entries(advisory: Mapping[str, Any], name: str) -> list[Mapping[str, Any]]:
     ]
 
 
+def evaluate_advisory(advisory: Mapping[str, Any], name: str, version: str) -> Evaluation:
+    """Evaluate the advisory for the PyPI package ``name`` at exactly ``version``."""
+    reasons: list[str] = []
+    for entry in _entries(advisory, name):
+        result = evaluate_affected(version, entry)
+        if result.affected:
+            return result
+        reasons.extend(reason for reason in result.reasons if reason not in reasons)
+    return Evaluation(affected=False, evaluated=not reasons, reasons=tuple(reasons))
+
+
 def advisory_affects(advisory: Mapping[str, Any], name: str, version: str) -> bool:
     """Whether the advisory affects the PyPI package ``name`` at exactly ``version``."""
-    return any(version_affected(version, entry) for entry in _entries(advisory, name))
+    return evaluate_advisory(advisory, name, version).affected
 
 
 def fixed_versions(advisory: Mapping[str, Any], name: str) -> list[str]:

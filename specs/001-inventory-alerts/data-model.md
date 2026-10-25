@@ -70,7 +70,7 @@ A source that failed in a run cannot close or change any alert in that run (FR-0
 | `retrieved_at` | UTC timestamp |
 | `matched_identifier` | The exact inventory identifier matched (FR-019) |
 | `body_sha256` | Hash of the stored raw response (content-addressed file) |
-| `detail` | For example the local range recomputation, or the scanner's dangerous globals |
+| `detail` | For example the local range evaluation (and why a range could not be read), or the scanner's dangerous globals |
 
 For a `format_policy` alert the owner's recorded policy is the primary source (constitution I): `source`
 is `format-policy`, `url` is empty, `retrieved_at` is the check time, `matched_identifier` is the file's
@@ -95,8 +95,8 @@ Rules:
 
 - At most one `open` alert per `model_id` and `cause_key` (FR-010): one open alert per model, advisory
   and package, carried forward across versions.
-- An alert is raised only on a confirmed match: for packages, OSV's match and the local recomputation
-  agree (research R2); for weight files, a `dangerous` scan result or an explicit hub "unsafe" verdict
+- An alert is raised only on a confirmed match: for packages, OSV's match and the local consistency
+  check on the same OSV record agree (research R2); for weight files, a `dangerous` scan result or an explicit hub "unsafe" verdict
   for the matching hash (R4, R5); under the `strict` format policy, a code-capable file with no
   code-free file beside it in the same version (FR-021), with the policy as evidence.
 - An alert closes as `cleared` (FR-023) when the source itself no longer shows the cause, with that
@@ -120,9 +120,14 @@ Rules:
  open ── format policy changed from strict to default ──▶ cleared  (recorded policy kept as evidence)
  open ── person dismisses with a listed reason ─▶ dismissed  (reason, person, time recorded)
  open ── new version still has the cause ───────▶ open       (current_version moves forward)
+ open ── new version names the item only in a gap ─▶ open, unchanged (a gap is not removal; FR-016)
  open ── advisory updated (severity, fixed version) ──▶ open (new values shown; earlier evidence kept)
  fixed / dismissed / withdrawn / cleared ── cause found again in the current version ──▶ a new open alert
 ```
+
+Which identity each kind is compared at, and which source can clear or withdraw it, is in the
+identity and clearance table of `specs/002-upstream-watch/data-model.md`. `withdrawn` needs explicit
+withdrawal evidence (an OSV record marked withdrawn); a cause that is merely no longer listed is `cleared`.
 
 Dismissal reasons (fixed list): `not_used_at_runtime`, `risk_accepted`, `false_positive`,
 `fix_not_available`, plus an optional note.

@@ -162,7 +162,8 @@ def test_a_disabled_hub_dataset_listed_in_the_log_shows_the_notice_date(
     check(store, derive_upstream(changes={"hf_takedowns/index": lambda _: log}), "m")
     (alert,) = alerts(store, "m")
     assert alert["kind"] == "dataset_removed"
-    assert alert["cause_key"] == f"dataset_removed:{MUXUE}"
+    # A disabled hub dataset is keyed by its repository, not the revision.
+    assert alert["cause_key"] == "dataset_removed:hf-dataset:yavon/muxue"
     assert_policy_high(alert)
     cause = alert["cause"]
     assert (cause["host"], cause["disabled"]) == ("huggingface", True)
@@ -270,7 +271,7 @@ def test_a_correction_adds_evidence_to_an_open_retraction_alert(
     assert kinds(store, "m") == []
 
 
-def test_a_retraction_alert_closes_as_withdrawn_when_crossref_lists_none(
+def test_a_retraction_alert_is_cleared_when_crossref_lists_none(
     store: Store, derive_upstream: Callable[..., Path]
 ) -> None:
     register(store, "m", [doi_dataset(ZENODO_FINDABLE, [RETRACTED])])
@@ -281,7 +282,8 @@ def test_a_retraction_alert_closes_as_withdrawn_when_crossref_lists_none(
     outcome = check(store, derive_upstream(changes={"crossref/retracted": _no_retraction}), "m")
     assert alert["alert_id"] in outcome.models[0]["closed"]
     closed = store.get_alert(alert["alert_id"])
-    assert closed is not None and closed["state"] == "withdrawn"
+    # Absence is the source's current state, not a published withdrawal (research U12).
+    assert closed is not None and closed["state"] == "cleared"
     latest = store.alert_evidence(alert["alert_id"])[-1]
     body = json.loads(store.read_body(latest["body_sha256"]))
     assert latest["source"] == "crossref" and "updated-by" not in body["message"]
@@ -421,7 +423,9 @@ def test_a_paper_tied_to_a_hub_dataset_is_checked_too(
     crossref(store, RETRACTED)
     check(store, derive_upstream(), "m", sources=("crossref",))
     (alert,) = alerts(store, "m")
-    assert alert["cause_key"] == f"paper_retracted:{MUXUE}:{RETRACTED}"
+    assert (
+        alert["cause_key"] == f"paper_retracted:hf-dataset:yavon/muxue:{RETRACTED}"
+    )  # by repository
 
 
 # An obviously fictional paper DOI under arXiv's DataCite prefix; doi.org's answer is derived.

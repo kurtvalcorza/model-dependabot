@@ -98,6 +98,12 @@ a scan that could not finish, a hub file whose hash no longer matches what was r
 of the base model, a newer version of a dataset, a licence that cannot be recognised. They never turn
 into alerts by repetition.
 
+A package alert needs OSV's match and a local evaluation of the same OSV record to agree. The local
+evaluation is a consistency check, not a second source: when the two disagree, or the record's ranges
+cannot be read, the result is a watch event that says which. The hub's scan verdict describes the
+repository's head commit; for a file pinned at another revision the head file's hash is compared with
+the pinned one before a clean result is accepted.
+
 ### Upstream checks
 
 | Alert | Raised when | Severity |
@@ -110,10 +116,15 @@ into alerts by repetition.
 | `base_model_disabled` | The hub reports the base model disabled | `MODERATE` |
 | `base_model_unavailable` | The hub has refused the base model in scheduled checks spanning at least 24 hours | `LOW` |
 
-These severities are set by policy, and the alerts say so (`severity_origin: "policy"`). A retraction
-alert closes as `withdrawn` when the retraction is no longer listed; a licence, disabled or unavailable
-alert closes as `cleared` when the source no longer shows the cause; any of them closes as `fixed` when a
-new version no longer depends on the item.
+These severities are set by policy, and the alerts say so (`severity_origin: "policy"`). A retraction,
+licence, disabled or unavailable alert closes as `cleared` when the source that reported it no longer shows
+the cause in a successful, well-formed answer; a licence alert needs every source that reported the change
+to answer so, and a source that failed or was not asked keeps it open. `withdrawn` is used only for an
+OSV advisory marked withdrawn. Any of them closes as `fixed` when a new version no longer depends on the
+item. A disabled or unavailable base model and a disabled hub dataset are states of the repository, and
+a base model's or hub dataset's licence and a paper tied to a hub dataset are read for the repository, so
+pinning another revision of the same repository keeps the alert open; an entry missing its pin (a gap)
+never counts as a fix.
 
 Licences are normalised against the SPDX licence list and exceptions list, version 3.29.0, vendored in
 [`src/model_dependabot/licences/`](src/model_dependabot/licences/README.md) with their SHA-256 and a short
@@ -214,7 +225,9 @@ The task's "Last Run Result" shows the exit code (0, 1, 2 or 3 as above).
 All requests are anonymous: no account, no token and no personal data. The User-Agent is the generic
 `model-dependabot/<version>`, and the tool refuses a User-Agent that carries an email address. Requests
 have timeouts, back off and retry on `429` and `5xx`, honour `Retry-After` and stay within each source's
-published limits.
+published limits. A `GET` answer that carries an ETag is cached in the database (the `etag_cache` table,
+with its body, already stripped of personal data, in `evidence/`), so a later run asks again with
+`If-None-Match`; a `304 Not Modified` reuses the stored body, retrieved at the time of that run.
 
 | Source | Used for | Requests |
 | :-- | :-- | :-- |
@@ -274,7 +287,25 @@ uv run ruff check
 ```
 
 Tests run against recorded source responses in `tests/fixtures/`; `tools/record_fixtures.py` re-records
-them. The live tests are left out of the default run.
+them. The live tests are left out of the default run. `tests/property/` drives the alert lifecycle through
+random sequences of registrations, source answers and checks with `hypothesis`, against the identity and
+clearance table of `specs/002-upstream-watch/data-model.md`; the default run is derandomised, and setting
+`MODEL_DEPENDABOT_PROPERTY_EXAMPLES` to a number runs that many random sequences instead.
+
+`.github/workflows/live-compat.yml` runs the live tests once a week (Mondays 03:17 UTC, or by hand from the
+Actions tab) and keeps their JUnit results as a workflow artifact for 90 days, so a change in a source's
+answers shows up between releases. It is never run on a push or pull request, reads the sources
+anonymously and needs no secrets.
+
+### Limitations
+
+- The fixture tests are contract tests: they show the tool behaves as specified on recorded and derived
+  answers. They are not accuracy estimates. Field detection and false-closure rates will be reported from a
+  held-out corpus (`research/heldout/`, being prepared).
+- A live check is a point-in-time reading of each source; a passing weekly run says the sources answered
+  in the expected shape that day, not that no incident was missed.
+- A retraction, removal or licence change is a signal for a person to review. It is not proof that the
+  model is harmed, and a licence change is not a legal conclusion about a version already in use.
 
 ## Background
 

@@ -96,7 +96,7 @@ The owner sees, as watch events rather than alerts, changes upstream that may ma
 - A source is unreachable or rate-limited during a check: nothing opens, changes or closes because of it; the check run records the source as failed; an unreachable base model counts toward "no longer publicly available" only when the hub answered with a refusal, not when the request failed or timed out.
 - The same dataset appears in several models: each model gets its own alert.
 - A dataset is identified only by a hub repository, without a DOI: retraction and removal records cannot apply; licence and availability checks still do.
-- A retraction notice is itself later retracted or corrected: the alert shows the update; a withdrawn notice closes the alert with the withdrawal as evidence.
+- A retraction notice is itself later retracted or corrected: the alert shows the update; once a well-formed Crossref answer no longer lists any retraction, the alert closes as cleared with that answer as evidence.
 - A licence identifier the service cannot interpret: watch event, not alert.
 - A dataset's removal record has no stated reason: the alert still opens and says the reason was not given.
 - A model with no base model or no datasets in its inventory: nothing to check for those; no error.
@@ -138,9 +138,9 @@ The owner sees, as watch events rather than alerts, changes upstream that may ma
 
 - **FR-014**: Every alert and watch event in this feature MUST carry evidence as defined in feature 001: source, retrieval time and the exact identifier matched.
 - **FR-015**: An alert MUST close as fixed when the owner registers a newer model version whose inventory no longer depends on the affected base model or dataset (feature 001 rules); a person MAY dismiss it with a listed reason.
-- **FR-016**: A "no longer publicly available" alert MUST close when the base model becomes publicly reachable again; a licence change alert MUST close when the declared licence returns to the recorded one; a retraction alert MUST close as withdrawn if the retraction notice is withdrawn.
+- **FR-016**: A "no longer publicly available" alert MUST close when the base model becomes publicly reachable again; a licence change alert MUST close when the declared licence returns to the recorded one at every source that reported the change; a retraction alert MUST close as cleared when a successful, well-formed Crossref answer no longer lists the retraction, and MUST NOT close as withdrawn without explicit withdrawal evidence.
 - **FR-017**: The service MUST NOT change any model, dataset or repository.
-- **FR-018**: The service MUST NOT change any alert's state because of a source that failed during a check.
+- **FR-018**: The service MUST NOT change any alert's state because of a source that failed during a check. An alert raised on one source's report (such as a licence change) MUST be cleared only by a successful answer from that same source; if that source failed or was not asked in the check, the alert MUST stay open whatever other sources report.
 - **FR-019**: Every alert in this feature MUST state its severity as follows: retraction and removal alerts High; licence change alerts High; base model disabled alerts Moderate; "no longer publicly available" alerts Low (feature 001's severity values `HIGH`, `MODERATE` and `LOW`; research U9).
 
 ### Key Entities
@@ -155,12 +155,14 @@ The owner sees, as watch events rather than alerts, changes upstream that may ma
 
 ### Measurable Outcomes
 
-- **SC-001**: On a test set of recorded retraction and removal records, 100% of datasets named in them raise an alert and 0 datasets not named do.
-- **SC-002**: On a test set of recorded licence pairs, every real change raises an alert and 0 spelling, case or alias differences do.
+- **SC-001**: On the recorded fixture cases of retraction and removal records, every dataset named in them raises an alert and no dataset not named does.
+- **SC-002**: On the recorded fixture cases of licence pairs, every real change raises an alert and no spelling, case or alias difference does.
 - **SC-003**: A base model unreachable on only one check never raises an alert; one unreachable on two consecutive scheduled checks at least 24 hours apart always does, and so does one refused on every scheduled check of an unbroken run that spans at least 24 hours, even when no two consecutive checks are a full 24 hours apart.
 - **SC-004**: 100% of alerts and watch events in this feature show their source, retrieval time and the exact identifier matched.
 - **SC-005**: When any source is unavailable during a check, 0 alerts change state because of it.
 - **SC-006**: A retraction or removal published for a registered model's dataset appears as an alert within one scheduled check interval after the source publishes it.
+
+The criteria above that count alerts over recorded cases are met by the fixture suite: they show deterministic behaviour on recorded and derived source answers, which makes them contract tests, not estimates of accuracy in use. Detection and false-alert rates in the field will be reported from the held-out corpus (`research/heldout/`, being prepared); no such rate is claimed here.
 
 ## Assumptions
 

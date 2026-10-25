@@ -9,7 +9,7 @@
 A command-line service that registers a trained model as a pinned inventory (CycloneDX 1.7 JSON: weight
 files by SHA-256, packages by purl, base model by `pkg:huggingface` purl at a commit, datasets by DOI),
 then checks it daily or on request. Packages are matched against OSV.dev advisories, with OSV's match
-re-checked locally by PEP 440 range evaluation; weight files are classified by format and pickle files
+checked for consistency by evaluating the same record's ranges locally under PEP 440; weight files are classified by format and pickle files
 scanned statically with `picklescan`, plus the Hugging Face scan verdict for hub-hosted files. Alerts
 need a confirmed match and carry stored evidence; everything uncertain is a watch event. A newer model
 version closes the alerts whose cause it removed; a source that withdraws or clears the cause closes its

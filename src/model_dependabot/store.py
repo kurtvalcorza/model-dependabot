@@ -10,7 +10,10 @@ Feature 002 adds upstream observations, the DOI routing cache and the takedown l
 ``requesting_entity`` column), the check run's ``trigger``, and the evidence fields
 ``original_sha256`` and ``redacted_fields`` (research U10). Tables are created with
 ``CREATE TABLE IF NOT EXISTS``, so a fresh database has them; a database created by feature 001
-is not migrated.
+is not migrated. The ETag cache (``etag_cache``, read through ``EtagCache``) is created the same
+way, so an existing database gains it when opened. One data migration runs on open: open
+repository-wide alerts written with a revision in their cause key are rekeyed by repository
+(``_rekey_repository_alerts``).
 """
 
 from __future__ import annotations
@@ -18,14 +21,19 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
 from typing import Any
 
+from model_dependabot.sources.fetcher import Headers, Response
+
 ENTRY_KINDS = ("weight_file", "package", "base_model", "dataset")
+# A hub dataset's paper retraction keyed by revision (before 003): repository, revision, paper DOI.
+_PAPER_KEY = re.compile(r"^(?P<repo>paper_retracted:hf-dataset:[^@:]+)@[^:]+(?P<paper>:.+)$")
 ALERT_KINDS = (
     "package_advisory",
     "weight_file_scan",
@@ -248,6 +256,19 @@ CREATE TABLE IF NOT EXISTS watch_event_evidence (
     PRIMARY KEY (watch_event_id, evidence_id)
 );
 
+-- Review C2, research U13: the ETag cache, kept across runs so a later run revalidates with
+-- If-None-Match. One row per URL; the body is the redacted one, kept in the evidence store.
+CREATE TABLE IF NOT EXISTS etag_cache (
+    url TEXT PRIMARY KEY,
+    etag TEXT NOT NULL,
+    status INTEGER NOT NULL,
+    headers TEXT NOT NULL,
+    body_sha256 TEXT NOT NULL,
+    original_sha256 TEXT NOT NULL,
+    redacted_fields TEXT NOT NULL,
+    retrieved_at TEXT NOT NULL
+);
+
 -- FR-005: a recorded model version and its inventory never change.
 CREATE TRIGGER IF NOT EXISTS model_versions_no_update BEFORE UPDATE ON model_versions
 BEGIN SELECT RAISE(ABORT, 'a recorded model version is immutable (FR-005)'); END;
@@ -323,6 +344,48 @@ class Store:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
+        self._rekey_repository_alerts()
+
+    def _rekey_repository_alerts(self) -> None:
+        """Key open repository-wide alerts by repository, not revision (003, identity table).
+
+        Before 003, ``base_model_disabled``, ``base_model_unavailable`` and a hub dataset's
+        ``dataset_removed`` were keyed by the pinned revision (``...@<commit>``), as were
+        ``licence_changed`` for a base model or hub dataset and ``paper_retracted`` for a hub
+        dataset. Their cause is a state or observation of the whole repository, so they are now
+        keyed without it. An open alert with an
+        old key is rekeyed when the database is opened; nothing else about it changes. Should
+        another open alert already hold the new key (two revisions of one repository open at
+        once), the old one is left as it is rather than merged.
+        """
+        rows = self.conn.execute(
+            "SELECT alert_id, model_id, cause_key FROM alerts WHERE state = 'open' AND ("
+            " kind IN ('base_model_disabled', 'base_model_unavailable')"
+            " OR (kind = 'dataset_removed' AND cause_key LIKE 'dataset_removed:hf-dataset:%')"
+            " OR (kind = 'licence_changed' AND (cause_key LIKE 'licence_changed:hf-dataset:%'"
+            "  OR cause_key LIKE 'licence_changed:pkg:huggingface/%'))"
+            " OR (kind = 'paper_retracted' AND cause_key LIKE 'paper_retracted:hf-dataset:%'))"
+            " AND cause_key LIKE '%@%'"
+        ).fetchall()
+        for row in rows:
+            if row["cause_key"].startswith("paper_retracted:"):
+                # paper_retracted:hf-dataset:owner/name@<revision>:<paper DOI>
+                match = _PAPER_KEY.match(row["cause_key"])
+                if match is None:
+                    continue
+                new_key = match["repo"] + match["paper"]
+            else:
+                new_key = row["cause_key"].rsplit("@", 1)[0]
+            with self.conn:
+                taken = self.conn.execute(
+                    "SELECT 1 FROM alerts WHERE model_id = ? AND cause_key = ? AND state = 'open'",
+                    (row["model_id"], new_key),
+                ).fetchone()
+                if taken is None:
+                    self.conn.execute(
+                        "UPDATE alerts SET cause_key = ? WHERE alert_id = ?",
+                        (new_key, row["alert_id"]),
+                    )
 
     def __enter__(self) -> Store:
         return self
@@ -916,6 +979,17 @@ class Store:
         rows = self.conn.execute(query + " ORDER BY o.observation_id", params).fetchall()
         return [self._observation(row) for row in rows]
 
+    def observations_in_repository(self, repository: str) -> list[dict[str, Any]]:
+        """Observations of every revision of a hub repository (``repository@<revision>`` items,
+        or the repository itself), oldest first."""
+        prefix = f"{repository}@"
+        rows = self.conn.execute(
+            self._OBSERVATION_QUERY + " WHERE o.item = ? OR substr(o.item, 1, ?) = ?"
+            " ORDER BY o.observation_id",
+            (repository, len(prefix), prefix),
+        ).fetchall()
+        return [self._observation(row) for row in rows]
+
     def previous_observation(self, item: str, source: str, before: int) -> dict[str, Any] | None:
         """The latest observation of ``item`` from ``source`` older than observation ``before``."""
         row = self.conn.execute(
@@ -990,3 +1064,76 @@ class Store:
             "SELECT date, reported_content FROM takedown_notices ORDER BY notice_id"
         )
         return [dict(row) for row in rows]
+
+
+# Headers that are never kept in the ETag cache: they belong to one exchange, not to the body.
+_UNCACHED_HEADERS = frozenset({"set-cookie", "set-cookie2", "date", "age"})
+
+
+class EtagCache(MutableMapping[str, Response]):
+    """The fetcher's ETag cache kept in the store, so it lasts across runs (research U13).
+
+    ``UrlFetcher`` stores a ``2xx`` response that carries an ETag, after its body has passed
+    through the source's redaction rule, and later sends that ETag in ``If-None-Match``; a
+    ``304`` then serves the cached response with the new retrieval time. The body is written to
+    the evidence store by its SHA-256, so only the redacted body is ever kept. A row whose body is
+    missing or no longer matches its hash is a miss, and the next request is unconditional.
+    """
+
+    def __init__(self, store: Store) -> None:
+        self._store = store
+
+    def __getitem__(self, url: str) -> Response:
+        row = self._store.conn.execute("SELECT * FROM etag_cache WHERE url = ?", (url,)).fetchone()
+        if row is None:
+            raise KeyError(url)
+        try:
+            body = self._store.read_body(row["body_sha256"])
+        except (OSError, ValueError):
+            raise KeyError(url) from None
+        return Response(
+            status=row["status"],
+            body=body,
+            url=row["url"],
+            retrieved_at=datetime.strptime(row["retrieved_at"], "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=UTC
+            ),
+            headers=Headers(json.loads(row["headers"])),
+            original_sha256=row["original_sha256"],
+            redacted_fields=tuple(json.loads(row["redacted_fields"])),
+        )
+
+    def __setitem__(self, url: str, response: Response) -> None:
+        etag = response.headers.get("ETag")
+        if not etag:
+            raise ValueError("only a response with an ETag can be cached")
+        headers = {k: v for k, v in response.headers.items() if k not in _UNCACHED_HEADERS}
+        digest = self._store.put_body(response.body)
+        with self._store.conn:
+            self._store.conn.execute(
+                "INSERT OR REPLACE INTO etag_cache (url, etag, status, headers, body_sha256,"
+                " original_sha256, redacted_fields, retrieved_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    url,
+                    etag,
+                    response.status,
+                    json.dumps(headers, sort_keys=True),
+                    digest,
+                    response.original_sha256,
+                    json.dumps(list(response.redacted_fields)),
+                    utc_text(response.retrieved_at),
+                ),
+            )
+
+    def __delitem__(self, url: str) -> None:
+        with self._store.conn:
+            deleted = self._store.conn.execute("DELETE FROM etag_cache WHERE url = ?", (url,))
+        if deleted.rowcount == 0:
+            raise KeyError(url)
+
+    def __iter__(self) -> Iterator[str]:
+        rows = self._store.conn.execute("SELECT url FROM etag_cache ORDER BY url").fetchall()
+        return iter([row["url"] for row in rows])
+
+    def __len__(self) -> int:
+        return int(self._store.conn.execute("SELECT COUNT(*) FROM etag_cache").fetchone()[0])

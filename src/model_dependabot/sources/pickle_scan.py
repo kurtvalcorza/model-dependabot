@@ -1,6 +1,7 @@
 """Static scan of pickle-based weight files with ``picklescan`` (research R4; FR-011, FR-022).
 
-The scan goes through ``picklescan.scanner.scan_bytes``, which disassembles the pickle stream with
+The scan goes through ``picklescan.scanner.scan_bytes`` (on a file handle for a file on disk, so
+the file is never read whole into memory), which disassembles the pickle stream with
 ``pickletools`` and never executes it: nothing here unpickles a file. Each imported global comes
 back as ``innocuous``, ``suspicious`` or ``dangerous``; the global names are the evidence.
 
@@ -15,10 +16,12 @@ zip archive the scanner does not expose a position, so it is ``None``.
 from __future__ import annotations
 
 import io
+import os
 import zipfile
 from dataclasses import dataclass, field
+from pathlib import Path
 from posixpath import splitext
-from typing import Any
+from typing import Any, BinaryIO
 
 from picklescan import scanner
 
@@ -89,25 +92,46 @@ class ScanReport:
 
 def scan(data: bytes, file_name: str) -> ScanReport:
     """Scan one file's bytes; ``file_name`` gives the extension the scanner dispatches on."""
+    return _scan_stream(io.BytesIO(data), file_name, len(data))
+
+
+def scan_path(path: Path, file_name: str | None = None) -> ScanReport:
+    """Scan a file on disk through a file handle, so a large file is never read whole.
+
+    Raises ``OSError`` if the file cannot be opened.
+    """
+    with path.open("rb") as handle:
+        return scan_handle(handle, file_name or path.name)
+
+
+def scan_handle(handle: BinaryIO, file_name: str) -> ScanReport:
+    """Scan an open file from its start. The scanner seeks (a zip archive is read from its end),
+    so it is given the handle, not a stream it must read in order."""
+    handle.seek(0)
+    size = os.fstat(handle.fileno()).st_size
+    return _scan_stream(handle, file_name, size)
+
+
+def _scan_stream(stream: BinaryIO, file_name: str, size: int) -> ScanReport:
     extension = splitext(file_name)[1].lower() or None
-    stream = io.BytesIO(data)
     try:
         result = scanner.scan_bytes(stream, file_name, extension)
     except Exception as error:  # the scanner gave up: incomplete, never clean (FR-022)
         return ScanReport(
-            file_name, len(data), complete=False, position=None, error=f"scanner error: {error}"
+            file_name, size, complete=False, position=None, error=f"scanner error: {error}"
         )
     findings = tuple(
         Finding(str(found.module), str(found.name), found.safety.value) for found in result.globals
     )
-    if zipfile.is_zipfile(io.BytesIO(data)):
+    # After reading a stream to its end the scanner sits one byte before it; after a stop it
+    # sits one byte past the first byte it could not read. Record it before checking for a zip.
+    reached = stream.tell()
+    stream.seek(0)
+    if zipfile.is_zipfile(stream):
         complete = not result.scan_err
-        position = len(data) if complete else None
+        position = size if complete else None
     else:
-        # After reading a stream to its end the scanner sits one byte before it; after a stop it
-        # sits one byte past the first byte it could not read.
-        reached = stream.tell()
-        complete = not result.scan_err and reached >= len(data) - 1
-        position = len(data) if complete else max(reached - 1, 0)
+        complete = not result.scan_err and reached >= size - 1
+        position = size if complete else max(reached - 1, 0)
     error = None if complete else "scanner stopped before the end of the file"
-    return ScanReport(file_name, len(data), findings, complete, position, error)
+    return ScanReport(file_name, size, findings, complete, position, error)

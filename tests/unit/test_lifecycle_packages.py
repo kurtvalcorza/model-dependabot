@@ -261,3 +261,66 @@ def test_a_check_run_records_its_sources(store: Store) -> None:
     assert run["sources"] == {"osv": "ok"}
     assert run["finished_at"] is not None
     assert store.latest_check_run()["run_id"] == outcome.run_id
+
+
+# --- OSV ``limit`` and unevaluable ranges in the lifecycle (review F5, phase B1) -----------------
+
+
+def test_an_explicit_infinite_limit_raises_the_alert(
+    store: Store, derive_osv: Callable[..., Path]
+) -> None:
+    def star(advisory: dict[str, Any]) -> dict[str, Any]:
+        advisory["affected"][0]["ranges"][0]["events"] = [{"introduced": "12.0.0"}, {"limit": "*"}]
+        advisory["affected"][0].pop("versions", None)
+        return advisory
+
+    root = derive_osv({f"vuln-{CP9V}": star})
+    _register(store, "m", VULNERABLE)
+    _check(store, root, "m")
+    assert sorted(_open(store, "m")) == [R24, CP9V]
+    assert store.watch_events("m") == []
+
+
+def test_an_unevaluable_range_is_a_watch_event_that_says_why(
+    store: Store, derive_osv: Callable[..., Path]
+) -> None:
+    def bogus(advisory: dict[str, Any]) -> dict[str, Any]:
+        advisory["affected"][0]["ranges"][0]["events"] = [{"introduced": "twelve!"}]
+        advisory["affected"][0].pop("versions", None)
+        return advisory
+
+    root = derive_osv({f"vuln-{CP9V}": bogus})
+    _register(store, "m", VULNERABLE)
+    _check(store, root, "m")
+    assert sorted(_open(store, "m")) == [R24]
+    [event] = store.watch_events("m")
+    assert event["kind"] == "advisory_unmatched"
+    recorded = event["detail"]["advisories"][CP9V]
+    assert recorded["osv_match"] is True
+    assert recorded["local_match"] is False
+    assert recorded["local_unevaluated"] == ["introduced value 'twelve!' is not a PEP 440 version"]
+
+
+def test_an_open_alert_is_not_cleared_when_the_local_check_cannot_evaluate(
+    store: Store, derive_osv: Callable[..., Path]
+) -> None:
+    _register(store, "m", VULNERABLE)
+    _check(store, OSV, "m")
+    assert CP9V in _open(store, "m")
+
+    def unlisted(answer: dict[str, Any]) -> dict[str, Any]:
+        answer["results"][0]["vulns"] = [
+            vuln for vuln in answer["results"][0].get("vulns") or [] if vuln["id"] != CP9V
+        ]
+        return answer
+
+    def bogus(advisory: dict[str, Any]) -> dict[str, Any]:
+        advisory["affected"][0]["ranges"][0]["events"] = [{"introduced": "twelve!"}]
+        advisory["affected"][0].pop("versions", None)
+        return advisory
+
+    root = derive_osv({"querybatch-vulnerable": unlisted, f"vuln-{CP9V}": bogus})
+    _check(store, root, "m")
+    assert CP9V in _open(store, "m")
+    [event] = store.watch_events("m")
+    assert event["detail"]["advisories"][CP9V]["local_unevaluated"]

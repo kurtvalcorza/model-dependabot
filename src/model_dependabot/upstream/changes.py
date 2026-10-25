@@ -74,12 +74,25 @@ class LicenceReference:
     observation_id: int | None
 
 
-def licence_reference(store: Store, entry: Mapping[str, Any]) -> LicenceReference | None:
-    """The licence an item's declared licences are compared with, or ``None`` if none yet."""
+def licence_reference(
+    store: Store, entry: Mapping[str, Any], scope: str | None = None
+) -> LicenceReference | None:
+    """The licence an item's declared licences are compared with, or ``None`` if none yet.
+
+    With ``scope`` (a hub repository's identity), the baseline is the first observation that
+    declared a licence for any revision of that repository: a hub licence is read from the
+    repository's info, so re-pinning a revision does not start a new baseline (identity and
+    clearance table).
+    """
     licence = recorded(entry.get("recorded_licence"), entry.get("licence_form"))
     if licence is not None:
         return LicenceReference(licence, "inventory", None)
-    for observation in store.observations(entry["identifier"]):
+    found = (
+        store.observations(entry["identifier"])
+        if scope is None
+        else store.observations_in_repository(scope)
+    )
+    for observation in found:
         if observation["source"] in LICENCE_SOURCES and observation["declared_licence"]:
             baseline = normalise(observation["declared_licence"])
             return LicenceReference(baseline, "baseline", observation["observation_id"])
