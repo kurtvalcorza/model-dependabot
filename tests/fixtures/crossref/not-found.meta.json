@@ -1,0 +1,16 @@
+{
+  "method": "GET",
+  "url": "https://api.crossref.org/works/10.1177/model-dependabot-fixture-does-not-exist",
+  "status": 404,
+  "headers": {
+    "content-type": "text/plain",
+    "x-rate-limit-limit": "5",
+    "x-rate-limit-interval": "1s",
+    "x-concurrency-limit": "1"
+  },
+  "retrieved_at": "2026-10-24T05:47:16Z",
+  "body_file": "not-found.json",
+  "original_sha256": "ae8462e3af85ca7577aaa97ff22a194f9dfd7fada58cf4944b53d2fdfa7b1f92",
+  "body_sha256": "ae8462e3af85ca7577aaa97ff22a194f9dfd7fada58cf4944b53d2fdfa7b1f92",
+  "redacted_fields": []
+}

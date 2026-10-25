@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "url": "https://huggingface.co/api/models/openai-community/gpt2?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha&expand[]=lastModified",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "etag": "W/\"108-FoxC2kReBLlmTWmpGYVJhHcpWQs\""
+  },
+  "retrieved_at": "2026-10-24T05:47:46Z",
+  "body_file": "model-normal.json",
+  "original_sha256": "a81d177558d52e184f92a252b8e0115b7d2a16cc323303d4472ff8331a8161cd",
+  "body_sha256": "a81d177558d52e184f92a252b8e0115b7d2a16cc323303d4472ff8331a8161cd",
+  "redacted_fields": []
+}

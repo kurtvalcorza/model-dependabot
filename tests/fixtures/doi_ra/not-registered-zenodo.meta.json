@@ -1,0 +1,13 @@
+{
+  "method": "GET",
+  "url": "https://doi.org/doiRA/10.5281/zenodo.12584226",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json;charset=UTF-8"
+  },
+  "retrieved_at": "2026-10-24T08:30:17Z",
+  "body_file": "not-registered-zenodo.json",
+  "original_sha256": "98d88322269d456d49d23d4e97801628924b6a1c5ffee2fe7214ff52f3063760",
+  "body_sha256": "98d88322269d456d49d23d4e97801628924b6a1c5ffee2fe7214ff52f3063760",
+  "redacted_fields": []
+}

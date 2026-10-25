@@ -11,8 +11,10 @@ them becomes vulnerable, changes or is withdrawn.
 
 Every alert MUST cite its primary source, the time the source was retrieved and the exact identifier
 it matched: a package name and version, a model repository and revision, a DOI or a file hash. An
-alert MUST NOT be raised from inference, a similarity guess or a summary written by a model. If the
-evidence cannot be recorded, there is no alert.
+alert MUST NOT be raised from inference, a similarity guess or a summary written by a model. An owner's
+recorded policy applied to a pinned file counts as a primary source: the evidence is the file's SHA-256
+and format plus the policy setting, who set it and when. If the evidence cannot be recorded, there is no
+alert.
 
 Rationale: an owner acts on an alert only if it can be checked; an unverifiable alert costs more trust
 than it saves.
@@ -32,7 +34,8 @@ inventory.
 
 The service MUST only alert and suggest. It MUST NOT change, retrain, re-export, retire or unpublish a
 model, and it MUST NOT open changes against a model's repository on its own. An alert closes
-automatically only when a newer model version's inventory shows the cause is gone; otherwise a person
+automatically only when a newer model version's inventory shows the cause is gone, or when the source
+itself withdraws or clears the cause, with that observation recorded as evidence; otherwise a person
 closes it with a recorded reason.
 
 Rationale: the model's owner is accountable for the model; a monitoring service that acts on its own
@@ -82,4 +85,4 @@ follow semantic versioning: MAJOR when a principle is removed or redefined, MINO
 section is added or materially expanded, PATCH for clarifications. Each feature plan's Constitution
 Check verifies compliance; a justified exception is recorded in that plan's Complexity Tracking.
 
-**Version**: 1.0.0 | **Ratified**: 2026-10-23 | **Last Amended**: 2026-10-23
+**Version**: 1.0.2 | **Ratified**: 2026-10-23 | **Last Amended**: 2026-10-24

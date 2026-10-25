@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "url": "https://huggingface.co/api/models/meta-llama/Llama-3.1-8B?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha&expand[]=lastModified",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "etag": "W/\"3421-6y+jGpsKU9tdhkYkOi2JPeAZMpM\""
+  },
+  "retrieved_at": "2026-10-24T05:47:46Z",
+  "body_file": "model-gated.json",
+  "original_sha256": "53b88e9df79c62a5b4f2a3155e008bde1d0ce42130f760d867c91fed30372433",
+  "body_sha256": "53b88e9df79c62a5b4f2a3155e008bde1d0ce42130f760d867c91fed30372433",
+  "redacted_fields": []
+}

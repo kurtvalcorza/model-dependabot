@@ -1,0 +1,18 @@
+{
+  "method": "GET",
+  "url": "https://api.crossref.org/works/10.1088/1361-6595/aaebdb",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "x-rate-limit-limit": "5",
+    "x-rate-limit-interval": "1s",
+    "x-concurrency-limit": "1"
+  },
+  "retrieved_at": "2026-10-24T05:47:12Z",
+  "body_file": "correction.json",
+  "original_sha256": "d036ee300961f6315814e3958aabcc5d5b90d50333aea8b656470237eab67af4",
+  "body_sha256": "6e9e8d12eecc91970af054825c4b180c0d09e3baa4c90fd022fdc0da72c16490",
+  "redacted_fields": [
+    "author"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "method": "GET",
+  "url": "https://huggingface.co/api/datasets/the_pile_books3?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha",
+  "status": 307,
+  "headers": {
+    "content-type": "text/plain; charset=utf-8",
+    "location": "/api/datasets/defunct-datasets/the_pile_books3?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha"
+  },
+  "redirected_to": "https://huggingface.co/api/datasets/defunct-datasets/the_pile_books3?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha",
+  "retrieved_at": "2026-10-24T05:47:47Z",
+  "body_file": "dataset-moved.json",
+  "original_sha256": "55b22afc3438ba75c5e099542f8a4db6c32b517a82a4f413d1a6d09a4668951f",
+  "body_sha256": "55b22afc3438ba75c5e099542f8a4db6c32b517a82a4f413d1a6d09a4668951f",
+  "redacted_fields": []
+}

@@ -1,0 +1,8 @@
+{
+  "method": "GET",
+  "url": "https://api.example.test/v1/private",
+  "status": 401,
+  "headers": {},
+  "retrieved_at": "2026-10-23T08:03:00Z",
+  "body_file": "example-unauthorised.json"
+}

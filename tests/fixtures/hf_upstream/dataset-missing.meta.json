@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "url": "https://huggingface.co/api/datasets/model-dependabot-fixture/does-not-exist?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha",
+  "status": 401,
+  "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "etag": "W/\"29-dEMcHWfJi78ZR1aqzb1ELAhp3Us\""
+  },
+  "retrieved_at": "2026-10-24T05:47:47Z",
+  "body_file": "dataset-missing.json",
+  "original_sha256": "65842e3d84e6b7f62a470c85204e80b953bb8f944e9b69813130a9d7f3eaa1d8",
+  "body_sha256": "65842e3d84e6b7f62a470c85204e80b953bb8f944e9b69813130a9d7f3eaa1d8",
+  "redacted_fields": []
+}

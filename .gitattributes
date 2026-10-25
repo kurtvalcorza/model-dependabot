@@ -1,0 +1,8 @@
+# Vendored schemas are byte-exact copies checked by SHA256SUMS; never convert line endings.
+src/model_dependabot/inventory/schema/*.json -text
+src/model_dependabot/inventory/schema/SHA256SUMS -text
+# Recorded source responses are hashed as evidence; keep them byte-exact.
+tests/fixtures/** -text
+# The vendored SPDX licence list is checked by its SHA256SUMS too.
+src/model_dependabot/licences/*.json -text
+src/model_dependabot/licences/SHA256SUMS -text

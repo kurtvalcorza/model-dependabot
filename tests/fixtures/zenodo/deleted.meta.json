@@ -1,0 +1,17 @@
+{
+  "method": "GET",
+  "url": "https://zenodo.org/api/records/12584226",
+  "status": 410,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "retrieved_at": "2026-10-24T05:49:18Z",
+  "body_file": "deleted.json",
+  "original_sha256": "e3d35e2a6422eca2f55c86170c9308ae2ebec434bcdf40ba2850376f8b07d2cd",
+  "body_sha256": "73ef66803d7463f20a9419cd53b792a37f15d4c35d7f8abd92cd0f991f13f3fe",
+  "redacted_fields": [
+    "citation_text",
+    "note",
+    "removed_by"
+  ]
+}

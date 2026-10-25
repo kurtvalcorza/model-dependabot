@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "url": "https://huggingface.co/api/datasets/yavon/muxue?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "etag": "W/\"b8-sgHz7O74+Ym0v4Gsa7g/hRNtCTE\""
+  },
+  "retrieved_at": "2026-10-24T05:47:47Z",
+  "body_file": "dataset-disabled.json",
+  "original_sha256": "3a9f8e0772b4159ce467d21e5a462ca9d02b406e7f5130153d8779485189a266",
+  "body_sha256": "3a9f8e0772b4159ce467d21e5a462ca9d02b406e7f5130153d8779485189a266",
+  "redacted_fields": []
+}

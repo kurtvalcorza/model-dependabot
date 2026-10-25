@@ -1,0 +1,11 @@
+{
+  "method": "GET",
+  "url": "https://huggingface.co/api/models/mcpotato/42-eicar-street/tree/8fb61c4d511e9aaff0ea55396a124aa292830efc?expand=true",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "etag": "W/\"24ed-o3yPrMt03EFA9ETtsi2fRG6mrYY\""
+  },
+  "retrieved_at": "2026-10-24T04:25:00Z",
+  "body_file": "eicar-tree-expand.json"
+}

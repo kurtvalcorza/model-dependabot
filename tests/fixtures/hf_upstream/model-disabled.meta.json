@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "url": "https://huggingface.co/api/models/sd-concepts-library/dyoudim-style?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha&expand[]=lastModified",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "etag": "W/\"f1-ch2r+wKE0rxbavhnLO5A5hq92PU\""
+  },
+  "retrieved_at": "2026-10-24T05:47:50Z",
+  "body_file": "model-disabled.json",
+  "original_sha256": "64bae1649f897cdb4a4999b3795e2f3d8c55ccea134b3fe9577d1deda0cc1302",
+  "body_sha256": "64bae1649f897cdb4a4999b3795e2f3d8c55ccea134b3fe9577d1deda0cc1302",
+  "redacted_fields": []
+}

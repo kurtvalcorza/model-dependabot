@@ -1,0 +1,36 @@
+# Example registration manifest for the tests: small local weight files (not real models), a
+# hash-locked lock file, hub-hosted weight files, a pinned base model and a dataset DOI.
+
+[model]
+id = "example-detector"
+name = "Example detector, test fixture"
+owner = "Model owner"
+
+[[weights]]
+path = "weights/tiny.pt"
+
+[[weights]]
+path = "weights/tiny.safetensors"
+
+[[weights]]
+path = "weights/tiny.onnx"
+
+[[weights]]
+hub = "hf:openai-community/gpt2"
+revision = "607a30d783dfa663caf39e06633721c8d4cfcd7e"
+file = "model.safetensors"
+
+[[weights]]
+hub = "hf:openai-community/gpt2"
+file = "pytorch_model.bin"
+
+[environment]
+lock = "../locks/uv-export-trimmed.txt"
+
+[base_model]
+hub = "hf:openai-community/gpt2"
+revision = "607a30d783dfa663caf39e06633721c8d4cfcd7e"
+
+[[datasets]]
+doi = "10.5555/example-dataset-0001"
+sha256 = "0f343b0931126a20f133d67c2b018a3b1d06bf1a3c4d3d1f7b2b2f1b1a4e5c6d"

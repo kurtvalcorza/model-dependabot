@@ -1,0 +1,7 @@
+# Hand-made lock for the OSV tests: two exact pins with their real sdist SHA-256 (from PyPI on
+# 2026-10-24) and one requirement without an exact version (a gap, never queried).
+pillow==12.3.0 \
+    --hash=sha256:3b8182a766685eaa002637e28b4ec8d6b18819a0c71f579bf0dbaa5830297cce
+validators==0.12.2 \
+    --hash=sha256:172ac45f7d1944ce4beca3c5c53ca7c83e9759e39fd3fedc1cf28e2130268706
+numpy>=2.0
