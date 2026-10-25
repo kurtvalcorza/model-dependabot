@@ -60,7 +60,12 @@ def test_dangerous_benign_and_onnx(
 
     code, checked = cli("check", "weights-model")
     assert code == EXIT_OK
-    assert checked["sources"] == {"osv": "ok", "picklescan": "ok", "hf-scan": "ok"}
+    # Feature 002 adds upstream sources to the default run; 001's three must be ok.
+    assert {name: checked["sources"][name] for name in ("osv", "picklescan", "hf-scan")} == {
+        "osv": "ok",
+        "picklescan": "ok",
+        "hf-scan": "ok",
+    }
 
     code, listed = cli("alerts", "weights-model")
     assert code == EXIT_OK

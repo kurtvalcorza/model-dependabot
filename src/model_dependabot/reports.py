@@ -21,7 +21,16 @@ from model_dependabot.store import Store
 
 SCOPE_ALL = "all"
 CLOSED_STATES = ("fixed", "dismissed", "withdrawn", "cleared")
-EVIDENCE_FIELDS = ("source", "url", "retrieved_at", "matched_identifier", "body_sha256", "detail")
+EVIDENCE_FIELDS = (
+    "source",
+    "url",
+    "retrieved_at",
+    "matched_identifier",
+    "original_sha256",
+    "body_sha256",
+    "redacted_fields",
+    "detail",
+)
 STATE_FILTERS: dict[str, tuple[str, ...] | None] = {
     "open": ("open",),
     "closed": CLOSED_STATES,
@@ -100,8 +109,13 @@ def alerts_report(store: Store, model_id: str, *, state: str = "open") -> dict[s
         "current_version": version,
         "alerts": [alert_view(store, alert) for alert in listed],
         "watch_events": [watch_view(event) for event in events],
-        "last_check": None if run is None else {"run_id": run["run_id"], "sources": run["sources"]},
+        "last_check": None if run is None else _last_check(run),
     }
+
+
+def _last_check(run: Mapping[str, Any]) -> dict[str, Any]:
+    """The latest run: its id, whether it was ``scheduled`` or ``on_demand``, and each source."""
+    return {"run_id": run["run_id"], "trigger": run["trigger"], "sources": run["sources"]}
 
 
 def history_report(store: Store, model_id: str) -> dict[str, Any]:
@@ -124,14 +138,34 @@ def _cause_text(kind: str, cause: Mapping[str, Any]) -> str:
     if kind == "package_advisory":
         fixed = ", ".join(cause.get("fixed") or []) or "none published"
         return f"{cause['advisory_id']} {cause['package']}=={cause['version']} (fixed: {fixed})"
-    return f"{kind} {cause.get('location')} ({cause.get('identifier')})"
+    if cause.get("location") is not None:
+        return f"{kind} {cause['location']} ({cause.get('identifier')})"
+    # The upstream kinds (feature 002) name a base model or dataset, not a file.
+    text = f"{kind} {cause.get('identifier')}"
+    if kind == "licence_changed":
+        recorded = _one_line(cause.get("recorded_licence"))
+        declared = _one_line(cause.get("declared_normalised") or cause.get("declared_licence"))
+        text += f": {recorded} -> {declared}"
+    if cause.get("paper_doi"):
+        text += f" (paper {cause['paper_doi']})"
+    return text
+
+
+def _one_line(licence: object) -> str:
+    """A licence set, one entry per line when stored, on one line for text output."""
+    return ", ".join(str(licence).splitlines()) if licence else "none"
 
 
 def evidence_line(evidence: Mapping[str, Any]) -> str:
-    return (
+    line = (
         f"{evidence['source']} {evidence['url']} at {evidence['retrieved_at']}"
         f" for {evidence['matched_identifier']} (sha256 {evidence['body_sha256']})"
     )
+    redacted = evidence.get("redacted_fields") or []
+    if redacted:
+        # Research U10: the stored body is the redacted copy; the received one is checkable too.
+        line += f" original sha256 {evidence['original_sha256']}, redacted: {', '.join(redacted)}"
+    return line
 
 
 def alert_line(alert: Mapping[str, Any]) -> str:

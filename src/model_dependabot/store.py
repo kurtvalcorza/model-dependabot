@@ -5,6 +5,12 @@ and watch events. Raw source responses are kept as files in ``evidence/`` beside
 named by its SHA-256 and referenced from evidence records by ``body_sha256``. The database itself
 enforces the rules that must never break: a recorded model version and its entries cannot change
 (FR-005), and a model has at most one open alert per cause (FR-010).
+
+Feature 002 adds upstream observations, the DOI routing cache and the takedown log (which has no
+``requesting_entity`` column), the check run's ``trigger``, and the evidence fields
+``original_sha256`` and ``redacted_fields`` (research U10). Tables are created with
+``CREATE TABLE IF NOT EXISTS``, so a fresh database has them; a database created by feature 001
+is not migrated.
 """
 
 from __future__ import annotations
@@ -20,7 +26,20 @@ from types import TracebackType
 from typing import Any
 
 ENTRY_KINDS = ("weight_file", "package", "base_model", "dataset")
-ALERT_KINDS = ("package_advisory", "weight_file_scan", "hub_scan", "format_policy")
+ALERT_KINDS = (
+    "package_advisory",
+    "weight_file_scan",
+    "hub_scan",
+    "format_policy",
+    # feature 002 (data-model.md, Alert)
+    "dataset_retracted",
+    "paper_retracted",
+    "dataset_removed",
+    "dataset_not_findable",
+    "licence_changed",
+    "base_model_disabled",
+    "base_model_unavailable",
+)
 ALERT_STATES = ("open", "fixed", "dismissed", "withdrawn", "cleared")
 FORMAT_POLICIES = ("default", "strict")
 DISMISSAL_REASONS = ("not_used_at_runtime", "risk_accepted", "false_positive", "fix_not_available")
@@ -31,7 +50,27 @@ WATCH_KINDS = (
     "hub_scan_unknown",
     "advisory_unmatched",
     "hash_mismatch",
+    # feature 002 (data-model.md, Watch event)
+    "base_model_new_revision",
+    "base_model_new_version_pointer",
+    "gating_changed",
+    "card_changed",
+    "base_model_refused",
+    "base_model_unrecognised",
+    "dataset_new_version",
+    "dataset_replaced",
+    "dataset_moved",
+    "dataset_unreachable",
+    "paper_not_found",
+    "licence_unrecognised",
+    "licence_missing",
+    "upstream_notice",
 )
+TRIGGERS = ("scheduled", "on_demand")
+OUTCOMES = ("reachable", "refused", "not_found", "removed", "redirected")
+LICENCE_FORMS = ("spdx", "expression", "unrecognised", "none")
+REPOSITORIES = ("zenodo", "figshare", "other")
+TAKEDOWN_FIELDS = ("date", "reported_content")
 
 
 def _in(values: tuple[str, ...]) -> str:
@@ -77,6 +116,9 @@ CREATE TABLE IF NOT EXISTS inventory_entries (
     name TEXT,
     package_version TEXT,
     hashes TEXT,
+    recorded_licence TEXT,
+    licence_form TEXT CHECK (licence_form IS NULL OR licence_form IN {_in(LICENCE_FORMS)}),
+    paper_dois TEXT,
     FOREIGN KEY (model_id, version) REFERENCES model_versions (model_id, version),
     CHECK (pinned = 1 OR gap_reason IS NOT NULL),
     CHECK (pinned = 0 OR identifier IS NOT NULL)
@@ -87,7 +129,8 @@ CREATE TABLE IF NOT EXISTS check_runs (
     started_at TEXT NOT NULL,
     finished_at TEXT,
     scope TEXT NOT NULL,
-    sources TEXT
+    sources TEXT,
+    trigger TEXT NOT NULL DEFAULT 'on_demand' CHECK (trigger IN {_in(TRIGGERS)})
 );
 
 CREATE TABLE IF NOT EXISTS evidence (
@@ -98,7 +141,49 @@ CREATE TABLE IF NOT EXISTS evidence (
     matched_identifier TEXT NOT NULL,
     body_sha256 TEXT NOT NULL CHECK (length(body_sha256) = 64),
     detail TEXT,
-    run_id INTEGER REFERENCES check_runs (run_id)
+    run_id INTEGER REFERENCES check_runs (run_id),
+    original_sha256 TEXT NOT NULL CHECK (length(original_sha256) = 64),
+    redacted_fields TEXT NOT NULL DEFAULT '[]'
+);
+
+CREATE TABLE IF NOT EXISTS upstream_observations (
+    observation_id INTEGER PRIMARY KEY,
+    run_id INTEGER NOT NULL REFERENCES check_runs (run_id),
+    source TEXT NOT NULL,
+    item TEXT NOT NULL,
+    http_status INTEGER NOT NULL,
+    redirected_to TEXT,
+    outcome TEXT NOT NULL CHECK (outcome IN {_in(OUTCOMES)}),
+    disabled INTEGER CHECK (disabled IS NULL OR disabled IN (0, 1)),
+    gated TEXT,
+    head_revision TEXT,
+    declared_licence TEXT,
+    licence_form TEXT CHECK (licence_form IS NULL OR licence_form IN {_in(LICENCE_FORMS)}),
+    card_hash TEXT,
+    new_version_pointer TEXT,
+    updates TEXT,
+    removal TEXT,
+    evidence_ref INTEGER REFERENCES evidence (evidence_id),
+    observed_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS upstream_observations_by_item
+    ON upstream_observations (item, source, observation_id);
+
+CREATE TABLE IF NOT EXISTS doi_routing (
+    doi TEXT PRIMARY KEY CHECK (doi = lower(doi)),
+    agency TEXT,
+    repository TEXT CHECK (repository IS NULL OR repository IN {_in(REPOSITORIES)}),
+    repository_id TEXT,
+    looked_up_at TEXT NOT NULL
+);
+
+-- FR-005, research U10: the requesting party of a takedown is never stored, nor the notice's file
+-- name, which can name it; evidence points to the log by its URL and the notice date.
+CREATE TABLE IF NOT EXISTS takedown_notices (
+    notice_id INTEGER PRIMARY KEY,
+    date TEXT NOT NULL,
+    reported_content TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS advisories (
@@ -189,7 +274,26 @@ ENTRY_FIELDS = (
     "name",
     "version",
     "hashes",
+    "recorded_licence",
+    "licence_form",
+    "paper_dois",
 )
+_OBSERVATION_FIELDS = (
+    "http_status",
+    "redirected_to",
+    "outcome",
+    "disabled",
+    "gated",
+    "head_revision",
+    "declared_licence",
+    "licence_form",
+    "card_hash",
+    "new_version_pointer",
+    "updates",
+    "removal",
+    "evidence_ref",
+)
+_OBSERVATION_JSON = ("updates", "removal")
 
 
 def utc_text(moment: datetime) -> str:
@@ -329,11 +433,12 @@ class Store:
             raise ValueError(f"unknown inventory entry fields: {sorted(unknown)}")
         hashes = entry.get("hashes")
         can_run_code = entry.get("can_run_code")
+        paper_dois = entry.get("paper_dois")
         self.conn.execute(
             "INSERT INTO inventory_entries (model_id, version, kind, identifier, pinned,"
             " gap_reason, location, size, format, can_run_code, hub_repo, hub_revision,"
-            " hub_file, name, package_version, hashes)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " hub_file, name, package_version, hashes, recorded_licence, licence_form,"
+            " paper_dois) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 model_id,
                 version,
@@ -351,6 +456,9 @@ class Store:
                 entry.get("name"),
                 entry.get("version"),
                 None if hashes is None else json.dumps(list(hashes)),
+                entry.get("recorded_licence"),
+                entry.get("licence_form"),
+                None if paper_dois is None else json.dumps(list(paper_dois)),
             ),
         )
 
@@ -376,6 +484,7 @@ class Store:
             record["pinned"] = bool(row["pinned"])
             record["can_run_code"] = _bool(row["can_run_code"])
             record["hashes"] = _loads(row["hashes"])
+            record["paper_dois"] = _loads(row["paper_dois"])
             result.append(record)
         return result
 
@@ -408,12 +517,20 @@ class Store:
         body: bytes,
         detail: Mapping[str, Any] | None = None,
         run_id: int | None = None,
+        original_sha256: str | None = None,
+        redacted_fields: Iterable[str] = (),
     ) -> int:
+        """Store ``body`` (already redacted where research U10 applies) and its evidence record.
+
+        ``original_sha256`` is the hash of the response as received; it defaults to the stored
+        body's hash, which is right for every source with nothing to redact.
+        """
         digest = self.put_body(body)
         with self.conn:
             cursor = self.conn.execute(
                 "INSERT INTO evidence (source, url, retrieved_at, matched_identifier, body_sha256,"
-                " detail, run_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                " detail, run_id, original_sha256, redacted_fields)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     source,
                     url,
@@ -422,9 +539,33 @@ class Store:
                     digest,
                     None if detail is None else json.dumps(detail),
                     run_id,
+                    original_sha256 or digest,
+                    json.dumps(sorted(redacted_fields)),
                 ),
             )
         return int(cursor.lastrowid)
+
+    def add_response_evidence(
+        self,
+        response: Any,
+        *,
+        source: str,
+        matched_identifier: str,
+        detail: Mapping[str, Any] | None = None,
+        run_id: int | None = None,
+    ) -> int:
+        """Evidence for a fetcher ``Response``, keeping its original hash and redacted fields."""
+        return self.add_evidence(
+            source=source,
+            url=response.url,
+            retrieved_at=response.retrieved_at,
+            matched_identifier=matched_identifier,
+            body=response.body,
+            detail=detail,
+            run_id=run_id,
+            original_sha256=response.original_sha256,
+            redacted_fields=response.redacted_fields,
+        )
 
     def get_evidence(self, evidence_id: int) -> dict[str, Any] | None:
         row = self.conn.execute(
@@ -434,6 +575,7 @@ class Store:
             return None
         record = dict(row)
         record["detail"] = _loads(record["detail"])
+        record["redacted_fields"] = _loads(record["redacted_fields"])
         return record
 
     # --- alerts --------------------------------------------------------------------------------
@@ -522,10 +664,12 @@ class Store:
 
     # --- check runs ----------------------------------------------------------------------------
 
-    def start_check_run(self, *, scope: str) -> int:
+    def start_check_run(self, *, scope: str, trigger: str = "on_demand") -> int:
+        """Start a run; ``trigger`` is ``scheduled`` only for ``check --all --scheduled`` (U7)."""
         with self.conn:
             cursor = self.conn.execute(
-                "INSERT INTO check_runs (started_at, scope) VALUES (?, ?)", (self._stamp(), scope)
+                "INSERT INTO check_runs (started_at, scope, trigger) VALUES (?, ?, ?)",
+                (self._stamp(), scope, trigger),
             )
         return int(cursor.lastrowid)
 
@@ -722,3 +866,127 @@ class Store:
             params += (version,)
         rows = self.conn.execute(query + " ORDER BY watch_event_id", params).fetchall()
         return [self._watch_event(row) for row in rows]
+
+    # --- upstream observations (feature 002, data-model.md) -------------------------------------
+
+    def add_observation(self, *, run_id: int, source: str, item: str, **fields: Any) -> int:
+        """Record what one run saw for one upstream item from one source."""
+        unknown = set(fields) - set(_OBSERVATION_FIELDS)
+        if unknown:
+            raise ValueError(f"unknown observation fields: {sorted(unknown)}")
+        values = dict.fromkeys(_OBSERVATION_FIELDS) | fields
+        for name in _OBSERVATION_JSON:
+            if values[name] is not None:
+                values[name] = json.dumps(values[name])
+        if values["disabled"] is not None:
+            values["disabled"] = int(bool(values["disabled"]))
+        columns = ("run_id", "source", "item", *_OBSERVATION_FIELDS, "observed_at")
+        params = (run_id, source, item, *(values[name] for name in _OBSERVATION_FIELDS))
+        with self.conn:
+            cursor = self.conn.execute(
+                f"INSERT INTO upstream_observations ({', '.join(columns)})"
+                f" VALUES ({', '.join('?' for _ in columns)})",
+                (*params, self._stamp()),
+            )
+        return int(cursor.lastrowid)
+
+    def _observation(self, row: sqlite3.Row) -> dict[str, Any]:
+        record = dict(row)
+        for name in _OBSERVATION_JSON:
+            record[name] = _loads(record[name])
+        record["disabled"] = _bool(record["disabled"])
+        return record
+
+    _OBSERVATION_QUERY = (
+        "SELECT o.*, r.trigger AS trigger FROM upstream_observations o"
+        " JOIN check_runs r ON r.run_id = o.run_id"
+    )
+
+    def get_observation(self, observation_id: int) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            self._OBSERVATION_QUERY + " WHERE o.observation_id = ?", (observation_id,)
+        ).fetchone()
+        return None if row is None else self._observation(row)
+
+    def observations(self, item: str, source: str | None = None) -> list[dict[str, Any]]:
+        """Observations of ``item`` (from ``source`` if given), oldest first."""
+        query, params = self._OBSERVATION_QUERY + " WHERE o.item = ?", (item,)
+        if source is not None:
+            query, params = query + " AND o.source = ?", (*params, source)
+        rows = self.conn.execute(query + " ORDER BY o.observation_id", params).fetchall()
+        return [self._observation(row) for row in rows]
+
+    def previous_observation(self, item: str, source: str, before: int) -> dict[str, Any] | None:
+        """The latest observation of ``item`` from ``source`` older than observation ``before``."""
+        row = self.conn.execute(
+            self._OBSERVATION_QUERY + " WHERE o.item = ? AND o.source = ? AND o.observation_id < ?"
+            " ORDER BY o.observation_id DESC LIMIT 1",
+            (item, source, before),
+        ).fetchone()
+        return None if row is None else self._observation(row)
+
+    # --- DOI routing (research U1) --------------------------------------------------------------
+
+    def get_routing(self, doi: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM doi_routing WHERE doi = ?", (doi.lower(),)
+        ).fetchone()
+        return None if row is None else dict(row)
+
+    _UNSET: Any = object()
+
+    def set_routing(
+        self,
+        doi: str,
+        *,
+        agency: Any = _UNSET,
+        repository: Any = _UNSET,
+        repository_id: Any = _UNSET,
+    ) -> None:
+        """Create or update a DOI's routing; fields not given keep their stored value."""
+        doi = doi.lower()
+        current = self.get_routing(doi) or {
+            "agency": None,
+            "repository": None,
+            "repository_id": None,
+        }
+        given = {"agency": agency, "repository": repository, "repository_id": repository_id}
+        values = {k: (current[k] if v is self._UNSET else v) for k, v in given.items()}
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO doi_routing (doi, agency, repository, repository_id, looked_up_at)"
+                " VALUES (?, ?, ?, ?, ?) ON CONFLICT (doi) DO UPDATE SET agency = excluded.agency,"
+                " repository = excluded.repository, repository_id = excluded.repository_id,"
+                " looked_up_at = excluded.looked_up_at",
+                (
+                    doi,
+                    values["agency"],
+                    values["repository"],
+                    values["repository_id"],
+                    self._stamp(),
+                ),
+            )
+
+    # --- takedown log (research U5) -------------------------------------------------------------
+
+    def replace_takedown_notices(self, rows: Iterable[Mapping[str, Any]]) -> None:
+        """Replace the cached takedown log; a row with any other column is refused."""
+        rows = list(rows)
+        for row in rows:
+            unknown = set(row) - set(TAKEDOWN_FIELDS)
+            if unknown:
+                raise ValueError(
+                    f"takedown notices keep only {TAKEDOWN_FIELDS}; got {sorted(unknown)}"
+                )
+        with self.conn:
+            self.conn.execute("DELETE FROM takedown_notices")
+            self.conn.executemany(
+                "INSERT INTO takedown_notices (date, reported_content) VALUES (?, ?)",
+                [(row["date"], row["reported_content"]) for row in rows],
+            )
+
+    def takedown_notices(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT date, reported_content FROM takedown_notices ORDER BY notice_id"
+        )
+        return [dict(row) for row in rows]

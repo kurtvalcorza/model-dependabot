@@ -10,6 +10,11 @@ A dataset is written as a ``data`` component (``bom-ref: "doi:<doi>"``, the DOI 
 reference, the optional SHA-256 in ``hashes``) that the model card's ``modelParameters.datasets[]``
 references by ``bom-ref``: the schema's inline dataset form allows neither ``hashes`` nor
 ``externalReferences``.
+
+Feature 002 (contracts/inventory-profile.md, research U11) uses standard fields only: recorded
+licences in ``licenses`` (``license.id``, ``license.name`` or ``expression``), tied papers as
+``citation`` references and hub datasets as ``data`` components with
+``bom-ref: "hf-dataset:<owner>/<name>@<commit>"`` and a ``distribution`` reference to the hub page.
 """
 
 from __future__ import annotations
@@ -30,17 +35,20 @@ from referencing.jsonschema import DRAFT7
 from model_dependabot import __version__
 from model_dependabot.inventory.build import (
     ENTRY_KIND_ORDER,
+    HUB_DATASET_PREFIX,
     NO_DOI,
     NO_REVISION,
     NOT_A_COMMIT,
     classify,
     gap,
+    hub_dataset_identifier,
     huggingface_purl,
     new_entry,
     normalise_doi,
 )
 from model_dependabot.lockfile import NO_EXACT_VERSION, NO_HASH
 from model_dependabot.sources.hf import is_commit
+from model_dependabot.upstream.licences import join_licences, recorded
 
 SPEC_VERSION = "1.7"
 IMPORTABLE_VERSIONS = ("1.5", "1.6", "1.7")
@@ -63,6 +71,7 @@ BOM_SCHEMA_ID = "http://cyclonedx.org/schema/bom-1.7.schema.json"
 _ALGORITHMS = {"sha256": "SHA-256", "sha384": "SHA-384", "sha512": "SHA-512"}
 _ALGORITHM_NAMES = {value: key for key, value in _ALGORITHMS.items()}
 DOI_URL = "https://doi.org/"
+HUB_DATASET_URL = "https://huggingface.co/datasets/"
 UNIDENTIFIED_DATASET = "unidentified dataset"
 
 
@@ -133,6 +142,29 @@ def _with(item: dict[str, Any], **optional: Any) -> dict[str, Any]:
     return item
 
 
+def _licenses(entry: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """The recorded licence set in CycloneDX form, one choice per entry (inventory-profile.md)."""
+    licences = recorded(entry.get("recorded_licence"), entry.get("licence_form"))
+    if licences is None or not licences.entries:
+        return None
+    choices: list[dict[str, Any]] = []
+    for licence in sorted(licences.entries, key=lambda item: str(item.normalised)):
+        if licence.form == "spdx":
+            choices.append({"license": {"id": licence.normalised}})
+        elif licence.form == "expression":
+            choices.append({"expression": licence.normalised})
+        else:
+            choices.append({"license": {"name": licence.declared}})
+    return choices
+
+
+def _citations(entry: dict[str, Any]) -> list[dict[str, str]]:
+    return [
+        {"type": "citation", "url": DOI_URL + quote(doi, safe="/")}
+        for doi in entry.get("paper_dois") or []
+    ]
+
+
 def _weight_component(index: int, entry: dict[str, Any]) -> dict[str, Any]:
     can_run_code = entry["can_run_code"]
     hub = entry["hub_repo"] is not None
@@ -184,25 +216,41 @@ def _base_model_component(index: int, entry: dict[str, Any]) -> dict[str, Any]:
         component,
         version=entry["version"],
         purl=entry["identifier"],
+        licenses=_licenses(entry),
         properties=_properties([(P_GAP, entry["gap_reason"])]),
     )
 
 
 def _dataset_component(index: int, entry: dict[str, Any]) -> dict[str, Any]:
-    doi = entry["identifier"]
-    name = doi or UNIDENTIFIED_DATASET
+    identifier = entry["identifier"]
+    hub = entry.get("hub_repo")
+    if hub is not None:
+        name = hub
+        ref = identifier or f"dataset:{index}"
+        references = [{"type": "distribution", "url": HUB_DATASET_URL + quote(hub, safe="/")}]
+        pairs = [(P_HUB_REPO, None if identifier else hub), (P_GAP, entry["gap_reason"])]
+    else:
+        name = identifier or UNIDENTIFIED_DATASET
+        ref = f"doi:{identifier}" if identifier else f"dataset:{index}"
+        references = (
+            [{"type": "distribution", "url": DOI_URL + quote(identifier, safe="/")}]
+            if identifier
+            else []
+        )
+        pairs = [(P_GAP, entry["gap_reason"])]
     component = {
         "type": "data",
-        "bom-ref": f"doi:{doi}" if doi else f"dataset:{index}",
+        "bom-ref": ref,
         "name": name,
         "data": [{"type": "dataset", "name": name}],
     }
-    references = [{"type": "distribution", "url": DOI_URL + quote(doi, safe="/")}] if doi else None
     return _with(
         component,
-        externalReferences=references,
+        version=entry.get("hub_revision"),
+        externalReferences=references + _citations(entry),
         hashes=_hashes(entry["hashes"]),
-        properties=_properties([(P_GAP, entry["gap_reason"])]),
+        licenses=_licenses(entry),
+        properties=_properties(pairs),
     )
 
 
@@ -275,6 +323,37 @@ def _references(item: dict[str, Any], kind: str) -> list[str]:
         for ref in item.get("externalReferences") or []
         if isinstance(ref, dict) and ref.get("type") == kind and ref.get("url")
     ]
+
+
+def _read_licence(item: dict[str, Any]) -> tuple[str | None, str | None]:
+    """``(recorded_licence, licence_form)`` from every ``licenses`` choice of a component.
+
+    Several choices are the recorded set, one entry per line; the form is ``unrecognised`` if any
+    choice is a ``license.name``, ``expression`` if any is an expression, else ``spdx``.
+    """
+    entries: list[tuple[str, str]] = []
+    for choice in item.get("licenses") or []:
+        if not isinstance(choice, dict):
+            continue
+        if isinstance(choice.get("expression"), str):
+            entries.append((choice["expression"], "expression"))
+            continue
+        licence = choice.get("license")
+        if isinstance(licence, dict):
+            if isinstance(licence.get("id"), str):
+                entries.append((licence["id"], "spdx"))
+            elif isinstance(licence.get("name"), str):
+                entries.append((licence["name"], "unrecognised"))
+    if not entries:
+        return None, None
+    forms = {form for _, form in entries}
+    form = next(f for f in ("unrecognised", "expression", "spdx") if f in forms)
+    return join_licences([text for text, _ in entries]), form
+
+
+def _read_papers(item: dict[str, Any]) -> list[str] | None:
+    dois = [normalise_doi(unquote(url)) for url in _references(item, "citation")]
+    return [doi for doi in dois if doi is not None] or None
 
 
 def _int(text: str | None) -> int | None:
@@ -369,6 +448,7 @@ def _import_base_model(item: dict[str, Any]) -> dict[str, Any]:
     if not is_commit(commit):
         return gap("base_model", props.get(P_GAP) or NOT_A_COMMIT, name=repo)
     reason = props.get(P_GAP)
+    licence, form = _read_licence(item)
     return new_entry(
         "base_model",
         identifier=huggingface_purl(repo, commit),
@@ -376,6 +456,8 @@ def _import_base_model(item: dict[str, Any]) -> dict[str, Any]:
         gap_reason=reason,
         name=repo,
         version=commit,
+        recorded_licence=licence,
+        licence_form=form,
     )
 
 
@@ -395,14 +477,52 @@ def _dataset_doi(item: dict[str, Any]) -> str | None:
     return None
 
 
+def _hub_dataset(item: dict[str, Any]) -> tuple[str, str | None] | None:
+    """``(repo, commit)`` of a hub dataset component, or ``None`` for any other dataset."""
+    ref = item.get("bom-ref")
+    if isinstance(ref, str) and ref.startswith(HUB_DATASET_PREFIX):
+        repo, _, commit = ref[len(HUB_DATASET_PREFIX) :].rpartition("@")
+        return repo, commit.lower() or None
+    repo = _props(item).get(P_HUB_REPO)
+    if repo is None:
+        for url in _references(item, "distribution"):
+            if url.startswith(HUB_DATASET_URL):
+                repo = unquote(url[len(HUB_DATASET_URL) :])
+                break
+    return None if repo is None else (repo, None)
+
+
 def _import_dataset(item: dict[str, Any]) -> dict[str, Any]:
     props = _props(item)
     hashes = _read_hashes(item) or None
+    licence, form = _read_licence(item)
+    common: dict[str, Any] = {
+        "hashes": hashes,
+        "paper_dois": _read_papers(item),
+        "recorded_licence": licence,
+        "licence_form": form,
+    }
+    hub = _hub_dataset(item)
+    if hub is not None:
+        repo, commit = hub
+        reason = props.get(P_GAP)
+        if reason is None and commit is None:
+            reason = NO_REVISION
+        elif reason is None and not is_commit(commit):
+            reason = NOT_A_COMMIT
+        identifier = hub_dataset_identifier(repo, commit) if reason is None and commit else None
+        return new_entry(
+            "dataset",
+            identifier=identifier,
+            pinned=reason is None,
+            gap_reason=reason,
+            hub_repo=repo,
+            hub_revision=commit if identifier else None,
+            **common,
+        )
     doi = _dataset_doi(item)
     reason = props.get(P_GAP) or (None if doi else NO_DOI)
-    return new_entry(
-        "dataset", identifier=doi, pinned=reason is None, gap_reason=reason, hashes=hashes
-    )
+    return new_entry("dataset", identifier=doi, pinned=reason is None, gap_reason=reason, **common)
 
 
 def _list(value: Any) -> list[dict[str, Any]]:

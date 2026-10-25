@@ -1,0 +1,13 @@
+{
+  "method": "GET",
+  "url": "https://doi.org/doiRA/10.5281/model-dependabot-fixture-does-not-exist",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json;charset=UTF-8"
+  },
+  "retrieved_at": "2026-10-24T08:30:48Z",
+  "body_file": "not-registered-made-up.json",
+  "original_sha256": "0054021e116d321f3bdb5a5c9d25d40e04ba6f1d3b2e0bc0949e82334e1c171a",
+  "body_sha256": "0054021e116d321f3bdb5a5c9d25d40e04ba6f1d3b2e0bc0949e82334e1c171a",
+  "redacted_fields": []
+}

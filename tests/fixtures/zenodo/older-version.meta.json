@@ -1,0 +1,17 @@
+{
+  "method": "GET",
+  "url": "https://zenodo.org/api/records/8176941",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "etag": "\"5\""
+  },
+  "retrieved_at": "2026-10-24T05:50:23Z",
+  "body_file": "older-version.json",
+  "original_sha256": "abbe41b7e41ad53689496a144d35cf6ce4922bd6a923d171ff34df214ffb9ff8",
+  "body_sha256": "82b2872e425bc01a85dd3f98e5102899609785afaedd85e69144dc3a574e66e5",
+  "redacted_fields": [
+    "metadata.creators",
+    "owners"
+  ]
+}

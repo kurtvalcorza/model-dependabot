@@ -1,0 +1,16 @@
+{
+  "method": "GET",
+  "url": "https://huggingface.co/datasets/huggingface-legal/takedown-notices/resolve/main/index.csv",
+  "status": 307,
+  "headers": {
+    "content-type": "text/plain; charset=utf-8",
+    "location": "/api/resolve-cache/datasets/huggingface-legal/takedown-notices/ab924c52c724af95331ee579af0cb12afacdebad/index.csv?%2Fdatasets%2Fhuggingface-legal%2Ftakedown-notices%2Fresolve%2Fmain%2Findex.csv=&etag=%22acebe0c6427ff86f743a2a0989b8dfe384afce47%22",
+    "x-repo-commit": "ab924c52c724af95331ee579af0cb12afacdebad"
+  },
+  "redirected_to": "https://huggingface.co/api/resolve-cache/datasets/huggingface-legal/takedown-notices/ab924c52c724af95331ee579af0cb12afacdebad/index.csv?%2Fdatasets%2Fhuggingface-legal%2Ftakedown-notices%2Fresolve%2Fmain%2Findex.csv=&etag=%22acebe0c6427ff86f743a2a0989b8dfe384afce47%22",
+  "retrieved_at": "2026-10-24T05:49:08Z",
+  "body_file": "index-redirect.csv",
+  "original_sha256": "e400e7334adbf29851554a872eafb45362bd36de45e1c11f6899379532a64d28",
+  "body_sha256": "e400e7334adbf29851554a872eafb45362bd36de45e1c11f6899379532a64d28",
+  "redacted_fields": []
+}

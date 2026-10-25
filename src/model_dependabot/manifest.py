@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from model_dependabot.doi import normalise_doi
 from model_dependabot.sources.hf import parse_hub
 
 _TOP_KEYS = {"model", "weights", "environment", "base_model", "datasets"}
@@ -22,7 +23,8 @@ _MODEL_KEYS = {"id", "name", "owner"}
 _WEIGHT_KEYS = {"path", "hub", "revision", "file"}
 _ENVIRONMENT_KEYS = {"lock"}
 _BASE_MODEL_KEYS = {"hub", "revision"}
-_DATASET_KEYS = {"doi", "sha256"}
+_DATASET_KEYS = {"doi", "sha256", "hub", "revision", "paper_doi"}
+_HUB_DATASET_PREFIX = "hf:datasets/"
 
 
 class ManifestError(ValueError):
@@ -48,8 +50,16 @@ class BaseModelSpec:
 
 @dataclass(frozen=True)
 class DatasetSpec:
+    """A DOI dataset (``doi``) or a hub dataset (``hub`` and ``revision``), never both.
+
+    ``paper_dois`` are the papers the owner ties to the dataset, normalised (contracts/manifest.md).
+    """
+
     doi: str | None
     sha256: str | None
+    hub: str | None = None
+    revision: str | None = None
+    paper_dois: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -119,6 +129,44 @@ def _weight(base: Path, table: Mapping[str, Any], where: str) -> WeightSpec:
     return WeightSpec(hub_repo=_hub(hub or "", where), revision=revision, file=file)
 
 
+def _paper_dois(table: Mapping[str, Any], where: str) -> tuple[str, ...]:
+    value = table.get("paper_doi")
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ManifestError(f"{where}.paper_doi must be a list of DOIs")
+    dois = []
+    for item in value:
+        doi = normalise_doi(item) if isinstance(item, str) else None
+        if doi is None:
+            raise ManifestError(f"{where}.paper_doi: {item!r} is not a DOI")
+        dois.append(doi)
+    return tuple(dois)
+
+
+def _dataset(table: Mapping[str, Any], where: str) -> DatasetSpec:
+    doi = _text(table, "doi", where)
+    hub = _text(table, "hub", where)
+    revision = _text(table, "revision", where)
+    # contracts/manifest.md: both is an error; neither is the gap "no DOI", as in 001, where
+    # registration never fails because of a gap.
+    if doi is not None and hub is not None:
+        raise ManifestError(f"{where} needs exactly one of 'doi' and 'hub', not both")
+    if hub is not None:
+        if not hub.startswith(_HUB_DATASET_PREFIX):
+            raise ManifestError(f"{where}.hub: expected 'hf:datasets/owner/name', got {hub!r}")
+        hub = _hub("hf:" + hub[len(_HUB_DATASET_PREFIX) :], where)
+    elif revision is not None:
+        raise ManifestError(f"{where}: 'revision' is for hub datasets only")
+    return DatasetSpec(
+        doi=doi,
+        sha256=_text(table, "sha256", where),
+        hub=hub,
+        revision=revision,
+        paper_dois=_paper_dois(table, where),
+    )
+
+
 def load_manifest(path: Path | str) -> Manifest:
     """Read and check a manifest; raise ``ManifestError`` if it is not valid."""
     path = Path(path).resolve()
@@ -160,10 +208,7 @@ def load_manifest(path: Path | str) -> Manifest:
         )
 
     datasets = tuple(
-        DatasetSpec(
-            doi=_text(table, "doi", f"datasets[{index}]"),
-            sha256=_text(table, "sha256", f"datasets[{index}]"),
-        )
+        _dataset(table, f"datasets[{index}]")
         for index, table in enumerate(_tables(data.get("datasets", []), "datasets", _DATASET_KEYS))
     )
 

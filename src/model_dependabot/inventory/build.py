@@ -10,17 +10,26 @@ from __future__ import annotations
 
 import hashlib
 import io
-import re
 import zipfile
+from collections.abc import Callable, Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import quote
 
+from model_dependabot.doi import normalise_doi
 from model_dependabot.lockfile import read_lock
 from model_dependabot.manifest import BaseModelSpec, DatasetSpec, Manifest, WeightSpec
-from model_dependabot.sources.fetcher import Fetcher
-from model_dependabot.sources.hf import HuggingFace, is_commit, resolve_url
+from model_dependabot.sources import datacite, figshare, zenodo
+from model_dependabot.sources.fetcher import Fetcher, NoRecordingError, SourceFailedError
+from model_dependabot.sources.hf import (
+    HuggingFace,
+    is_commit,
+    read_dataset,
+    read_model,
+    resolve_url,
+)
 from model_dependabot.store import ENTRY_FIELDS, ENTRY_KINDS
+from model_dependabot.upstream.licences import normalise
 
 ENTRY_KIND_ORDER = ("weight_file", "package", "base_model", "dataset")
 
@@ -37,9 +46,10 @@ UNKNOWN_FORMAT = "unknown"
 
 _ZIP_MAGIC = b"PK\x03\x04"
 _HEAD_BYTES = 4
-_DOI = re.compile(r"^10\.\d{4,9}/\S+$")
-_DOI_PREFIXES = ("https://doi.org/", "http://doi.org/", "https://dx.doi.org/", "doi:")
 _CHUNK = 1 << 20
+HUB_DATASET_PREFIX = "hf-dataset:"
+
+__all__ = ["normalise_doi"]
 
 
 def new_entry(kind: str, **fields: Any) -> dict[str, Any]:
@@ -190,25 +200,33 @@ def _base_model(spec: BaseModelSpec) -> dict[str, Any]:
     )
 
 
-def normalise_doi(text: str) -> str | None:
-    """A DOI in its bare, lower-case form, or ``None`` if the text is not a DOI."""
-    doi = text.strip()
-    for prefix in _DOI_PREFIXES:
-        if doi.lower().startswith(prefix):
-            doi = doi[len(prefix) :]
-            break
-    doi = doi.lower()
-    return doi if _DOI.match(doi) else None
+def hub_dataset_identifier(repo: str, commit: str) -> str:
+    """``hf-dataset:owner/name@commit`` (data-model.md, Inventory entry)."""
+    return f"{HUB_DATASET_PREFIX}{repo}@{commit}"
 
 
 def _dataset(spec: DatasetSpec) -> dict[str, Any]:
     hashes = None if spec.sha256 is None else [f"sha256:{spec.sha256.lower()}"]
+    papers = list(spec.paper_dois) or None
+    if spec.hub is not None:
+        fields: dict[str, Any] = {"hashes": hashes, "paper_dois": papers, "hub_repo": spec.hub}
+        if spec.revision is None:
+            return gap("dataset", NO_REVISION, **fields)
+        if not is_commit(spec.revision):
+            return gap("dataset", NOT_A_COMMIT, **fields)
+        return new_entry(
+            "dataset",
+            identifier=hub_dataset_identifier(spec.hub, spec.revision),
+            pinned=True,
+            hub_revision=spec.revision,
+            **fields,
+        )
     if spec.doi is None:
-        return gap("dataset", NO_DOI, hashes=hashes)
+        return gap("dataset", NO_DOI, hashes=hashes, paper_dois=papers)
     doi = normalise_doi(spec.doi)
     if doi is None:
-        return gap("dataset", NOT_A_DOI, hashes=hashes)
-    return new_entry("dataset", identifier=doi, pinned=True, hashes=hashes)
+        return gap("dataset", NOT_A_DOI, hashes=hashes, paper_dois=papers)
+    return new_entry("dataset", identifier=doi, pinned=True, hashes=hashes, paper_dois=papers)
 
 
 def build_entries(manifest: Manifest, fetcher: Fetcher | None = None) -> list[dict[str, Any]]:
@@ -225,3 +243,54 @@ def build_entries(manifest: Manifest, fetcher: Fetcher | None = None) -> list[di
     for entry in entries:
         check_entry(entry)
     return entries
+
+
+Routing = Callable[[str], Mapping[str, Any] | None]
+
+
+def _declared(entry: Mapping[str, Any], fetcher: Fetcher, routing: Routing) -> str | None:
+    """The licence a source declares for a base model or dataset (FR-008, US1 adapters)."""
+    if entry["kind"] == "base_model":
+        model = read_model(fetcher, entry["name"])
+        return model.licence if model.outcome == "reachable" else None
+    if entry.get("hub_repo"):
+        dataset = read_dataset(fetcher, entry["hub_repo"])
+        return dataset.licence if dataset.outcome == "reachable" else None
+    doi = entry["identifier"]
+    route = routing(doi) or {}
+    if not datacite.queried(route.get("agency")):
+        return None
+    record = datacite.DataCite(fetcher).record(doi)
+    if record.licence:
+        return record.licence
+    repository, record_id = route.get("repository"), route.get("repository_id")
+    if record.outcome == "reachable" and record.repository is not None:
+        repository, record_id = record.repository, record.repository_id
+    if repository == "zenodo" and record_id:
+        found = zenodo.Zenodo(fetcher).record(str(record_id))
+        return found.licence if found.outcome == "reachable" else None
+    if repository == "figshare" and record_id:
+        article = figshare.Figshare(fetcher).article(str(record_id))
+        return article.licence if article.outcome == "reachable" else None
+    return None
+
+
+def record_licences(entries: list[dict[str, Any]], fetcher: Fetcher, routing: Routing) -> None:
+    """Write the declared licence, normalised, into each base-model and dataset entry (FR-008).
+
+    The order for a DOI is DataCite's ``rightsList``, then the Zenodo or Figshare record it routes
+    to. A source that fails, or declares none, leaves the licence empty: the first successful
+    observation at a check then becomes the baseline (research U8).
+    """
+    for entry in entries:
+        if entry["kind"] not in ("base_model", "dataset") or not entry["pinned"]:
+            continue
+        try:
+            declared = _declared(entry, fetcher, routing)
+        except (SourceFailedError, NoRecordingError):
+            declared = None
+        licence = normalise(declared)
+        if licence.form == "none":
+            continue
+        entry["recorded_licence"] = licence.normalised
+        entry["licence_form"] = licence.form

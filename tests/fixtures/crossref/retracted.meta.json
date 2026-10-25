@@ -1,0 +1,18 @@
+{
+  "method": "GET",
+  "url": "https://api.crossref.org/works/10.1177/1758835919874651",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "x-rate-limit-limit": "5",
+    "x-rate-limit-interval": "1s",
+    "x-concurrency-limit": "1"
+  },
+  "retrieved_at": "2026-10-24T05:47:09Z",
+  "body_file": "retracted.json",
+  "original_sha256": "7d66b86d4d20965b5086ab415939dd0ad81834ed67451f049632c29ebae4e215",
+  "body_sha256": "ba072da4c9686bbb569def8d7587d2c22654cbf99d72d6d0fa8ebc41318a11bd",
+  "redacted_fields": [
+    "author"
+  ]
+}

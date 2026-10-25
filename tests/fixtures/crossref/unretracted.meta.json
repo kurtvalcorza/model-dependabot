@@ -1,0 +1,19 @@
+{
+  "method": "GET",
+  "url": "https://api.crossref.org/works/10.1038/nature14539",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "x-rate-limit-limit": "5",
+    "x-rate-limit-interval": "1s",
+    "x-concurrency-limit": "1"
+  },
+  "retrieved_at": "2026-10-24T05:47:10Z",
+  "body_file": "unretracted.json",
+  "original_sha256": "a203d47229b14b2b6b560b4a93d3fec6d460520af78e0ee5664d2efcad74c973",
+  "body_sha256": "40424261750203c872a6b85f8e0e9dba6ffe37fadbc2b05013b329d46cf50bfd",
+  "redacted_fields": [
+    "author",
+    "reference[].unstructured"
+  ]
+}

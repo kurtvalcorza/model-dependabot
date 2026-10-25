@@ -3,7 +3,9 @@
 Dependency alerts for AI models. You describe a model in a small manifest; the tool records a pinned
 inventory of what the model depends on (its weight files, the packages locked in its environment, the
 base model it was fine-tuned from and its training data) and then checks that inventory against
-published advisories and weight-file scans. When something it depends on becomes vulnerable or unsafe it
+published advisories and weight-file scans. It also watches what happens upstream: a training dataset or
+a paper tied to it being retracted or removed, a licence changing and the base model being disabled or
+no longer publicly available. When something it depends on becomes vulnerable, unsafe or unavailable it
 raises an alert, and it closes the alert when a new version of the model fixes the cause or the source
 withdraws or clears it.
 
@@ -52,7 +54,16 @@ revision = "0123abcd..."
 [[datasets]]
 doi = "10.5555/example-dataset"
 sha256 = "..."                     # optional
+paper_doi = ["10.5555/example-paper"]   # optional: papers you tie to this dataset
+
+[[datasets]]
+hub = "hf:datasets/owner/name"     # a dataset on the Hugging Face Hub, without a DOI
+revision = "0123abcd..."           # the exact commit; without it the dataset is a gap
 ```
+
+A dataset has either `doi` or `hub`, not both. `paper_doi` lists the papers you say the dataset comes
+with; they are checked for retractions too and are never guessed. Licences are not written in the
+manifest: `register` records the licence each source declares for the base model and each dataset.
 
 Only `model.id` is required. Anything missing or inexact is recorded as a gap with a reason (a hub file
 without a revision, a lock line without `==` or without a hash) and registration still succeeds.
@@ -61,7 +72,8 @@ produced with `uv export --format requirements-txt` or `pip-compile --generate-h
 markers (`; sys_platform == "win32"` and the like) are not evaluated: every locked package is checked,
 so a platform-only package can raise an alert even where it is never installed.
 
-The full rules are in [`specs/001-inventory-alerts/contracts/manifest.md`](specs/001-inventory-alerts/contracts/manifest.md).
+The full rules are in [`specs/001-inventory-alerts/contracts/manifest.md`](specs/001-inventory-alerts/contracts/manifest.md)
+and, for `paper_doi` and hub datasets, [`specs/002-upstream-watch/contracts/manifest.md`](specs/002-upstream-watch/contracts/manifest.md).
 
 ## Commands
 
@@ -74,16 +86,39 @@ output; both may go before or after the command name.
 | `import BOM.json --model-id ID` | Registers a version from an existing CycloneDX inventory |
 | `inventory show ID [--version N]` | Lists the entries with their identifiers and the gaps with their reasons |
 | `inventory export ID [--version N] -o FILE` | Writes the stored CycloneDX 1.7 inventory, validated against the official schema |
-| `check (ID \| --all) [--source osv,picklescan,hf-scan]` | Runs the checks now and records a check run |
+| `check (ID \| --all) [--scheduled] [--source ...]` | Runs the checks now and records a check run. Sources: `osv`, `picklescan`, `hf-scan`, `hf-hub`, `hf-takedowns`, `crossref`, `datacite`, `zenodo` and `figshare`; without `--source` every source runs. `--scheduled` (with `--all`) marks the run as scheduled; see [Scheduling](#scheduling) |
 | `policy ID --format (default\|strict) --by NAME` | Sets the model's weight-format policy, recording who set it and when. Under `default` a format that can run code when loaded is a watch event; under `strict` a code-capable weight file with no code-free file beside it in the same version raises an alert. Takes effect at the next check |
 | `alerts ID [--state open\|closed\|all]` | Lists alerts by severity (`CRITICAL`, `HIGH`, `MODERATE`, `LOW`, `UNKNOWN`), then the watch events, each with its evidence |
-| `alert show ALERT_ID` | One alert with all its evidence |
+| `alert show ALERT_ID` | One alert with all its evidence; for a redacted response, both hashes and the fields removed |
 | `alert dismiss ALERT_ID --reason REASON [--note TEXT] --by NAME` | Dismisses an alert; `REASON` is `not_used_at_runtime`, `risk_accepted`, `false_positive` or `fix_not_available` |
 | `history ID` | Closed alerts with how they closed (`fixed`, `dismissed`, `withdrawn` or `cleared`), when and on what evidence |
 
 Watch events are things worth knowing that are not alerts: a weight file in a format that can run code,
-a scan that could not finish, a hub file whose hash no longer matches what was registered. They never
-turn into alerts by repetition.
+a scan that could not finish, a hub file whose hash no longer matches what was registered, a new revision
+of the base model, a newer version of a dataset, a licence that cannot be recognised. They never turn
+into alerts by repetition.
+
+### Upstream checks
+
+| Alert | Raised when | Severity |
+| :-- | :-- | :-- |
+| `dataset_retracted` | Crossref lists a retraction, withdrawal or removal for the dataset DOI | `HIGH` |
+| `paper_retracted` | The same for a paper tied to the dataset with `paper_doi` | `HIGH` |
+| `dataset_removed` | Zenodo answers 410 with a tombstone, or the hub reports the dataset disabled | `HIGH` |
+| `dataset_not_findable` | DataCite answers 404 for a DOI registered with DataCite | `HIGH` |
+| `licence_changed` | The set of licences a source declares, normalised and in any order, differs from the recorded set | `HIGH` |
+| `base_model_disabled` | The hub reports the base model disabled | `MODERATE` |
+| `base_model_unavailable` | The hub has refused the base model in scheduled checks spanning at least 24 hours | `LOW` |
+
+These severities are set by policy, and the alerts say so (`severity_origin: "policy"`). A retraction
+alert closes as `withdrawn` when the retraction is no longer listed; a licence, disabled or unavailable
+alert closes as `cleared` when the source no longer shows the cause; any of them closes as `fixed` when a
+new version no longer depends on the item.
+
+Licences are normalised against the SPDX licence list and exceptions list, version 3.29.0, vendored in
+[`src/model_dependabot/licences/`](src/model_dependabot/licences/README.md) with their SHA-256 and a short
+table of repository spellings. A spelling or case difference raises nothing; a licence that cannot be
+recognised is a watch event, never an alert.
 
 A first session:
 
@@ -95,7 +130,8 @@ uv run model-dependabot alerts example-detector
 uv run model-dependabot alert show 1
 ```
 
-The JSON shapes are in [`specs/001-inventory-alerts/contracts/cli.md`](specs/001-inventory-alerts/contracts/cli.md).
+The JSON shapes are in [`specs/001-inventory-alerts/contracts/cli.md`](specs/001-inventory-alerts/contracts/cli.md)
+and [`specs/002-upstream-watch/contracts/cli.md`](specs/002-upstream-watch/contracts/cli.md).
 
 ### Exit codes
 
@@ -111,7 +147,11 @@ failures. Scripts read the `--json` output instead.
 
 ## Scheduling
 
-Run `check --all` once a day; a new advisory then shows up as an alert within a day. Use absolute paths,
+Run `check --all --scheduled` once a day; a new advisory or retraction then shows up as an alert within a
+day. `--scheduled` supersedes feature 001's plain `check --all` for the scheduler: only scheduled runs count
+towards the rule that a base model refused for at least 24 hours is no longer publicly available, so a
+host already running `check --all` must add `--scheduled`. A plain `check --all` still runs every check
+and records the run as on demand. Use absolute paths,
 because schedulers do not start in the repository. The examples assume the repository is at
 `/opt/model-dependabot` (or `C:\model-dependabot`) and the database at `/var/lib/model-dependabot/md.db`
 (or `C:\model-dependabot\md.db`).
@@ -120,7 +160,7 @@ because schedulers do not start in the repository. The examples assume the repos
 
 ```cron
 # m h dom mon dow  command
-15 6 * * *  cd /opt/model-dependabot && uv run model-dependabot check --all --db /var/lib/model-dependabot/md.db --json >> /var/log/model-dependabot.log 2>&1
+15 6 * * *  cd /opt/model-dependabot && uv run model-dependabot check --all --scheduled --db /var/lib/model-dependabot/md.db --json >> /var/log/model-dependabot.log 2>&1
 ```
 
 ### systemd timer
@@ -134,7 +174,7 @@ Description=model-dependabot daily check
 [Service]
 Type=oneshot
 WorkingDirectory=/opt/model-dependabot
-ExecStart=/usr/local/bin/uv run model-dependabot check --all --db /var/lib/model-dependabot/md.db --json
+ExecStart=/usr/local/bin/uv run model-dependabot check --all --scheduled --db /var/lib/model-dependabot/md.db --json
 ```
 
 `/etc/systemd/system/model-dependabot.timer`:
@@ -161,7 +201,7 @@ From PowerShell:
 
 ```powershell
 $action = New-ScheduledTaskAction -Execute "uv.exe" `
-    -Argument "run model-dependabot check --all --db C:\model-dependabot\md.db --json" `
+    -Argument "run model-dependabot check --all --scheduled --db C:\model-dependabot\md.db --json" `
     -WorkingDirectory "C:\model-dependabot"
 $trigger = New-ScheduledTaskTrigger -Daily -At 6:15am
 Register-ScheduledTask -TaskName "model-dependabot" -Action $action -Trigger $trigger
@@ -179,11 +219,18 @@ published limits.
 | Source | Used for | Requests |
 | :-- | :-- | :-- |
 | [OSV.dev](https://osv.dev) | Advisories for the locked PyPI packages | `POST /v1/querybatch` (a read-only query) and `GET /v1/vulns/{id}` |
-| [Hugging Face Hub API](https://huggingface.co/docs/hub/api) | Pinning hub files and base models to a commit; the hub's own security scan of hosted weight files | `GET /api/models/...` only |
+| [Hugging Face Hub API](https://huggingface.co/docs/hub/api) | Pinning hub files and base models to a commit; the hub's own security scan of hosted weight files; whether the base model and hub datasets are disabled, gated, moved or refused, their licence and newest revision | `GET /api/models/...` and `GET /api/datasets/...` only |
+| [Hub takedown log](https://huggingface.co/datasets/huggingface-legal/takedown-notices) | The notice date of a takedown naming a hub dataset (a notice date, not a removal date) | `GET` of the public `index.csv` |
+| [doi.org](https://www.doi.org/) | Which agency registered each DOI | `GET /doiRA/{doi}` |
+| [Crossref](https://www.crossref.org/documentation/retrieve-metadata/rest-api/) | Retractions, withdrawals, corrections and expressions of concern for Crossref DOIs | `GET /works/{doi}` |
+| [DataCite](https://support.datacite.org/docs/api) | Whether a DataCite DOI is findable, its licences, newer versions and replacements | `GET /dois/{doi}` |
+| [Zenodo](https://developers.zenodo.org/) | Removed records (410 with a tombstone), licences and newer versions | `GET /api/records/{id}` |
+| [Figshare](https://docs.figshare.com/) | An article's licence, or that it is gone | `GET /v2/articles/{id}` |
 | [picklescan](https://github.com/mmaitre314/picklescan) | Scanning local pickle-based weight files for dangerous imports | None: runs locally and never loads the file |
 
 Severity comes from the advisory's own rating, else from its CVSS v3 or v4 vector (scored with the
-`cvss` package), else `UNKNOWN`; the alert says which.
+`cvss` package), else `UNKNOWN`; the alert says which. A source that fails in a run is recorded as failed
+and cannot open, change or close any alert in that run.
 
 ## The evidence store
 
@@ -194,6 +241,13 @@ folder beside it, each named by its SHA-256, so any alert can be traced back to 
 said at the time. A recorded model version and its inventory are immutable. Back up the database and the
 `evidence/` folder together.
 
+Personal data is removed before a response is stored: the takedown log keeps only `date` and
+`reported_content` (never the requesting party or the notice's file name), and the names of people in
+Zenodo, Figshare, Crossref and DataCite answers (creators, contributors, authors, owners, citation text,
+who removed a record) are dropped. Such evidence keeps the SHA-256 of the response as received
+(`original_sha256`) beside the hash of the stored copy (`body_sha256`) and lists the fields removed
+(`redacted_fields`), so it stays checkable.
+
 ## What it never does
 
 - It never changes, deletes, retrains, re-exports or unpublishes a model or any file, and never writes
@@ -201,7 +255,11 @@ said at the time. A recorded model version and its inventory are immutable. Back
   file byte-for-byte unchanged (a test checks their SHA-256 and modification times).
 - It never sends `PUT`, `PATCH` or `DELETE`. The only `POST` is OSV's read-only query.
 - It never loads a weight file to inspect it: pickles are scanned as data, without running them.
-- It never sends a token, an account name or personal data to a source.
+- It never sends a token, an account name or personal data to a source; every upstream request is a
+  `GET` or `HEAD`.
+- It never stores the requesting party of a takedown or the names of people in a source's answer.
+- It never guesses: a paper is checked only when you tie it to a dataset, a licence it cannot recognise
+  is a watch event, and a base model is called unavailable only after scheduled refusals spanning 24 hours.
 - It never closes an alert because a source failed to answer; missing data leaves alerts as they were.
 
 The only files it writes are its own database, its `evidence/` folder and, when asked, the file named by
@@ -224,3 +282,5 @@ them. The live tests are left out of the default run.
   checked against primary sources.
 - [`specs/001-inventory-alerts/`](specs/001-inventory-alerts/): the specification, plan, data model,
   contracts and validation record for this first feature.
+- [`specs/002-upstream-watch/`](specs/002-upstream-watch/): the same for the upstream watch of base models
+  and training datasets.

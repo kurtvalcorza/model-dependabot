@@ -140,7 +140,16 @@ def test_check_accepts_all_without_an_id() -> None:
     recorder = Recorder()
     assert main(["check", "--all"], handlers=handlers_for("check", recorder)) == EXIT_OK
     assert recorder.args.all is True
-    assert recorder.args.sources == ["osv", "picklescan", "hf-scan"]
+    # Feature 002 adds six upstream sources; omitting --source still runs every source.
+    assert recorder.args.sources[:3] == ["osv", "picklescan", "hf-scan"]
+    assert recorder.args.sources[3:] == [
+        "hf-hub",
+        "hf-takedowns",
+        "crossref",
+        "datacite",
+        "zenodo",
+        "figshare",
+    ]
 
 
 def test_invalid_input_from_a_command_exits_1(capsys: pytest.CaptureFixture[str]) -> None:

@@ -1,0 +1,13 @@
+{
+  "method": "GET",
+  "url": "https://api.datacite.org/dois/10.5281/model-dependabot-fixture-does-not-exist",
+  "status": 404,
+  "headers": {
+    "content-type": "application/json; charset=utf-8"
+  },
+  "retrieved_at": "2026-10-24T05:47:18Z",
+  "body_file": "not-found.json",
+  "original_sha256": "30b443bb0e590a597609b71b83a2424d39b6f050b18d234c6543cdd1f8791b6b",
+  "body_sha256": "30b443bb0e590a597609b71b83a2424d39b6f050b18d234c6543cdd1f8791b6b",
+  "redacted_fields": []
+}

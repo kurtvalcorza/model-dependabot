@@ -1,0 +1,15 @@
+{
+  "method": "GET",
+  "url": "https://zenodo.org/api/records/8176941/versions/latest",
+  "status": 301,
+  "headers": {
+    "content-type": "application/json",
+    "location": "https://zenodo.org/api/records/18180184"
+  },
+  "redirected_to": "https://zenodo.org/api/records/18180184",
+  "retrieved_at": "2026-10-24T05:50:24Z",
+  "body_file": "older-version-latest.json",
+  "original_sha256": "81ac057455f9f68619ca11a17558b07238b9bd13da4dd651fd6c0234dfb9896b",
+  "body_sha256": "81ac057455f9f68619ca11a17558b07238b9bd13da4dd651fd6c0234dfb9896b",
+  "redacted_fields": []
+}

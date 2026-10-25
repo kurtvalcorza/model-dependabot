@@ -1,0 +1,13 @@
+{
+  "method": "GET",
+  "url": "https://doi.org/doiRA/10.1177/1758835919874651",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json;charset=UTF-8"
+  },
+  "retrieved_at": "2026-10-24T05:47:08Z",
+  "body_file": "crossref.json",
+  "original_sha256": "4e1a12a8836f835f5914a2154e55c517ffe7b4c1d606b6ac910392e4d5f3193d",
+  "body_sha256": "4e1a12a8836f835f5914a2154e55c517ffe7b4c1d606b6ac910392e4d5f3193d",
+  "redacted_fields": []
+}

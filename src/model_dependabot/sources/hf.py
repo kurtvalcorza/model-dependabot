@@ -10,13 +10,15 @@ private or missing repository, is a gap, never an error. Requests are anonymous 
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
 from posixpath import dirname
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlsplit
 
 from model_dependabot.sources.fetcher import Fetcher, Response, SourceFailedError
+from model_dependabot.upstream.licences import join_licences
 
 HF_ENDPOINT = "https://huggingface.co"
 _REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -97,6 +99,10 @@ class HuggingFace:
         except SourceFailedError as error:
             return None, f"hub not reachable: {error.reason}"
         return response, _refusal(response)
+
+    def dataset(self, repo: str) -> HubDataset:
+        """A hub dataset's info for the upstream watch (feature 002, research U5)."""
+        return read_dataset(self.fetcher, repo, self.endpoint)
 
     def tree(self, repo: str, revision: str, directory: str = "") -> TreeResult:
         """The files in one directory of a repository at a revision."""
@@ -304,3 +310,173 @@ class HubSecurity:
             file_status=file_status,
             tree_response=response,
         )
+
+
+# --- hub datasets (feature 002, research U5) ------------------------------------------------------
+
+DATASET_EXPAND = "expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha"
+DATASET_SOURCE = "hf-hub"
+
+
+def dataset_info_url(repo: str, endpoint: str = HF_ENDPOINT) -> str:
+    """Dataset info with the fields the upstream watch reads."""
+    return f"{endpoint}/api/datasets/{_path(repo)}?{DATASET_EXPAND}"
+
+
+def _declared_licence(card: object) -> str | None:
+    """``cardData.license``: every entry of a list, one per line (owner decision of 2026-10-24)."""
+    licence = card.get("license") if isinstance(card, dict) else None
+    if isinstance(licence, list):
+        return join_licences([str(item) for item in licence if item])
+    return str(licence) if licence else None
+
+
+def _gated(value: object) -> str | None:
+    if value is None:
+        return None
+    if value is False:
+        return "false"
+    return str(value).lower()
+
+
+@dataclass(frozen=True)
+class HubDataset:
+    """What the hub answered for one dataset: ``reachable``, ``refused`` or ``redirected``."""
+
+    repo: str
+    response: Response
+    outcome: str
+    disabled: bool | None = None
+    gated: str | None = None
+    sha: str | None = None
+    licence: str | None = None
+    moved_to: str | None = None
+
+
+def _moved_to(target: str | None) -> str | None:
+    if not target:
+        return None
+    path = urlsplit(target).path
+    prefix = "/api/datasets/"
+    return unquote(path[len(prefix) :]) if path.startswith(prefix) else None
+
+
+def parse_dataset(repo: str, response: Response) -> HubDataset:
+    status = response.status
+    if 300 <= status < 400:
+        target = _moved_to(response.redirected_to)
+        return HubDataset(repo, response, "redirected", moved_to=target)
+    if status in (401, 403, 404):
+        return HubDataset(repo, response, "refused")
+    if status != 200:
+        raise SourceFailedError(DATASET_SOURCE, f"HTTP {status} for dataset {repo}")
+    try:
+        info = json.loads(response.body)
+    except ValueError as error:
+        raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}: {error}") from None
+    if not isinstance(info, dict):
+        raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}")
+    sha = info.get("sha")
+    return HubDataset(
+        repo,
+        response,
+        "reachable",
+        disabled=bool(info.get("disabled", False)),
+        gated=_gated(info.get("gated", False)),
+        sha=sha if isinstance(sha, str) else None,
+        licence=_declared_licence(info.get("cardData")),
+    )
+
+
+def read_dataset(fetcher: Fetcher, repo: str, endpoint: str = HF_ENDPOINT) -> HubDataset:
+    """One dataset's info; a move is returned as it is, never followed (research U5)."""
+    return parse_dataset(
+        repo, fetcher.get(dataset_info_url(repo, endpoint), follow_redirects=False)
+    )
+
+
+MODEL_EXPAND = DATASET_EXPAND + "&expand[]=lastModified"
+
+
+def model_info_url(repo: str, endpoint: str = HF_ENDPOINT) -> str:
+    """Model info with the fields the upstream watch reads."""
+    return f"{endpoint}/api/models/{_path(repo)}?{MODEL_EXPAND}"
+
+
+@dataclass(frozen=True)
+class HubModel:
+    """What the hub answered for a base model: ``reachable``, ``refused`` or ``redirected``."""
+
+    repo: str
+    response: Response
+    outcome: str
+    disabled: bool | None = None
+    gated: str | None = None
+    sha: str | None = None
+    licence: str | None = None
+    private: bool | None = None
+    last_modified: str | None = None
+    card: dict[str, object] | None = None
+    card_hash: str | None = None
+    new_version: str | None = None
+    unrecognised: str | None = None
+
+
+# Research U7: a disabled model answers HTTP 200 with ``disabled: true`` (recorded in
+# ``model-disabled``). Any other value of ``disabled`` is not that shape, so it opens no alert.
+UNRECOGNISED_DISABLED = "the hub's disabled field is not true or false"
+# Left out of ``card_hash``: the licence fields are compared on their own (FR-008) and
+# ``new_version`` is its own watch event (data-model.md, Upstream observation).
+CARD_EXCLUDED = ("license", "license_name", "license_link", "new_version")
+
+
+def card_hash(card: object) -> str:
+    """SHA-256 of the canonical ``cardData`` without licence fields and ``new_version``."""
+    fields = card if isinstance(card, dict) else {}
+    kept = {name: value for name, value in fields.items() if name not in CARD_EXCLUDED}
+    canonical = json.dumps(kept, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def parse_model(repo: str, response: Response) -> HubModel:
+    status = response.status
+    if 300 <= status < 400:
+        return HubModel(repo, response, "redirected")
+    if status in (401, 403, 404):
+        return HubModel(repo, response, "refused")
+    if status != 200:
+        raise SourceFailedError(DATASET_SOURCE, f"HTTP {status} for model {repo}")
+    try:
+        info = json.loads(response.body)
+    except ValueError as error:
+        raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}: {error}") from None
+    if not isinstance(info, dict):
+        raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}")
+    sha = info.get("sha")
+    # The reader always asks for expand[]=disabled; an answer without it is not the recorded
+    # shape, so it is unrecognised (a watch event), never false (which would clear an alert).
+    disabled = info.get("disabled")
+    card = info.get("cardData")
+    card = card if isinstance(card, dict) else None
+    pointer = (card or {}).get("new_version")
+    modified = info.get("lastModified")
+    return HubModel(
+        repo,
+        response,
+        "reachable",
+        disabled=disabled if isinstance(disabled, bool) else None,
+        gated=_gated(info.get("gated", False)),
+        sha=sha if isinstance(sha, str) else None,
+        licence=_declared_licence(card),
+        private=info.get("private") if isinstance(info.get("private"), bool) else None,
+        last_modified=modified if isinstance(modified, str) else None,
+        card=card,
+        card_hash=card_hash(card),
+        new_version=pointer if isinstance(pointer, str) and pointer else None,
+        unrecognised=None if isinstance(disabled, bool) else UNRECOGNISED_DISABLED,
+    )
+
+
+def read_model(fetcher: Fetcher, repo: str, endpoint: str = HF_ENDPOINT) -> HubModel:
+    """A base model's info; a redirect is returned as it is, never followed."""
+    return parse_model(repo, fetcher.get(model_info_url(repo, endpoint), follow_redirects=False))

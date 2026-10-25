@@ -2,28 +2,41 @@
 
 ``Fetcher`` is the interface the source adapters use. ``UrlFetcher`` talks to the real sources with
 the standard library; ``RecordedFetcher`` serves recorded responses so tests make no network calls
-(constitution V). Both only read: they offer ``get`` and ``post`` (for read-only queries such as
-OSV's ``/v1/querybatch``) and nothing that could change a remote resource (FR-017).
+(constitution V). Both only read: they offer ``get``, ``head`` and ``post`` (for read-only queries
+such as OSV's ``/v1/querybatch``) and nothing that could change a remote resource (FR-017).
+
+Feature 002 additions (research U5, U10, U13): urllib never follows a redirect; the fetcher follows
+it itself (at most ``MAX_REDIRECTS`` hops, so each hop is paced and redacted) and marks the final
+answer with ``redirected_from``, which keeps feature 001's adapters working as before. A call that
+must see a move (002's hub dataset and model info) passes ``follow_redirects=False`` and gets the
+3xx as it is, with ``redirected_from`` and ``redirected_to``. Every body passes through the
+source's redaction rule (``redact.py``) before it leaves the fetcher, so nothing personal can reach
+the evidence store; each upstream source is paced at its published limit, one request at a time;
+and an optional ETag cache revalidates with ``If-None-Match`` and serves a 304 from the cache.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import threading
 import time
 import urllib.error
 import urllib.request
 from collections import deque
-from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable, Mapping, MutableMapping
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from model_dependabot import __version__
+from model_dependabot.redact import redact, source_for_url
 
 DEFAULT_USER_AGENT = f"model-dependabot/{__version__}"
+MAX_REDIRECTS = 5
 
 
 class Headers(dict[str, str]):
@@ -52,6 +65,20 @@ class Response:
     url: str
     retrieved_at: datetime
     headers: Headers = field(default_factory=Headers)
+    redirected_from: str | None = None
+    redirected_to: str | None = None
+    original_sha256: str = ""
+    redacted_fields: tuple[str, ...] = ()
+    not_modified: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.original_sha256:
+            object.__setattr__(self, "original_sha256", hashlib.sha256(self.body).hexdigest())
+
+    @property
+    def body_sha256(self) -> str:
+        """The SHA-256 of the body as it may be stored (redacted where research U10 applies)."""
+        return hashlib.sha256(self.body).hexdigest()
 
 
 class SourceFailedError(Exception):
@@ -71,7 +98,7 @@ class NoRecordingError(LookupError):
 class Fetcher(Protocol):
     """Read-only HTTP access: GET, plus POST for read-only queries."""
 
-    def get(self, url: str) -> Response: ...
+    def get(self, url: str, *, follow_redirects: bool = True) -> Response: ...
 
     def post(self, url: str, body: bytes) -> Response: ...
 
@@ -87,7 +114,15 @@ class RateLimit:
 # Published ceilings per host (research R8). The Hugging Face Hub documents 500 API requests per
 # five-minute window for anonymous use (September 2025 figures, "subject to change"). OSV.dev states
 # no limit, so it relies on the cache and back-off alone.
-DEFAULT_LIMITS: Mapping[str, RateLimit] = {"huggingface.co": RateLimit(requests=500, window=300.0)}
+# Feature 002 (research U13): Crossref's anonymous public pool and Figshare allow one request a
+# second, Zenodo 60 a minute for guests.
+DEFAULT_LIMITS: Mapping[str, RateLimit] = {
+    "huggingface.co": RateLimit(requests=500, window=300.0),
+    "api.crossref.org": RateLimit(requests=1, window=1.0),
+    "api.figshare.com": RateLimit(requests=1, window=1.0),
+    "zenodo.org": RateLimit(requests=60, window=60.0),
+}
+READ_METHODS = ("GET", "HEAD", "POST")
 
 
 def source_of(url: str) -> str:
@@ -107,6 +142,59 @@ def _canonical_body(body: object) -> str | None:
         except ValueError:
             return body
     return json.dumps(body, sort_keys=True, separators=(",", ":"))
+
+
+def _redacted(response: Response, recorded: Mapping[str, Any] | None = None) -> Response:
+    """``response`` with its body passed through the source's redaction rule (research U10).
+
+    A recording made redacted carries the original hash and fields in its meta file; they are kept.
+    """
+    result = redact(source_for_url(response.url), response.body)
+    original = result.original_sha256
+    fields = set(result.redacted_fields)
+    if recorded:
+        original = recorded.get("original_sha256") or original
+        fields |= set(recorded.get("redacted_fields") or ())
+    return replace(
+        response, body=result.body, original_sha256=original, redacted_fields=tuple(sorted(fields))
+    )
+
+
+def _location(url: str, headers: Any) -> str | None:
+    value = headers.get("Location") if headers is not None else None
+    return urljoin(url, value) if value else None
+
+
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Makes urllib return a 3xx as an error; the fetcher decides whether to follow it (U5)."""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+def open_without_redirects(request: urllib.request.Request, timeout: float) -> Any:
+    """The default opener: ``urlopen`` without silent redirects."""
+    return urllib.request.build_opener(NoRedirectHandler()).open(request, timeout=timeout)
+
+
+def _follow(
+    send: Callable[[str, str, bytes | None], Response],
+    method: str,
+    url: str,
+    body: bytes | None,
+    follow_redirects: bool,
+) -> Response:
+    """``send`` one request and, unless the caller opts out, follow its redirects (GET and HEAD)."""
+    response = send(method, url, body)
+    if not follow_redirects or method == "POST":
+        return response
+    hops = 0
+    while 300 <= response.status < 400 and response.redirected_to:
+        if hops >= MAX_REDIRECTS:
+            raise SourceFailedError(source_of(url), f"more than {MAX_REDIRECTS} redirects")
+        hops += 1
+        response = send(method, response.redirected_to, None)
+    return replace(response, redirected_from=url) if hops else response
 
 
 def _parse_time(text: str) -> datetime:
@@ -133,8 +221,11 @@ class RecordedFetcher:
                 raise ValueError(f"two recordings for {key[0]} {key[1]}: {meta_path}")
             self._recordings[key] = (meta_path, meta)
 
-    def get(self, url: str) -> Response:
-        return self._serve("GET", url, None)
+    def get(self, url: str, *, follow_redirects: bool = True) -> Response:
+        return _follow(self._serve, "GET", url, None, follow_redirects)
+
+    def head(self, url: str, *, follow_redirects: bool = True) -> Response:
+        return _follow(self._serve, "HEAD", url, None, follow_redirects)
 
     def post(self, url: str, body: bytes) -> Response:
         return self._serve("POST", url, body)
@@ -147,13 +238,16 @@ class RecordedFetcher:
         meta_path, meta = self._recordings[key]
         if "error" in meta:
             raise SourceFailedError(source_of(url), meta["error"])
-        return Response(
+        response = Response(
             status=int(meta["status"]),
             body=(meta_path.parent / meta["body_file"]).read_bytes(),
             url=url,
             retrieved_at=_parse_time(meta["retrieved_at"]),
             headers=Headers(meta.get("headers", {})),
+            redirected_from=url if meta.get("redirected_to") else None,
+            redirected_to=meta.get("redirected_to"),
         )
+        return _redacted(response, meta)
 
 
 Opener = Callable[..., Any]
@@ -182,6 +276,7 @@ class UrlFetcher:
         monotonic: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         utcnow: Callable[[], datetime] = lambda: datetime.now(UTC),
+        etag_cache: MutableMapping[str, Response] | None = None,
     ) -> None:
         if "@" in user_agent:
             raise ValueError("the User-Agent must be generic and must not carry an email address")
@@ -192,7 +287,9 @@ class UrlFetcher:
         self._max_429s = max_429s
         self._max_retry_after = max_retry_after
         self._limits = dict(DEFAULT_LIMITS if limits is None else limits)
-        self._opener = opener or urllib.request.urlopen
+        self._opener = opener or open_without_redirects
+        self._etags = etag_cache
+        self._locks: dict[str, threading.Lock] = {}
         self._monotonic = monotonic
         self._sleep = sleep
         self._utcnow = utcnow
@@ -201,13 +298,21 @@ class UrlFetcher:
         self._429s: dict[str, int] = {}
         self.failed_sources: dict[str, str] = {}
 
-    def get(self, url: str) -> Response:
-        return self._send("GET", url, None)
+    def get(self, url: str, *, follow_redirects: bool = True) -> Response:
+        return _follow(self._send, "GET", url, None, follow_redirects)
+
+    def head(self, url: str, *, follow_redirects: bool = True) -> Response:
+        return _follow(self._send, "HEAD", url, None, follow_redirects)
 
     def post(self, url: str, body: bytes) -> Response:
         return self._send("POST", url, body)
 
     def _send(self, method: str, url: str, body: bytes | None) -> Response:
+        # One request at a time per source (research U13).
+        with self._locks.setdefault(source_of(url), threading.Lock()):
+            return self._send_one(method, url, body)
+
+    def _send_one(self, method: str, url: str, body: bytes | None) -> Response:
         source = source_of(url)
         if source in self.failed_sources:
             raise SourceFailedError(source, self.failed_sources[source])
@@ -215,25 +320,33 @@ class UrlFetcher:
         if key in self._cache:
             return self._cache[key]
 
+        cached = self._etags.get(url) if self._etags is not None and method == "GET" else None
+        etag = cached.headers.get("ETag") if cached is not None else None
+
         reason = "no attempt made"
         for attempt in range(self._retries + 1):
             self._throttle(source)
             delay = self._backoff * 2**attempt
             try:
-                with self._opener(self._build(method, url, body), timeout=self._timeout) as raw:
-                    response = self._response(raw.status, raw.read(), raw.geturl(), raw.headers)
+                request = self._build(method, url, body, etag=etag)
+                with self._opener(request, timeout=self._timeout) as raw:
+                    response = self._answer(url, raw.status, raw.read(), raw.headers, cached)
                 self._429s[source] = 0
                 self._cache[key] = response
                 return response
             except urllib.error.HTTPError as error:
                 status = error.code
                 reason = f"HTTP {status}"
+                if status < 400:
+                    response = self._answer(url, status, error.read(), error.headers, cached)
+                    self._cache[key] = response
+                    return response
                 if status == 429:
                     self._429s[source] = self._429s.get(source, 0) + 1
                     if self._429s[source] >= self._max_429s:
                         self._fail(source, f"HTTP 429 {self._429s[source]} times")
                 elif status < 500:
-                    response = self._response(status, error.read(), url, error.headers)
+                    response = self._answer(url, status, error.read(), error.headers, None)
                     self._cache[key] = response
                     return response
                 retry_after = self._retry_after(error.headers)
@@ -247,17 +360,35 @@ class UrlFetcher:
                 self._sleep(delay)
         raise SourceFailedError(source, f"{reason} after {self._retries + 1} attempts")
 
-    def _build(self, method: str, url: str, body: bytes | None) -> urllib.request.Request:
-        if method not in ("GET", "POST"):
+    def _build(
+        self, method: str, url: str, body: bytes | None, *, etag: str | None = None
+    ) -> urllib.request.Request:
+        if method not in READ_METHODS:
             raise ValueError(f"the fetcher only reads; {method} is not allowed")
         headers = {"User-Agent": self._user_agent}
         if body is not None:
             headers["Content-Type"] = "application/json"
+        if etag:
+            headers["If-None-Match"] = etag
         return urllib.request.Request(url, data=body, headers=headers, method=method)
 
     def _response(self, status: int, body: bytes, url: str, headers: Any) -> Response:
         items = headers.items() if headers is not None else ()
-        return Response(status, body, url, self._utcnow(), Headers(items))
+        return _redacted(Response(status, body, url, self._utcnow(), Headers(items)))
+
+    def _answer(
+        self, url: str, status: int, body: bytes, headers: Any, cached: Response | None
+    ) -> Response:
+        """A response as recorded: a 304 served from the ETag cache, a 3xx with its target."""
+        if status == 304 and cached is not None:
+            return replace(cached, retrieved_at=self._utcnow(), not_modified=True)
+        response = self._response(status, body, url, headers)
+        if 300 <= status < 400:
+            target = _location(url, headers)
+            return replace(response, redirected_from=url, redirected_to=target)
+        if self._etags is not None and 200 <= status < 300 and response.headers.get("ETag"):
+            self._etags[url] = response
+        return response
 
     def _fail(self, source: str, reason: str) -> None:
         self.failed_sources[source] = reason

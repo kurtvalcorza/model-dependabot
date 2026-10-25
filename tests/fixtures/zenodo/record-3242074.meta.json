@@ -1,0 +1,17 @@
+{
+  "method": "GET",
+  "url": "https://zenodo.org/api/records/3242074",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "etag": "\"5\""
+  },
+  "retrieved_at": "2026-10-24T05:47:24Z",
+  "body_file": "record-3242074.json",
+  "original_sha256": "a3ea4a4d5c862b4fb7fafd26d93886841fb307c0396f6ae2470fa30e7dd5a181",
+  "body_sha256": "bdee58d704ddda24287e35adf385c60fddd887eec54895be13774bcce80391e5",
+  "redacted_fields": [
+    "metadata.creators",
+    "owners"
+  ]
+}
