@@ -117,12 +117,43 @@ def parse_work(doi: str, response: Response) -> CrossrefWork:
     if response.status != 200:
         raise SourceFailedError(SOURCE, f"HTTP {response.status} for {doi}")
     try:
-        message = json.loads(response.body)["message"]
+        updates = _read_updates(doi, json.loads(response.body))
     except (ValueError, KeyError, TypeError) as error:
         raise SourceFailedError(SOURCE, f"unreadable answer for {doi}: {error}") from None
-    entries = (message.get("updated-by") or []) if isinstance(message, dict) else []
-    updates = tuple(u for u in (_update(e) for e in entries if isinstance(e, dict)) if u)
     return CrossrefWork(doi, response, "reachable", updates)
+
+
+def _read_updates(doi: str, envelope: Any) -> tuple[Update, ...]:
+    """The ``updated-by`` entries of a well-formed answer for ``doi``.
+
+    Anything this cannot read is an unreadable answer, never "no notices" (FR-016 of 001): the
+    envelope must be an object whose ``message`` is the work asked for, ``updated-by`` (absent or
+    null means none) must be a list, and every entry in it must be an object with a text ``type``.
+    """
+    if not isinstance(envelope, dict):
+        raise TypeError("the answer is not an object")
+    if envelope.get("status", "ok") != "ok":
+        raise ValueError(f"status {envelope.get('status')!r}")
+    if envelope.get("message-type", "work") != "work":
+        raise ValueError(f"message-type {envelope.get('message-type')!r}")
+    message = envelope["message"]
+    if not isinstance(message, dict):
+        raise TypeError("message is not an object")
+    answered = message.get("DOI")
+    if answered is not None and (not isinstance(answered, str) or answered.lower() != doi.lower()):
+        raise ValueError(f"the answer is for {answered!r}")
+    entries = message.get("updated-by")
+    if entries is None:
+        return ()
+    if not isinstance(entries, list):
+        raise TypeError("updated-by is not a list")
+    updates: list[Update] = []
+    for entry in entries:
+        update = _update(entry) if isinstance(entry, dict) else None
+        if update is None:
+            raise TypeError(f"an updated-by entry has no type: {entry!r}")
+        updates.append(update)
+    return tuple(updates)
 
 
 class Crossref:

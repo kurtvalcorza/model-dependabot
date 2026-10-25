@@ -181,9 +181,11 @@ def _packages(lock: Path) -> list[dict[str, Any]]:
     return entries
 
 
-def huggingface_purl(repo: str, commit: str) -> str:
+def huggingface_purl(repo: str, commit: str | None) -> str:
+    """The base model's purl at ``commit``; without one, the repository's versionless purl."""
     owner, name = repo.split("/", 1)
-    return f"pkg:huggingface/{quote(owner, safe='')}/{quote(name, safe='')}@{commit}"
+    purl = f"pkg:huggingface/{quote(owner, safe='')}/{quote(name, safe='')}"
+    return purl if commit is None else f"{purl}@{commit}"
 
 
 def _base_model(spec: BaseModelSpec) -> dict[str, Any]:

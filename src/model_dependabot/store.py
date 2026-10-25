@@ -10,7 +10,8 @@ Feature 002 adds upstream observations, the DOI routing cache and the takedown l
 ``requesting_entity`` column), the check run's ``trigger``, and the evidence fields
 ``original_sha256`` and ``redacted_fields`` (research U10). Tables are created with
 ``CREATE TABLE IF NOT EXISTS``, so a fresh database has them; a database created by feature 001
-is not migrated.
+is not migrated. One data migration runs on open: open repository-wide alerts written with a
+revision in their cause key are rekeyed by repository (``_rekey_repository_alerts``).
 """
 
 from __future__ import annotations
@@ -323,6 +324,36 @@ class Store:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
+        self._rekey_repository_alerts()
+
+    def _rekey_repository_alerts(self) -> None:
+        """Key open repository-wide alerts by repository, not revision (003, identity table).
+
+        Before 003, ``base_model_disabled``, ``base_model_unavailable`` and a hub dataset's
+        ``dataset_removed`` were keyed by the pinned revision (``...@<commit>``). Their cause is
+        a state of the whole repository, so they are now keyed without it. An open alert with an
+        old key is rekeyed when the database is opened; nothing else about it changes. Should
+        another open alert already hold the new key (two revisions of one repository open at
+        once), the old one is left as it is rather than merged.
+        """
+        rows = self.conn.execute(
+            "SELECT alert_id, model_id, cause_key FROM alerts WHERE state = 'open' AND ("
+            " kind IN ('base_model_disabled', 'base_model_unavailable')"
+            " OR (kind = 'dataset_removed' AND cause_key LIKE 'dataset_removed:hf-dataset:%'))"
+            " AND cause_key LIKE '%@%'"
+        ).fetchall()
+        for row in rows:
+            new_key = row["cause_key"].rsplit("@", 1)[0]
+            with self.conn:
+                taken = self.conn.execute(
+                    "SELECT 1 FROM alerts WHERE model_id = ? AND cause_key = ? AND state = 'open'",
+                    (row["model_id"], new_key),
+                ).fetchone()
+                if taken is None:
+                    self.conn.execute(
+                        "UPDATE alerts SET cause_key = ? WHERE alert_id = ?",
+                        (new_key, row["alert_id"]),
+                    )
 
     def __enter__(self) -> Store:
         return self

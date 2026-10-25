@@ -110,10 +110,14 @@ into alerts by repetition.
 | `base_model_disabled` | The hub reports the base model disabled | `MODERATE` |
 | `base_model_unavailable` | The hub has refused the base model in scheduled checks spanning at least 24 hours | `LOW` |
 
-These severities are set by policy, and the alerts say so (`severity_origin: "policy"`). A retraction
-alert closes as `withdrawn` when the retraction is no longer listed; a licence, disabled or unavailable
-alert closes as `cleared` when the source no longer shows the cause; any of them closes as `fixed` when a
-new version no longer depends on the item.
+These severities are set by policy, and the alerts say so (`severity_origin: "policy"`). A retraction,
+licence, disabled or unavailable alert closes as `cleared` when the source that reported it no longer shows
+the cause in a successful, well-formed answer; a licence alert needs every source that reported the change
+to answer so, and a source that failed or was not asked keeps it open. `withdrawn` is used only for an
+OSV advisory marked withdrawn. Any of them closes as `fixed` when a new version no longer depends on the
+item. A disabled or unavailable base model and a disabled hub dataset are states of the repository, so
+pinning another revision of the same repository keeps the alert open; an entry missing its pin (a gap)
+never counts as a fix.
 
 Licences are normalised against the SPDX licence list and exceptions list, version 3.29.0, vendored in
 [`src/model_dependabot/licences/`](src/model_dependabot/licences/README.md) with their SHA-256 and a short

@@ -24,12 +24,13 @@ scan that stopped early a ``scan_incomplete`` watch event. ``hf-scan`` reads the
 an explicit ``unsafe`` verdict for a file whose hub SHA-256 matches the inventory raises a
 ``hub_scan`` alert; anything else it cannot confirm is a watch event.
 
-Closing (US4; FR-014, FR-015, FR-023, constitution III): registering a newer version closes an
-alert as ``fixed`` when the new inventory no longer has its cause and carries it forward when it
-does, consulting no source. A check closes an alert as ``cleared`` when the source that answered in
-that run no longer shows the cause: OSV and the local evaluation both agree the pinned version is
-unaffected, the hub gives an explicit ``safe`` verdict for the matching hash, or the owner's
-recorded format policy is no longer ``strict``. A person dismisses an alert with a listed reason.
+Closing (US4; FR-014, FR-015, FR-023, constitution III): registering a newer version closes an alert
+as ``fixed`` when the new inventory no longer has its cause and carries it forward when it does,
+consulting no source; a gap for the same dependency leaves it as it was. A check closes an alert as
+``cleared`` when the source that answered in that run no longer shows the cause: OSV and the local
+evaluation both agree the pinned version is unaffected, the hub gives an explicit ``safe`` verdict
+for the matching hash, or the owner's recorded format policy is no longer ``strict``. A person
+dismisses an alert with a listed reason.
 """
 
 from __future__ import annotations
@@ -40,9 +41,11 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 from packaging.utils import canonicalize_name
 
+from model_dependabot.inventory.build import HUB_DATASET_PREFIX, huggingface_purl
 from model_dependabot.matching.severity import severity_of
 from model_dependabot.matching.versions import advisory_affects, affected_ranges, fixed_versions
 from model_dependabot.sources import (
@@ -965,10 +968,14 @@ def reevaluate_version(store: Store, model_id: str, version: int) -> dict[str, l
     """Settle the model's open alerts against a newly registered version (FR-014, SC-004).
 
     A cause the new inventory no longer has closes its alert as ``fixed`` by that version, with
-    the new inventory as evidence; a cause it still has carries the alert forward. An unpinned
-    entry for the same package or weight file is not proof the cause is gone, so the alert is
-    left as it was. Only the two inventories are compared: no source is consulted, so a failed
-    source cannot affect it.
+    the new inventory as evidence; a cause it still has carries the alert forward. Each cause is
+    compared at its own identity (the identity and clearance table of 002's data-model.md): a
+    disabled or unavailable base model and a disabled hub dataset are states of the repository,
+    so a version pinning another revision of it carries the alert to that revision; every other
+    cause is its exact file hash, revision or DOI. An unpinned entry (a gap) for the same package,
+    weight file, dataset or repository is not proof the cause is gone, so the alert is left as it
+    was. Only the two inventories are compared: no source is consulted, so a failed source
+    cannot affect it.
     """
     result: dict[str, list[int]] = {"fixed": [], "carried_forward": []}
     record = store.get_version(model_id, version)
@@ -993,13 +1000,22 @@ def reevaluate_version(store: Store, model_id: str, version: int) -> dict[str, l
             if present and entry is not None:
                 cause |= {"version": entry["version"], "identifier": entry["identifier"]}
             detail["found"] = None if entry is None else entry["identifier"]
-        elif alert["kind"] in DATASET_ALERTS:
-            present = _dataset_present(cause, alert["kind"], entries)
-            detail["found"] = cause["identifier"] if present else None
-        elif alert["kind"] in (LICENCE_CHANGED, BASE_MODEL_DISABLED, BASE_MODEL_UNAVAILABLE):
-            present = any(
-                entry["pinned"] and entry["identifier"] == cause["identifier"] for entry in entries
-            )
+        elif alert["kind"] in UPSTREAM_ITEM_ALERTS:
+            earlier = store.entries(model_id, alert["current_version"])
+            repository = _repository_of(cause, earlier)
+            if _repository_scoped(alert["kind"], cause) and repository is not None:
+                # A state of the whole hub repository: any pinned revision of it still has it.
+                same = [entry for entry in entries if _in_repository(entry, repository)]
+                pinned = [entry for entry in same if entry["pinned"]]
+                if not pinned and same:
+                    continue  # only a gap for the repository: neither fixed nor shown again
+                present = bool(pinned)
+                if present:
+                    cause |= _repinned(alert["kind"], pinned[0])
+            else:
+                present = _dataset_present(cause, alert["kind"], entries)
+                if not present and _gap_for(cause, repository, entries):
+                    continue  # only a gap for the same dependency: neither fixed nor shown again
             detail["found"] = cause["identifier"] if present else None
         else:
             entry = weights.get(cause["identifier"])
@@ -1109,6 +1125,26 @@ DOI_SOURCES = (CROSSREF, DATACITE, ZENODO, FIGSHARE)
 def dataset_cause_key(kind: str, identifier: str, paper_doi: str | None = None) -> str:
     """Cause keys of data-model.md: kind + dataset DOI or identifier (+ paper DOI)."""
     return f"{kind}:{identifier}" if paper_doi is None else f"{kind}:{identifier}:{paper_doi}"
+
+
+def base_model_repo(entry: Mapping[str, Any]) -> str:
+    """The base model's repository identity: its purl without a version (data-model.md).
+
+    A disabled or unavailable base model is a state of the whole repository, so its alerts are
+    keyed by this and not by the pinned revision (identity and clearance table).
+    """
+    return huggingface_purl(entry["name"], None)
+
+
+def hub_dataset_repo(repo: str) -> str:
+    """A hub dataset's repository identity: ``hf-dataset:owner/name`` without a revision."""
+    return f"{HUB_DATASET_PREFIX}{repo}"
+
+
+# Alert kinds whose cause is a state of a whole hub repository (identity and clearance table).
+REPOSITORY_ALERTS = (BASE_MODEL_DISABLED, BASE_MODEL_UNAVAILABLE)
+# Alert kinds about one upstream item that registering a version settles (identity table).
+UPSTREAM_ITEM_ALERTS = (*DATASET_ALERTS, *REPOSITORY_ALERTS, LICENCE_CHANGED)
 
 
 @dataclass
@@ -1413,8 +1449,10 @@ def _apply_crossref(
         return
     existing = store.find_open_alert(target.model_id, cause_key)
     if existing is not None:
-        # Research U12: Crossref no longer lists a retraction, withdrawal or removal.
-        _close(store, target, existing, "withdrawn", [evidence_id])
+        # Research U12: a well-formed answer no longer lists a retraction, withdrawal or removal.
+        # That is the source's current state, not a published withdrawal of the notice, so the
+        # alert is cleared; ``withdrawn`` is kept for explicit withdrawal evidence (an OSV record).
+        _close(store, target, existing, "cleared", [evidence_id])
     if work.notices:
         detail = {"source": CROSSREF, "dataset": dataset, "doi": doi, "notices": notices}
         _upstream_watch(store, target, UPSTREAM_NOTICE, doi, detail, [evidence_id])
@@ -1576,10 +1614,11 @@ def _apply_hub_dataset(
         return
     if not dataset.disabled:
         return
-    key = dataset_cause_key(DATASET_REMOVED, item)
+    key = dataset_cause_key(DATASET_REMOVED, hub_dataset_repo(repo))
     cause: dict[str, Any] = {
         "identifier": item,
         "dataset": item,
+        "repo": repo,
         "host": "huggingface",
         "disabled": True,
         "notice_date": None,
@@ -1628,11 +1667,11 @@ def _apply_base_model(
     evidence = [observation["evidence_ref"]]
     base: dict[str, Any] = {"identifier": item, "base_model": item, "repo": entry["name"]}
     if model.outcome == "refused":
-        _apply_refusal(store, target, item, base, observation)
+        _apply_refusal(store, target, entry, base, observation)
         return
     # Any answer that is not a refusal, from any run, ends the run of refusals (research U7).
     unavailable = store.find_open_alert(
-        target.model_id, dataset_cause_key(BASE_MODEL_UNAVAILABLE, item)
+        target.model_id, dataset_cause_key(BASE_MODEL_UNAVAILABLE, base_model_repo(entry))
     )
     if unavailable is not None:
         _close(store, target, unavailable, "cleared", evidence)
@@ -1644,14 +1683,14 @@ def _apply_base_model(
         detail |= {"disabled": _disabled_value(model.response), "reason": model.unrecognised}
         _upstream_watch(store, target, BASE_MODEL_UNRECOGNISED, item, detail, evidence)
     elif model.disabled:
-        key = dataset_cause_key(BASE_MODEL_DISABLED, item)
+        key = dataset_cause_key(BASE_MODEL_DISABLED, base_model_repo(entry))
         cause = base | {"disabled": True, "source": HF_HUB}
         severity = BASE_MODEL_SEVERITY[BASE_MODEL_DISABLED]
         _upstream_alert(store, target, BASE_MODEL_DISABLED, key, cause, evidence, severity)
     elif model.disabled is False:
         # The hub reports the model enabled again: the cause is gone (constitution 1.0.2).
         disabled = store.find_open_alert(
-            target.model_id, dataset_cause_key(BASE_MODEL_DISABLED, item)
+            target.model_id, dataset_cause_key(BASE_MODEL_DISABLED, base_model_repo(entry))
         )
         if disabled is not None:
             _close(store, target, disabled, "cleared", evidence)
@@ -1737,13 +1776,14 @@ def _disabled_value(response: Response) -> Any:
 def _apply_refusal(
     store: Store,
     target: _Target,
-    item: str,
+    entry: Mapping[str, Any],
     base: Mapping[str, Any],
     observation: Mapping[str, Any],
 ) -> None:
     """The refusal-span rule (research U7, FR-012): an alert, or a ``base_model_refused`` event."""
+    item = entry["identifier"]
     run = refusal_run(store.observations(item, HF_HUB))
-    key = dataset_cause_key(BASE_MODEL_UNAVAILABLE, item)
+    key = dataset_cause_key(BASE_MODEL_UNAVAILABLE, base_model_repo(entry))
     if run.counted and run.qualifies:
         refusals = [
             {
@@ -1785,8 +1825,11 @@ def _apply_licence(
     """Compare this run's declared licences of one item with its reference (FR-009, FR-010).
 
     The reference is the recorded licence, or the first stored observation that declared one
-    (the baseline). One alert per item: a further change updates it, and a return to the
-    reference closes it as ``cleared`` (research U8, U12).
+    (the baseline). One alert per item: a further change updates it. The alert's cause names each
+    source that reports the change (``sources``); a source drops out only when it answers in a run
+    with the reference again, and the alert closes as ``cleared`` once none is left (FR-018,
+    research U8, U12). A source that failed or was not asked in the run keeps its report, whatever
+    the other sources say.
     """
     item = entry["identifier"]
     seen = [o for o in observed.of_item(item) if o["source"] in LICENCE_SOURCES]
@@ -1823,6 +1866,10 @@ def _apply_licence(
         elif finding == "same":
             same.append(observation)
     key = dataset_cause_key(LICENCE_CHANGED, item)
+    existing = store.find_open_alert(target.model_id, key)
+    returned = {o["source"] for o in same}
+    reporting = [s for s in _reporting_sources(existing) if s not in returned]
+    reporting = list(dict.fromkeys(reporting + [o["source"] for o in changed]))
     if changed:
         latest = changed[-1]
         cause = {
@@ -1833,13 +1880,42 @@ def _apply_licence(
             "declared_licence": latest["declared_licence"],
             "declared_normalised": normalise(latest["declared_licence"]).normalised,
             "source": latest["source"],
+            "sources": reporting,
         }
         evidence_ids = [o["evidence_ref"] for o in changed]
         _upstream_alert(store, target, LICENCE_CHANGED, key, cause, evidence_ids)
         return
-    existing = store.find_open_alert(target.model_id, key) if same else None
-    if existing is not None:
-        _close(store, target, existing, "cleared", [o["evidence_ref"] for o in same])
+    if existing is None or not same:
+        return
+    evidence_ids = [o["evidence_ref"] for o in same]
+    if not reporting:
+        _close(store, target, existing, "cleared", evidence_ids)
+        return
+    if reporting != _reporting_sources(existing):
+        # Some reporting sources answered with the reference again; the others still report it.
+        cause = dict(existing["cause"]) | {"sources": reporting, "source": reporting[-1]}
+        _link_new(store, existing["alert_id"], evidence_ids)
+        store.update_open_alert(
+            existing["alert_id"],
+            current_version=max(existing["current_version"], target.version),
+            severity=existing["severity"],
+            severity_origin=existing["severity_origin"],
+            cause=cause,
+        )
+        if existing["alert_id"] not in target.summary["carried_forward"]:
+            target.summary["carried_forward"].append(existing["alert_id"])
+
+
+def _reporting_sources(alert: Mapping[str, Any] | None) -> list[str]:
+    """The sources an open licence alert says report the change (an alert written before causes
+    listed them names only its latest one, ``source``)."""
+    if alert is None:
+        return []
+    cause = alert["cause"]
+    listed = cause.get("sources")
+    if isinstance(listed, list) and listed:
+        return [str(source) for source in listed]
+    return [str(cause["source"])] if cause.get("source") else []
 
 
 def _apply_upstream(
@@ -1870,12 +1946,84 @@ def _apply_upstream(
 def _dataset_present(
     cause: Mapping[str, Any], kind: str, entries: Sequence[Mapping[str, Any]]
 ) -> bool:
-    """Whether a new inventory still depends on the alert's dataset (and its tied paper)."""
+    """Whether a new inventory still pins the alert's exact item (and, for a paper, its tie).
+
+    The item is a dataset DOI or hub dataset revision, or for a licence alert also a base model
+    revision. A gap is not a pin: the caller decides what a gap for the same dependency means.
+    """
     for entry in entries:
-        if entry["kind"] != "dataset" or not entry["pinned"]:
+        if entry["kind"] not in ("dataset", "base_model") or not entry["pinned"]:
             continue
         if entry["identifier"] != cause["identifier"]:
             continue
         if kind != PAPER_RETRACTED or cause.get("paper_doi") in (entry.get("paper_dois") or []):
             return True
     return False
+
+
+def _repository_scoped(kind: str, cause: Mapping[str, Any]) -> bool:
+    """Whether the cause is a state of a whole hub repository (identity and clearance table):
+    a disabled or unavailable base model, or a disabled hub dataset."""
+    return kind in REPOSITORY_ALERTS or (
+        kind == DATASET_REMOVED and cause.get("host") == "huggingface"
+    )
+
+
+def _repository_of(
+    cause: Mapping[str, Any], earlier: Sequence[Mapping[str, Any]]
+) -> tuple[str, str] | None:
+    """The hub repository the cause's item is in, as (entry kind, owner/name), if it is in one.
+
+    Read from the earlier version's entry for the item, else from the cause itself (an alert
+    written before causes named their repository).
+    """
+    for entry in earlier:
+        if entry.get("identifier") != cause["identifier"]:
+            continue
+        if entry["kind"] == "base_model" and entry.get("name"):
+            return ("base_model", entry["name"])
+        if entry["kind"] == "dataset" and entry.get("hub_repo"):
+            return ("dataset", entry["hub_repo"])
+    identifier = str(cause["identifier"])
+    if identifier.startswith(HUB_DATASET_PREFIX):
+        return ("dataset", identifier.removeprefix(HUB_DATASET_PREFIX).rsplit("@", 1)[0])
+    if cause.get("repo") and identifier.startswith("pkg:huggingface/"):
+        return ("base_model", str(cause["repo"]))
+    if identifier.startswith("pkg:huggingface/"):
+        return (
+            "base_model",
+            unquote(identifier.removeprefix("pkg:huggingface/").rsplit("@", 1)[0]),
+        )
+    return None
+
+
+def _in_repository(entry: Mapping[str, Any], repository: tuple[str, str]) -> bool:
+    kind, repo = repository
+    if entry["kind"] != kind:
+        return False
+    return entry.get("name" if kind == "base_model" else "hub_repo") == repo
+
+
+def _gap_for(
+    cause: Mapping[str, Any],
+    repository: tuple[str, str] | None,
+    entries: Sequence[Mapping[str, Any]],
+) -> bool:
+    """Whether the new inventory names the cause's dependency only in a gap (FR-016 of 001):
+    an unpinned entry with the same identifier, or in the same hub repository."""
+    for entry in entries:
+        if entry["pinned"] or entry["kind"] not in ("dataset", "base_model"):
+            continue
+        if entry.get("identifier") and entry["identifier"] == cause["identifier"]:
+            return True
+        if repository is not None and _in_repository(entry, repository):
+            return True
+    return False
+
+
+def _repinned(kind: str, entry: Mapping[str, Any]) -> dict[str, Any]:
+    """What a repository-wide cause shows of the revision the new version pins."""
+    item = entry["identifier"]
+    if kind in REPOSITORY_ALERTS:
+        return {"identifier": item, "base_model": item, "repo": entry["name"]}
+    return {"identifier": item, "dataset": item, "repo": entry["hub_repo"]}

@@ -25,7 +25,8 @@ from model_dependabot.store import Store
 DAY0 = datetime(2026, 10, 24, 6, 0, tzinfo=UTC)
 GPT2 = "openai-community/gpt2"
 GPT2_SHA = "607a30d783dfa663caf39e06633721c8d4cfcd7e"
-PURL = f"pkg:huggingface/openai-community/gpt2@{GPT2_SHA}"
+REPO_PURL = "pkg:huggingface/openai-community/gpt2"
+PURL = f"{REPO_PURL}@{GPT2_SHA}"
 
 
 class Clock:
@@ -101,7 +102,8 @@ def test_disabled_opens_a_moderate_alert_at_once_with_the_hub_answer(
     check(store, clock, answers, "disabled", 0 * H, trigger="on_demand")
     [alert] = alerts(store, "base_model_disabled")
     [observation] = store.observations(PURL, "hf-hub")
-    assert alert["cause_key"] == f"base_model_disabled:{PURL}"
+    # Keyed by the repository, not the revision (identity and clearance table).
+    assert alert["cause_key"] == f"base_model_disabled:{REPO_PURL}"
     assert (alert["severity"], alert["severity_origin"]) == ("MODERATE", "policy")
     assert alert["cause"]["disabled"] is True
     assert [e["evidence_id"] for e in store.alert_evidence(alert["alert_id"])] == [
@@ -128,7 +130,7 @@ def test_two_scheduled_refusals_24_hours_apart_open_a_low_alert(
     check(store, clock, answers, answer, 24 * H)
     [alert] = alerts(store, "base_model_unavailable")
     refusals = store.observations(PURL, "hf-hub")
-    assert alert["cause_key"] == f"base_model_unavailable:{PURL}"
+    assert alert["cause_key"] == f"base_model_unavailable:{REPO_PURL}"
     assert (alert["severity"], alert["severity_origin"]) == ("LOW", "policy")
     assert alert["cause"]["statement"] == "no longer publicly available (deleted or made private)"
     assert alert["cause"]["statement"] == UNAVAILABLE_STATEMENT

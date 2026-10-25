@@ -136,7 +136,7 @@ For each model, the owner sees open alerts ordered by severity, watch events and
 
 - **FR-014**: The service MUST close an alert as fixed, naming the fixing version, when the owner registers a newer version of the model whose inventory no longer contains the alert's cause. This closure happens at registration by comparing the two inventories and consults no source.
 - **FR-015**: The service MUST let a person dismiss an alert only with a reason from a fixed list and MUST record who (the name given), when and why; the service does not authenticate people, so access to the database is the access control.
-- **FR-016**: The service MUST NOT close any alert because a source was unreachable or returned no data.
+- **FR-016**: The service MUST NOT close any alert because a source was unreachable or returned no data. An answer that cannot be read in the shape the source documents counts as no data (a failed read). An inventory entry that names the same dependency but lacks its pin (a gap) MUST NOT count as removal of the cause.
 - **FR-017**: The service MUST NOT change, delete, retrain, re-export or unpublish any model or file, and MUST NOT write to any model's repository.
 
 **Visibility and evidence**

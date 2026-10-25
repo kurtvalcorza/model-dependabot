@@ -264,15 +264,22 @@ for this feature (constitution II).
 **Decision**: Reuse feature 001's `cleared` state (001 FR-023 and data model), adding no new state, and
 extend it to two kinds: a "no longer publicly available" alert closes as `cleared` when the base model is
 reachable again (FR-016), and a `licence_changed` alert closes as `cleared` when the declared licence returns
-to the recorded one (U8), each with that observation as evidence. A retraction alert closes as `withdrawn`
-(001's existing state) when a later successful Crossref response no longer lists any retraction, withdrawal
-or removal update for the DOI, with that response as evidence. Every other alert in this feature stays open
+to the recorded one (U8) at every source that reported the change, each with that observation as evidence.
+A retraction alert closes as `cleared` when a later successful, well-formed Crossref response no longer
+lists any retraction, withdrawal or removal update for the DOI, with that response as evidence. It does not
+close as `withdrawn`: absence from the feed is the source's current state, not a published withdrawal of
+the notice, and Crossref does not describe disappearance as one. `withdrawn` is kept for explicit withdrawal
+evidence (an OSV record marked withdrawn). A Crossref answer that cannot be read as the work asked for (the
+message not an object, `updated-by` not a list, an entry without a type, or a record for another DOI) is a
+failed read, never an answer with no updates (001 FR-016). Every other alert in this feature stays open
 until a newer model version no longer depends on the affected item (`fixed`) or a person dismisses it. 001's
 re-open rule (a closed alert whose cause is found again in the current version gives a new open alert)
 applies to the new kinds unchanged.
 
 **Rationale**: FR-015 and FR-016. Constitution 1.0.2 (Principle III) allows automatic closing when the source
-withdraws or clears the cause, as feature 001 already does for withdrawn and cleared advisories.
+withdraws or clears the cause, as feature 001 already does for withdrawn and cleared advisories. Amended
+2026-10-25 after review: retraction closure moved from `withdrawn` to `cleared`, and malformed Crossref
+answers made failed reads (data-model.md, Identity and clearance).
 
 ## U13. Request budget per check
 

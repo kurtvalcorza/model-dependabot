@@ -164,7 +164,7 @@ def test_history_lists_closed_new_kinds_with_how_they_closed(cli: Invoke, tmp_pa
     closing = {
         "base_model_unavailable": "cleared",
         "licence_changed": "cleared",
-        "dataset_retracted": "withdrawn",
+        "dataset_retracted": "cleared",
     }
     with Store(tmp_path / "db" / "md.db") as store:
         for kind, state in closing.items():

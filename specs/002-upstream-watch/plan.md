@@ -123,4 +123,5 @@ apart from the adapters, so the refusal-span rule and licence comparison are tes
 None. Closing an alert when the source withdraws or clears its cause was an exception to Principle III
 1.0.0; the owner settled it by amendment on 2026-10-24. The current constitution, 1.0.2, allows closing when
 the source withdraws or clears the cause, which covers feature 001's withdrawn and cleared advisories and this
-feature's `withdrawn` and `cleared` closes.
+feature's `cleared` closes (since the 2026-10-25 review a retraction no longer listed is `cleared`, not
+`withdrawn`; data-model.md, Identity and clearance).

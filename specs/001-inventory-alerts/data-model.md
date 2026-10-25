@@ -120,9 +120,14 @@ Rules:
  open ── format policy changed from strict to default ──▶ cleared  (recorded policy kept as evidence)
  open ── person dismisses with a listed reason ─▶ dismissed  (reason, person, time recorded)
  open ── new version still has the cause ───────▶ open       (current_version moves forward)
+ open ── new version names the item only in a gap ─▶ open, unchanged (a gap is not removal; FR-016)
  open ── advisory updated (severity, fixed version) ──▶ open (new values shown; earlier evidence kept)
  fixed / dismissed / withdrawn / cleared ── cause found again in the current version ──▶ a new open alert
 ```
+
+Which identity each kind is compared at, and which source can clear or withdraw it, is in the
+identity and clearance table of `specs/002-upstream-watch/data-model.md`. `withdrawn` needs explicit
+withdrawal evidence (an OSV record marked withdrawn); a cause that is merely no longer listed is `cleared`.
 
 Dismissal reasons (fixed list): `not_used_at_runtime`, `risk_accepted`, `false_positive`,
 `fix_not_available`, plus an optional note.
