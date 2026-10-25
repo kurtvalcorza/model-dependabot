@@ -101,8 +101,15 @@ def scan_path(path: Path, file_name: str | None = None) -> ScanReport:
     Raises ``OSError`` if the file cannot be opened.
     """
     with path.open("rb") as handle:
-        size = os.fstat(handle.fileno()).st_size
-        return _scan_stream(handle, file_name or path.name, size)
+        return scan_handle(handle, file_name or path.name)
+
+
+def scan_handle(handle: BinaryIO, file_name: str) -> ScanReport:
+    """Scan an open file from its start. The scanner seeks (a zip archive is read from its end),
+    so it is given the handle, not a stream it must read in order."""
+    handle.seek(0)
+    size = os.fstat(handle.fileno()).st_size
+    return _scan_stream(handle, file_name, size)
 
 
 def _scan_stream(stream: BinaryIO, file_name: str, size: int) -> ScanReport:

@@ -16,6 +16,7 @@ model-dependabot = "model_dependabot.cli:main"
 
 [dependency-groups]
 dev = [
+    "hypothesis==6.168.5",
     "pytest",
     "ruff",
 ]

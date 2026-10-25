@@ -161,12 +161,14 @@ For each model, the owner sees open alerts ordered by severity, watch events and
 ### Measurable Outcomes
 
 - **SC-001**: An owner can register the worked example and see its complete inventory, with every pinned item and every gap, in under 5 minutes.
-- **SC-002**: On a test set of package versions with known published advisories and versions known to be unaffected, 100% of affected versions raise an alert and 0 unaffected versions do.
+- **SC-002**: On the recorded fixture cases of package versions inside a published advisory's affected range and versions outside it, every affected version raises an alert and no unaffected version does.
 - **SC-003**: 100% of alerts show their source, retrieval time and the exact identifier matched; an owner can reach the evidence in one step.
 - **SC-004**: When a newer model version removes an alert's cause, the alert shows as fixed as soon as that version is registered, with no manual step and no check needed.
 - **SC-005**: An inventory exported and re-imported is identical in every pinned identifier (0 differences).
 - **SC-006**: A newly published advisory that affects a registered model appears as an alert within one scheduled check interval.
 - **SC-007**: When a source is unavailable, 0 alerts change state because of it.
+
+The criteria above that count alerts over recorded cases are met by the fixture suite: they show deterministic behaviour on recorded and derived source answers, which makes them contract tests, not estimates of accuracy in use. Detection and false-alert rates in the field will be reported from the held-out corpus (`research/heldout/`, being prepared); no such rate is claimed here.
 
 ## Assumptions
 

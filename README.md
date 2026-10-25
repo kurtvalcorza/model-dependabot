@@ -287,7 +287,25 @@ uv run ruff check
 ```
 
 Tests run against recorded source responses in `tests/fixtures/`; `tools/record_fixtures.py` re-records
-them. The live tests are left out of the default run.
+them. The live tests are left out of the default run. `tests/property/` drives the alert lifecycle through
+random sequences of registrations, source answers and checks with `hypothesis`, against the identity and
+clearance table of `specs/002-upstream-watch/data-model.md`; the default run is derandomised, and setting
+`MODEL_DEPENDABOT_PROPERTY_EXAMPLES` to a number runs that many random sequences instead.
+
+`.github/workflows/live-compat.yml` runs the live tests once a week (Mondays 03:17 UTC, or by hand from the
+Actions tab) and keeps their JUnit results as a workflow artifact for 90 days, so a change in a source's
+answers shows up between releases. It is never run on a push or pull request, reads the sources
+anonymously and needs no secrets.
+
+### Limitations
+
+- The fixture tests are contract tests: they show the tool behaves as specified on recorded and derived
+  answers. They are not accuracy estimates. Field detection and false-closure rates will be reported from a
+  held-out corpus (`research/heldout/`, being prepared).
+- A live check is a point-in-time reading of each source; a passing weekly run says the sources answered
+  in the expected shape that day, not that no incident was missed.
+- A retraction, removal or licence change is a signal for a person to review. It is not proof that the
+  model is harmed, and a licence change is not a legal conclusion about a version already in use.
 
 ## Background
 

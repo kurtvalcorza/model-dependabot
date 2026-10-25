@@ -108,3 +108,40 @@ def test_a_check_scans_local_files_without_reading_them_whole(
         run_check(store, RecordedFetcher(tmp_path / "none"), ["m"], ["picklescan"])
         [alert] = store.alerts_for("m")
     assert alert["cause"]["dangerous"] == ["os.system"]
+
+
+def test_a_file_changed_while_scanned_gives_no_report_against_the_pinned_hash(
+    craft: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review D3: the file is changed in place after it is hashed and before the scanner reads
+    it. The scan saw other bytes than the pinned ones, so it is discarded: no alert is raised
+    against the pinned hash, and the run records a hash mismatch with the hash it read last."""
+    pinned = craft.innocuous()
+    changed = craft.dangerous()
+    path = tmp_path / "model.pkl"
+    path.write_bytes(pinned)
+    original = pickle_scan.scanner.scan_bytes
+
+    def change_then_scan(stream: Any, *args: Any, **kwargs: Any) -> Any:
+        path.write_bytes(changed)  # another writer, through its own handle
+        return original(stream, *args, **kwargs)
+
+    monkeypatch.setattr(pickle_scan.scanner, "scan_bytes", change_then_scan)
+    identifier = f"sha256:{hashlib.sha256(pinned).hexdigest()}"
+    entry = {
+        "kind": "weight_file",
+        "identifier": identifier,
+        "pinned": True,
+        "location": "model.pkl",
+        "size": len(pinned),
+        "format": "pickle",
+        "can_run_code": True,
+    }
+    with Store(tmp_path / "md.db", now=lambda: MOMENT) as store:
+        store.add_model("m")
+        store.add_version("m", {}, "0" * 64, [entry], base_dir=tmp_path)
+        run_check(store, RecordedFetcher(tmp_path / "none"), ["m"], ["picklescan"])
+        assert store.alerts_for("m") == []
+        [event] = [e for e in store.watch_events("m") if e["kind"] == "hash_mismatch"]
+    assert event["entry_identifier"] == identifier
+    assert event["detail"]["actual_sha256"] == hashlib.sha256(changed).hexdigest()

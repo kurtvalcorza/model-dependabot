@@ -155,12 +155,14 @@ The owner sees, as watch events rather than alerts, changes upstream that may ma
 
 ### Measurable Outcomes
 
-- **SC-001**: On a test set of recorded retraction and removal records, 100% of datasets named in them raise an alert and 0 datasets not named do.
-- **SC-002**: On a test set of recorded licence pairs, every real change raises an alert and 0 spelling, case or alias differences do.
+- **SC-001**: On the recorded fixture cases of retraction and removal records, every dataset named in them raises an alert and no dataset not named does.
+- **SC-002**: On the recorded fixture cases of licence pairs, every real change raises an alert and no spelling, case or alias difference does.
 - **SC-003**: A base model unreachable on only one check never raises an alert; one unreachable on two consecutive scheduled checks at least 24 hours apart always does, and so does one refused on every scheduled check of an unbroken run that spans at least 24 hours, even when no two consecutive checks are a full 24 hours apart.
 - **SC-004**: 100% of alerts and watch events in this feature show their source, retrieval time and the exact identifier matched.
 - **SC-005**: When any source is unavailable during a check, 0 alerts change state because of it.
 - **SC-006**: A retraction or removal published for a registered model's dataset appears as an alert within one scheduled check interval after the source publishes it.
+
+The criteria above that count alerts over recorded cases are met by the fixture suite: they show deterministic behaviour on recorded and derived source answers, which makes them contract tests, not estimates of accuracy in use. Detection and false-alert rates in the field will be reported from the held-out corpus (`research/heldout/`, being prepared); no such rate is claimed here.
 
 ## Assumptions
 

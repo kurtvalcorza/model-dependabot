@@ -45,7 +45,7 @@ from urllib.parse import unquote
 
 from packaging.utils import canonicalize_name
 
-from model_dependabot.inventory.build import HUB_DATASET_PREFIX, hash_file, huggingface_purl
+from model_dependabot.inventory.build import HUB_DATASET_PREFIX, hash_stream, huggingface_purl
 from model_dependabot.matching.severity import severity_of
 from model_dependabot.matching.versions import (
     affected_ranges,
@@ -715,13 +715,21 @@ def _read_local_scans(
                 continue
             path = _local_path(target, entry["location"])
             scan = _LocalScan(path, store.now())
-            # The file is hashed in chunks and then scanned through a file handle: it is read
-            # twice from disk but never held whole in memory, and only a file whose hash matches
-            # the pinned identifier is scanned.
+            # Hashed, scanned and hashed again through one handle, in chunks, so the file is
+            # never held whole in memory. picklescan seeks (a zip archive is read from its end),
+            # so it cannot hash as it reads; the scan counts only if both hashes match the pinned
+            # identifier. One handle means a file renamed over this one between the reads is not
+            # the one scanned; the second hash catches a change written into it meanwhile, and a
+            # changed file is a hash mismatch with the hash read last.
             try:
-                scan.actual_sha256, _ = hash_file(path)
-                if f"sha256:{scan.actual_sha256}" == entry["identifier"]:
-                    scan.report = pickle_scan.scan_path(path)
+                with path.open("rb") as handle:
+                    scan.actual_sha256, _ = hash_stream(handle)
+                    if f"sha256:{scan.actual_sha256}" == entry["identifier"]:
+                        report = pickle_scan.scan_handle(handle, path.name)
+                        handle.seek(0)
+                        scan.actual_sha256, _ = hash_stream(handle)
+                        if f"sha256:{scan.actual_sha256}" == entry["identifier"]:
+                            scan.report = report
             except OSError as error:
                 scan.read_error = f"cannot read the file: {error.strerror or error}"
             scans[(target.model_id, target.version, entry["identifier"])] = scan

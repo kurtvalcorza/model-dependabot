@@ -13,7 +13,7 @@ import io
 import zipfile
 from collections.abc import Callable, Mapping
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, BinaryIO
 from urllib.parse import quote
 
 from model_dependabot.doi import normalise_doi
@@ -116,12 +116,17 @@ def classify(name: str, head: bytes | Path | None) -> tuple[str, bool | None]:
 
 def hash_file(path: Path) -> tuple[str, int]:
     """A file's SHA-256 and size, read in chunks so a large file is never held in memory."""
+    with path.open("rb") as handle:
+        return hash_stream(handle)
+
+
+def hash_stream(handle: BinaryIO) -> tuple[str, int]:
+    """The SHA-256 and size of what ``handle`` reads from where it is to its end, in chunks."""
     digest = hashlib.sha256()
     size = 0
-    with path.open("rb") as handle:
-        while chunk := handle.read(_CHUNK):
-            digest.update(chunk)
-            size += len(chunk)
+    while chunk := handle.read(_CHUNK):
+        digest.update(chunk)
+        size += len(chunk)
     return digest.hexdigest(), size
 
 

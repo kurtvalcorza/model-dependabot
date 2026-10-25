@@ -1,0 +1,47 @@
+# Weekly read-only compatibility run against the real sources (2026-10-25 review, methodology
+# point 6). It runs only the tests marked `live`, which the default suite and ci.yml exclude, and
+# keeps the JUnit results for 90 days so feed or schema drift can be traced over time.
+# It is never triggered by a push or a pull request, asks for no secrets and writes nothing back:
+# the sources are read anonymously with the generic User-Agent the tool always sends.
+name: live-compat
+
+on:
+  schedule:
+    - cron: "17 3 * * 1" # Mondays 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-compat
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      # astral-sh/setup-uv v10.3.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install (locked)
+        run: uv sync --frozen
+      # `-m live` replaces the `-m 'not live'` in pyproject's addopts; tests/conftest.py leaves
+      # the network open only for tests marked `live`.
+      - name: Live tests (network open)
+        run: uv run pytest -m live -q --junitxml=live-results.xml
+      # actions/upload-artifact v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: live-results-${{ github.run_id }}
+          path: live-results.xml
+          retention-days: 90
+          if-no-files-found: warn
