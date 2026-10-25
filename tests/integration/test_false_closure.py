@@ -200,7 +200,7 @@ def test_other_base_model_fixes_disabled_alert(root: Path) -> None:
 def test_disabled_base_model_alert_follows_new_revision_through_a_check(root: Path) -> None:
     """After a re-pin, the hub still reports the repository disabled: one alert, still open,
     then cleared when the hub reports it enabled again."""
-    normal = fixture_json("hf_upstream/model-normal")
+    normal = fixture_json("hf_upstream/model-normal") | {"id": REPO}
     url = model_info_url(REPO)
     with fresh(root, "check", BASE_A) as store:
         run_check(store, Answers({url: normal | {"disabled": True}}), ["m"], ["hf-hub"])
@@ -214,7 +214,7 @@ def test_disabled_base_model_alert_follows_new_revision_through_a_check(root: Pa
 
 
 def test_disabled_hub_dataset_alert_follows_new_revision_through_a_check(root: Path) -> None:
-    normal = fixture_json("hf_upstream/dataset-disabled")
+    normal = fixture_json("hf_upstream/dataset-disabled") | {"id": DATA_REPO}
     url = dataset_info_url(DATA_REPO)
     with fresh(root, "hub-check", HUB_DATASET_A) as store:
         run_check(store, Answers({url: normal | {"disabled": True}}), ["m"], ["hf-hub"])
@@ -399,7 +399,7 @@ def test_rekeying_leaves_an_alert_whose_new_key_is_taken(root: Path) -> None:
 
 
 def test_rekeyed_alert_is_carried_and_cleared_by_the_hub(root: Path) -> None:
-    normal = fixture_json("hf_upstream/model-normal")
+    normal = fixture_json("hf_upstream/model-normal") | {"id": REPO}
     url = model_info_url(REPO)
     path = root / "carried" / "md.db"
     with fresh(root, "carried", BASE_A) as store:
@@ -416,7 +416,7 @@ def test_rekeyed_alert_is_carried_and_cleared_by_the_hub(root: Path) -> None:
 
 
 def _licensed(licence: str) -> dict[str, Any]:
-    normal = fixture_json("hf_upstream/model-normal")
+    normal = fixture_json("hf_upstream/model-normal") | {"id": REPO}
     return normal | {"cardData": normal["cardData"] | {"license": licence}}
 
 

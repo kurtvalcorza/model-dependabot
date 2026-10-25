@@ -145,6 +145,16 @@ revision in its cause key, is rekeyed by repository when the database is opened;
 `base_model_disabled`, `base_model_unavailable`, a hub dataset's `dataset_removed` and `paper_retracted`,
 and a base model's or hub dataset's `licence_changed`.
 
+**Answer identity** (hub): a hub answer is about the repository it names, not the one asked for.
+Model and dataset info, security status and revision answers name their repository in `id` (model
+answers also in `modelId`), spelt as the hub spells it (`tests/fixtures/hf/`, `tests/fixtures/hf_upstream/`).
+When a 200 answer names another repository, compared ignoring case as the hub does, it is unreadable:
+model or dataset info fails the `hf-hub` source for the run (no observation, so nothing opens or
+closes), a security status is `unrecognised` (a watch event) and a revision is a gap. An answer that
+names no repository, such as a tree listing, is read as before. A renamed repository still surfaces as
+a move, because model and dataset info never follow redirects (U5); the rule guards against a 200
+answer that a redirect elsewhere or a misrouted response delivers for the wrong repository.
+
 **Refusal-span rule** (U7): `base_model_unavailable` opens when an unbroken run of refusal observations from
 scheduled check runs, with no reachable observation from any run in between, spans at least 24 hours from
 its first to its latest refusal. On-demand refusals neither count towards the span nor break the run; a

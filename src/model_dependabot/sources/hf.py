@@ -76,6 +76,25 @@ class HubFileResult:
     gap_reason: str | None = None
 
 
+def answered_for(repo: str, info: object) -> str | None:
+    """Why an answer is for another repository, or ``None`` when it is for ``repo`` or names none.
+
+    Model and dataset info, security status and revision answers name their repository in ``id``
+    (model answers also in ``modelId``). The hub treats repository ids case-insensitively, so case
+    is ignored. An answer naming another repository is unreadable for ``repo`` (data-model.md,
+    Identity and clearance); one with no such field is read as before.
+    """
+    if not isinstance(info, dict):
+        return None
+    for name in ("id", "modelId"):
+        if name not in info:
+            continue
+        value = info[name]
+        if not isinstance(value, str) or value.lower() != repo.lower():
+            return f"the answer is for {value!r}"
+    return None
+
+
 def _refusal(response: Response) -> str | None:
     if response.status == 200:
         return None
@@ -137,12 +156,16 @@ class HuggingFace:
         response, gap = self._get(url)
         if response is None or gap is not None:
             return RevisionResult(commit=None, gap_reason=gap)
+        try:
+            info = json.loads(response.body)
+        except ValueError:
+            info = None
+        other = answered_for(repo, info)
+        if other is not None:
+            return RevisionResult(commit=None, gap_reason=f"hub {other}, not {repo}")
         commit = response.headers.get("X-Repo-Commit")
         if commit is None:
-            try:
-                commit = json.loads(response.body).get("sha")
-            except (ValueError, AttributeError):
-                commit = None
+            commit = info.get("sha") if isinstance(info, dict) else None
         if not is_commit(commit):
             return RevisionResult(commit=None, gap_reason="hub gave no commit for the revision")
         return RevisionResult(commit=commit)
@@ -222,6 +245,9 @@ def _parse_status(repo: str, response: Response) -> SecurityStatus:
         info = json.loads(response.body)
     except ValueError:
         return SecurityStatus(repo, response, MISSING, reason="response is not JSON")
+    other = answered_for(repo, info)
+    if other is not None:
+        return SecurityStatus(repo, response, UNRECOGNISED, reason=other)
     status = info.get("securityRepoStatus") if isinstance(info, dict) else None
     if not isinstance(status, dict):
         return SecurityStatus(repo, response, MISSING, reason="no securityRepoStatus in response")
@@ -383,6 +409,9 @@ def parse_dataset(repo: str, response: Response) -> HubDataset:
         raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}: {error}") from None
     if not isinstance(info, dict):
         raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}")
+    other = answered_for(repo, info)
+    if other is not None:
+        raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}: {other}")
     sha = info.get("sha")
     return HubDataset(
         repo,
@@ -459,6 +488,9 @@ def parse_model(repo: str, response: Response) -> HubModel:
         raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}: {error}") from None
     if not isinstance(info, dict):
         raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}")
+    other = answered_for(repo, info)
+    if other is not None:
+        raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}: {other}")
     sha = info.get("sha")
     # The reader always asks for expand[]=disabled; an answer without it is not the recorded
     # shape, so it is unrecognised (a watch event), never false (which would clear an alert).

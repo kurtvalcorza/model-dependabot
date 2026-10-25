@@ -290,6 +290,13 @@ cached by ETag across runs (the store's `etag_cache` table; a `304` reuses the s
 limit: Crossref one a second, Figshare one a second, Zenodo 60 a minute, Hugging Face 500 API requests per
 five minutes per IP (landscape §9).
 
+**ETag cache housekeeping** (follow-up, 2026-10-25): the cache stays bounded. Replacing a URL's entry
+deletes the previous body from `evidence/` when no evidence record and no other cache entry refers to
+it, and each `check` drops entries that no run has stored or looked up for 90 days
+(`ETAG_CACHE_MAX_AGE_DAYS`), with their bodies under the same rule; an entry from before use times
+were kept ages from its retrieval. A body an evidence record refers to is never deleted (Principle I),
+and pruning again deletes nothing more.
+
 **Rationale**: constitution ("polite to sources"); keeps a model with ten datasets within 001's 60-second
 check budget.
 
