@@ -75,19 +75,19 @@ domains and generic academic and government words; the list itself is kept outsi
 
 | Command | Result |
 | :-- | :-- |
-| `grep -rniE "$P" src tests tools README.md research specs` | 6 lines. 5 are licence names in the vendored SPDX schema (`src/model_dependabot/inventory/schema/spdx.schema.json`: University of California, Nara Institute of Science and Technology, University of Illinois), third-party data. 1 is `specs/001-inventory-alerts/plan.md:58`, which names the first platform's programme in the constitution check (G0-02, open for the owner) |
+| `grep -rniE "$P" src tests tools README.md research specs` | 6 lines. 5 are licence names in the vendored SPDX schema (`src/model_dependabot/inventory/schema/spdx.schema.json`: University of California, Nara Institute of Science and Technology, University of Illinois), third-party data. 1 is `specs/001-inventory-alerts/plan.md:58`, which named the first platform's programme in the constitution check (G0-02). Since resolved: commit `4aa9c95` replaced it with neutral wording, and the same search finds no match in `plan.md` on 2026-10-25 |
 | `grep -rnoE "<email pattern>" src tests tools README.md research specs` | 3: two schema authors' addresses in the vendored CycloneDX and JSF schemas, and `someone@example.org` (a reserved example domain) in `tests/unit/test_fetcher.py`, used to prove an email in the User-Agent is refused |
 | `grep -rnE "hf_…\|ghp_…\|github_pat_\|sk-…\|Bearer \|Authorization\|AKIA…"` over the same paths | none |
 | `git log --format=%B \| grep -ciE "$P"` | 0 commit messages match |
 | `git log --format=%B` email addresses | only `noreply@anthropic.com` (co-author lines), 16 commits |
 | `git log --format='%an <%ae>'` | one author with a GitHub `users.noreply.github.com` address, 16 commits |
 | User-Agent | `DEFAULT_USER_AGENT = f"model-dependabot/{__version__}"` (`src/model_dependabot/sources/fetcher.py:26`); `UrlFetcher` refuses a User-Agent with an email address (line 187); no token is sent anywhere (`tools/record_fixtures.py` docstring and the fetcher) |
-| `rice` (excluding `price`) in `src`, `tests`, `tools`, `research` | none; the worked-example id `rice-pest-r50-v5` appears only in `specs/001-inventory-alerts/contracts/cli.md`, `contracts/manifest.md` and `quickstart.md` |
+| `rice` (excluding `price`) in `src`, `tests`, `tools`, `research` | none; the worked-example id `rice-pest-r50-v5` appeared only in `specs/001-inventory-alerts/contracts/cli.md`, `contracts/manifest.md` and `quickstart.md`. Since resolved: commit `4aa9c95` (G0-03) replaced it with a neutral placeholder in all three, and `grep -n rice` finds no match in them on 2026-10-25 |
 
 Third-party repository ids used only as test data (`openai-community/gpt2`, `mcpotato/42-eicar-street`)
-are not institution names. Open for the owner: the programme name in `plan.md:58` and the
-domain-specific worked-example id in the contracts and quickstart; neither is in code, tests or the
-README.
+are not institution names. The two items once left open for the owner (the programme name in
+`plan.md:58` and the domain-specific worked-example id in the contracts and quickstart) were both
+resolved in commit `4aa9c95`; neither was ever in code, tests or the README.
 
 ## T055: walk-through on a real inventory
 

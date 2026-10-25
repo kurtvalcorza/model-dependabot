@@ -237,3 +237,23 @@ def test_an_affected_range_wins_over_an_unevaluable_one() -> None:
     result = evaluate_advisory(advisory, "pkg", "1.0")
     assert result.affected is True
     assert result.evaluated is True
+
+
+@pytest.mark.parametrize("version", ["1.2", "1.8", "2.5"])
+def test_a_range_mixing_fixed_and_last_affected_is_not_evaluated(version: str) -> None:
+    # The OSV schema forbids a range with both a fixed and a last_affected event; its meaning
+    # is not defined, so it is reported as unevaluated with the reason, never read either way.
+    events = [{"introduced": "1.0"}, {"fixed": "1.5"}, {"introduced": "1.7"}]
+    events.append({"last_affected": "2.0"})
+    advisory = {
+        "affected": [
+            {
+                "package": {"ecosystem": "PyPI", "name": "pkg"},
+                "ranges": [{"type": "ECOSYSTEM", "events": events}],
+            }
+        ]
+    }
+    result = evaluate_advisory(advisory, "pkg", version)
+    assert result.affected is False
+    assert result.evaluated is False
+    assert result.reasons == ("range has both fixed and last_affected events",)

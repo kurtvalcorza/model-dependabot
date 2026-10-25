@@ -100,7 +100,8 @@ needed once the record API answers).
 
 **Decision**: For each hub dataset, `GET /api/datasets/{owner}/{name}?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha`.
 `disabled: true` raises the dataset removal alert (FR-005). Once per check run, if any hub dataset is in
-scope, the public takedown log `huggingface-legal/takedown-notices` `index.csv` is fetched (cached by ETag)
+scope, the public takedown log `huggingface-legal/takedown-notices` `index.csv` is fetched (cached by ETag in the
+store's `etag_cache` table, so a later run revalidates with `If-None-Match`; review C2, 2026-10-25)
 and searched for the dataset's path; a match adds the entry's `date` (labelled `notice_date`) and its `reported_content`
 to the evidence, which points to the log by its URL and the notice date. A 307 redirect to another namespace (such as `defunct-datasets/`) records a `dataset_moved`
 watch event, never an alert. HTTP 401, 403 or 404 records a `dataset_unreachable` watch event.
@@ -285,7 +286,7 @@ answers made failed reads (data-model.md, Identity and clearance).
 
 **Decision**: Per model version: one hub request for the base model; per dataset one to three requests
 (Crossref or DataCite, the repository and Crossref for each tied paper); one `index.csv` per check run,
-cached by ETag; agency lookups only at registration. Requests to one source run sequentially within its
+cached by ETag across runs (the store's `etag_cache` table; a `304` reuses the stored, redacted body); agency lookups only at registration. Requests to one source run sequentially within its
 limit: Crossref one a second, Figshare one a second, Zenodo 60 a minute, Hugging Face 500 API requests per
 five minutes per IP (landscape §9).
 

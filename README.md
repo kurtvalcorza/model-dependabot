@@ -225,7 +225,9 @@ The task's "Last Run Result" shows the exit code (0, 1, 2 or 3 as above).
 All requests are anonymous: no account, no token and no personal data. The User-Agent is the generic
 `model-dependabot/<version>`, and the tool refuses a User-Agent that carries an email address. Requests
 have timeouts, back off and retry on `429` and `5xx`, honour `Retry-After` and stay within each source's
-published limits.
+published limits. A `GET` answer that carries an ETag is cached in the database (the `etag_cache` table,
+with its body, already stripped of personal data, in `evidence/`), so a later run asks again with
+`If-None-Match`; a `304 Not Modified` reuses the stored body, retrieved at the time of that run.
 
 | Source | Used for | Requests |
 | :-- | :-- | :-- |

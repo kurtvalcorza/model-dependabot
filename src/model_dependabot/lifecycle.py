@@ -45,7 +45,7 @@ from urllib.parse import unquote
 
 from packaging.utils import canonicalize_name
 
-from model_dependabot.inventory.build import HUB_DATASET_PREFIX, huggingface_purl
+from model_dependabot.inventory.build import HUB_DATASET_PREFIX, hash_file, huggingface_purl
 from model_dependabot.matching.severity import severity_of
 from model_dependabot.matching.versions import (
     affected_ranges,
@@ -715,14 +715,15 @@ def _read_local_scans(
                 continue
             path = _local_path(target, entry["location"])
             scan = _LocalScan(path, store.now())
+            # The file is hashed in chunks and then scanned through a file handle: it is read
+            # twice from disk but never held whole in memory, and only a file whose hash matches
+            # the pinned identifier is scanned.
             try:
-                data = path.read_bytes()
+                scan.actual_sha256, _ = hash_file(path)
+                if f"sha256:{scan.actual_sha256}" == entry["identifier"]:
+                    scan.report = pickle_scan.scan_path(path)
             except OSError as error:
                 scan.read_error = f"cannot read the file: {error.strerror or error}"
-            else:
-                scan.actual_sha256 = _sha256(data)
-                if f"sha256:{scan.actual_sha256}" == entry["identifier"]:
-                    scan.report = pickle_scan.scan(data, path.name)
             scans[(target.model_id, target.version, entry["identifier"])] = scan
     return scans
 

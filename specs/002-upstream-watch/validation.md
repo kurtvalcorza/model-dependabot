@@ -58,12 +58,13 @@ model ties many papers or Figshare datasets.
 
 ## 3. Neutrality and privacy (T062)
 
-Pattern `P = (the list itself is kept outside the repository)`
-(the 001 pattern).
+`P` is the same case-insensitive search as feature 001's T056: the owner's institution, programme
+and personal names, their domains and generic academic and government words; the list itself is
+kept outside the repository.
 
 | Search | Result |
 | :-- | :-- |
-| `grep -rniEc "$P" src tests tools README.md research specs` | 44 lines in 8 files. 38 are licence and exception names in the vendored SPDX lists and schema (University of California, Nara Institute of Science and Technology, University of Illinois): third-party data. 3 are third-party metadata in recorded public answers used as test data: Crossref funder names in `crossref/retracted.json`, the holding library of the Figshare article in `figshare/public-article.json`, and the gated-model fixture `meta-llama/Llama-3.1-8B` (`hf_upstream/model-gated.json`). 3 are in feature 001's own records (`plan.md:58`, `validation.md:73,78`), as recorded there. None names the project's users or authors |
+| `grep -rniEc "$P" src tests tools README.md research specs` | 44 lines in 8 files. 38 are licence and exception names in the vendored SPDX lists and schema (University of California, Nara Institute of Science and Technology, University of Illinois): third-party data. 3 are third-party metadata in recorded public answers used as test data: Crossref funder names in `crossref/retracted.json`, the holding library of the Figshare article in `figshare/public-article.json`, and the gated-model fixture `meta-llama/Llama-3.1-8B` (`hf_upstream/model-gated.json`). 3 are in feature 001's own records (`plan.md:58`, `validation.md:73,78`), as recorded there. None names the project's users or authors. Correction (2026-10-25): `plan.md:58` had already been neutralised by commit `4aa9c95`, as had the worked-example id in the three contract and quickstart files; a re-run of the search at `ad6aea5` finds no match in `plan.md`, one line in 001's `validation.md` (line 78, which quotes the vendored licence names) and the lines of this file that quote the pattern and these results |
 | `git log --format=%B \| grep -ciE "$P"` | 0 commit messages match. The commit author field carries the account's name and its GitHub no-reply address, which is git metadata rather than message text |
 | Email addresses in `src tests tools README.md research specs` (outside the vendored SPDX and JSF files and the gated-model card) | `firstname.lastname@example.com` (CycloneDX schema example), `someone@example.org` (a test that the fetcher refuses such a User-Agent, and 001's record of it) |
 | Personal fields in fixtures | The names `removed_by`, `citation_text`, `creators`, `contributors`, `owners`, `authors` and `requesting_entity` occur only in `.meta.json` files' `redacted_fields`; the recorded takedown log's header is `date,reported_content` |

@@ -140,7 +140,9 @@ proven).
 
 **Decision**: Python's standard `urllib.request` behind a small `Fetcher` interface: a generic
 User-Agent, no personal data, timeouts, retries with back-off and a response cache keyed by URL and
-body. Tests replace the fetcher with one that serves recorded responses. The fetcher only reads: it
+body. That cache lasts one run; since the 2026-10-25 review (C2) a `GET` answer with an ETag is also kept
+in the store's `etag_cache` table, so a later run revalidates it with `If-None-Match` and a `304` reuses
+the stored body. Tests replace the fetcher with one that serves recorded responses. The fetcher only reads: it
 sends `GET`, plus `POST` to OSV's read-only `/v1/querybatch`, and never `PUT`, `PATCH` or `DELETE`
 (FR-017).
 

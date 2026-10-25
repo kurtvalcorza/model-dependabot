@@ -11,7 +11,8 @@ at least one ``limit`` (exclusive; ``"*"`` means infinity, and no ``limit`` mean
 Versions compare under PEP 440 with ``packaging``, so pre-releases sort before their release.
 
 A range that cannot be evaluated (an event value that is not a PEP 440 version, an unknown event
-kind or no ``introduced`` event) and a pinned version that is not a PEP 440 version are reported as
+kind, no ``introduced`` event or both ``fixed`` and ``last_affected`` events, which the OSV schema
+forbids in one range) and a pinned version that is not a PEP 440 version are reported as
 unevaluated, with the reason, rather than as "not affected".
 """
 
@@ -73,6 +74,10 @@ def _range_problem(events: list[Mapping[str, str]]) -> str | None:
             continue
         if _version(value) is None:
             return f"{kind} value {value!r} is not a PEP 440 version"
+    kinds = {kind for event in events for kind in event}
+    if {"fixed", "last_affected"} <= kinds:
+        # The OSV schema forbids the two in one range, so its meaning is not defined.
+        return "range has both fixed and last_affected events"
     return None
 
 

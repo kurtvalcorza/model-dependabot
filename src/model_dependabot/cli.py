@@ -35,7 +35,7 @@ from model_dependabot.reports import (
 from model_dependabot.sources.datacite import ensure_repository
 from model_dependabot.sources.doi_ra import ensure_agency
 from model_dependabot.sources.fetcher import Fetcher, SourceFailedError, UrlFetcher
-from model_dependabot.store import DISMISSAL_REASONS, Store
+from model_dependabot.store import DISMISSAL_REASONS, EtagCache, Store
 
 EXIT_OK = 0
 EXIT_INVALID_INPUT = 1
@@ -345,8 +345,13 @@ def make_handlers(
     def _open(path: Path | str) -> Store:
         return Store(path, now=now)
 
-    def _fetcher() -> Fetcher:
-        return UrlFetcher() if fetcher is None else fetcher
+    def _fetcher(store: Store) -> Fetcher:
+        # The ETag cache lives in the store, so a later run revalidates (research U13).
+        if fetcher is not None:
+            return fetcher
+        if now is None:
+            return UrlFetcher(etag_cache=EtagCache(store))
+        return UrlFetcher(etag_cache=EtagCache(store), utcnow=now)
 
     def register(args: argparse.Namespace) -> CommandResult:
         try:
@@ -360,7 +365,7 @@ def make_handlers(
                     f"model {model_id!r} is already registered; pass --model-id {model_id} to"
                     " register a new version"
                 )
-            fetcher_ = _fetcher()
+            fetcher_ = _fetcher(store)
             entries = build_entries(manifest, fetcher_)
             _route_dois(store, fetcher_, entries)
             record_licences(entries, fetcher_, store.get_routing)
@@ -429,7 +434,7 @@ def make_handlers(
             # contracts/cli.md: only ``check --all --scheduled`` is a scheduled run (FR-012).
             trigger = "scheduled" if args.all and args.scheduled else "on_demand"
             outcome = run_check(
-                store, _fetcher(), model_ids, args.sources, scope=scope, trigger=trigger
+                store, _fetcher(store), model_ids, args.sources, scope=scope, trigger=trigger
             )
         payload = {
             "run_id": outcome.run_id,
