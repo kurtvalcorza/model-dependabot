@@ -2,17 +2,19 @@
 
 Candidate advisories come from ``POST /v1/querybatch`` (ecosystem ``PyPI``, normalised name, exact
 version) and each record from ``GET /v1/vulns/{id}``. Only package entries with ``pinned`` true are
-queried (FR-003); gaps are never matched. OSV leaves withdrawn records out of query answers, so a
-withdrawal is seen by fetching an open alert's advisory by its id. Any failure to read the
-source, an error status or an answer that cannot be read is a ``SourceFailedError`` for
-``osv.dev`` (FR-016).
+queried (FR-003); gaps are never matched. More than ``BATCH_LIMIT`` distinct packages are split into
+several batch requests, and a result that carries ``next_page_token`` is followed by re-sending only
+those queries with ``page_token`` set, for at most ``MAX_PAGES`` further rounds.
+OSV leaves withdrawn records out of query answers, so a withdrawal is seen by fetching an open
+alert's advisory by its id. Any failure to read the source, an error status or an answer that
+cannot be read is a ``SourceFailedError`` for ``osv.dev`` (FR-016).
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from model_dependabot.sources.fetcher import Fetcher, Response, SourceFailedError
@@ -21,14 +23,30 @@ OSV_API = "https://api.osv.dev/v1"
 SOURCE = "osv.dev"
 ECOSYSTEM = "PyPI"
 BATCH_LIMIT = 1000  # queries per querybatch request, as OSV documents
+MAX_PAGES = 10  # follow-up rounds for paginated results before the source counts as failed
 
 
 @dataclass(frozen=True)
 class BatchAnswer:
-    """Candidate advisory ids per package identifier, with the response they came from."""
+    """Candidate advisory ids per package identifier, with the responses they came from.
 
-    response: Response | None
+    ``responses`` holds every querybatch response in request order; ``origin`` maps an identifier
+    to the index of the response that first answered it (its evidence).
+    """
+
+    responses: tuple[Response, ...]
     matches: dict[str, list[str]]
+    origin: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def response(self) -> Response | None:
+        """The first batch response, or ``None`` when nothing was queried."""
+        return self.responses[0] if self.responses else None
+
+    def response_for(self, identifier: str) -> Response | None:
+        """The batch response that answered ``identifier``."""
+        index = self.origin.get(identifier)
+        return self.responses[index] if index is not None else self.response
 
 
 @dataclass(frozen=True)
@@ -76,26 +94,58 @@ class OsvClient:
             }
         )
         if not packages:
-            return BatchAnswer(None, {})
-        if len(packages) > BATCH_LIMIT:
-            raise SourceFailedError(SOURCE, f"{len(packages)} packages exceed one batch")
-        query = {
-            "queries": [
-                {"package": {"name": name, "ecosystem": ECOSYSTEM}, "version": version}
-                for name, version, _ in packages
-            ]
-        }
-        body = json.dumps(query, separators=(",", ":")).encode("utf-8")
+            return BatchAnswer((), {})
+        responses: list[Response] = []
+        matches: dict[str, set[str]] = {identifier: set() for _, _, identifier in packages}
+        origin: dict[str, int] = {}
+        # (name, version, identifier, page token or None) still to ask about
+        pending: list[tuple[str, str, str, str | None]] = [(*package, None) for package in packages]
+        rounds = 0
+        while pending:
+            if rounds > MAX_PAGES:
+                raise SourceFailedError(
+                    SOURCE, f"answers still paginated after {MAX_PAGES} follow-up rounds"
+                )
+            follow: list[tuple[str, str, str, str | None]] = []
+            for start in range(0, len(pending), BATCH_LIMIT):
+                chunk = pending[start : start + BATCH_LIMIT]
+                response, results = self._post_batch(chunk)
+                responses.append(response)
+                for (name, version, identifier, _), result in zip(chunk, results, strict=True):
+                    origin.setdefault(identifier, len(responses) - 1)
+                    matches[identifier].update(vuln["id"] for vuln in result.get("vulns") or [])
+                    token = result.get("next_page_token")
+                    if token:
+                        follow.append((name, version, identifier, token))
+            pending = follow
+            rounds += 1
+        return BatchAnswer(
+            tuple(responses),
+            {identifier: sorted(ids) for identifier, ids in matches.items()},
+            origin,
+        )
+
+    def _post_batch(
+        self, chunk: list[tuple[str, str, str, str | None]]
+    ) -> tuple[Response, list[Mapping[str, Any]]]:
+        queries = []
+        for name, version, _, token in chunk:
+            query: dict[str, Any] = {
+                "package": {"name": name, "ecosystem": ECOSYSTEM},
+                "version": version,
+            }
+            if token is not None:
+                query["page_token"] = token
+            queries.append(query)
+        body = json.dumps({"queries": queries}, separators=(",", ":")).encode("utf-8")
         response = self.fetcher.post(f"{self.api}/querybatch", body)
-        results = _read(response).get("results")
-        if not isinstance(results, list) or len(results) != len(packages):
+        answer = _read(response)
+        results = answer.get("results") if isinstance(answer, dict) else None
+        if not isinstance(results, list) or len(results) != len(chunk):
             raise SourceFailedError(SOURCE, "the batch answer does not match the queries")
-        matches: dict[str, list[str]] = {}
-        for (_, _, identifier), result in zip(packages, results, strict=True):
-            if result.get("next_page_token"):
-                raise SourceFailedError(SOURCE, f"the answer for {identifier} is paginated")
-            matches[identifier] = sorted(vuln["id"] for vuln in result.get("vulns") or [])
-        return BatchAnswer(response, matches)
+        if not all(isinstance(result, dict) for result in results):
+            raise SourceFailedError(SOURCE, "the batch answer holds a result that is not an object")
+        return response, results
 
     def vuln(self, advisory_id: str) -> VulnRecord:
         response = self.fetcher.get(f"{self.api}/vulns/{advisory_id}")

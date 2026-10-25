@@ -410,3 +410,133 @@ def test_rekeyed_alert_is_carried_and_cleared_by_the_hub(root: Path) -> None:
         assert [a["alert_id"] for a in store.alerts_for("m", ["open"])] == [aid]
         run_check(store, Answers({url: normal | {"disabled": False}}), ["m"], ["hf-hub"])
         assert state(store, aid) == "cleared"
+
+
+# --- B4: repository-level licence and paper observations follow the repository ------------------
+
+
+def _licensed(licence: str) -> dict[str, Any]:
+    normal = fixture_json("hf_upstream/model-normal")
+    return normal | {"cardData": normal["cardData"] | {"license": licence}}
+
+
+def test_new_revision_carries_a_base_model_licence_alert(root: Path) -> None:
+    with fresh(root, "licence-repin", BASE_A) as store:
+        cause = {"identifier": PURL_A, "item": PURL_A, "source": "hf-hub", "sources": ["hf-hub"]}
+        aid = opened(store, "licence_changed", cause, "licence_changed:pkg:huggingface/owner/model")
+        store.add_version("m", {}, "0" * 64, [BASE_B])
+        result = reevaluate_version(store, "m", 2)
+        alert = store.get_alert(aid)
+        assert alert is not None and alert["state"] == "open"
+        assert aid in result["carried_forward"]
+        assert alert["cause"]["identifier"] == PURL_B
+        assert alert["cause"]["item"] == PURL_B
+
+
+def test_new_revision_carries_a_hub_dataset_licence_alert(root: Path) -> None:
+    with fresh(root, "hub-licence-repin", HUB_DATASET_A) as store:
+        cause = {"identifier": HUB_A, "item": HUB_A, "source": "hf-hub", "sources": ["hf-hub"]}
+        aid = opened(store, "licence_changed", cause, f"licence_changed:hf-dataset:{DATA_REPO}")
+        store.add_version("m", {}, "0" * 64, [HUB_DATASET_B])
+        reevaluate_version(store, "m", 2)
+        alert = store.get_alert(aid)
+        assert alert is not None and alert["state"] == "open"
+        assert alert["cause"]["identifier"] == HUB_B
+
+
+def test_other_base_model_fixes_a_licence_alert(root: Path) -> None:
+    with fresh(root, "licence-other", BASE_A) as store:
+        cause = {"identifier": PURL_A, "item": PURL_A, "source": "hf-hub"}
+        aid = opened(store, "licence_changed", cause, "licence_changed:pkg:huggingface/owner/model")
+        other = BASE_B | {
+            "name": "owner/other",
+            "identifier": f"pkg:huggingface/owner/other@{SHA_B}",
+        }
+        store.add_version("m", {}, "0" * 64, [other])
+        reevaluate_version(store, "m", 2)
+        assert state(store, aid) == "fixed"
+
+
+def test_new_revision_carries_a_hub_dataset_paper_retraction(root: Path) -> None:
+    paper = "10.1234/paper"
+    with fresh(root, "paper-repin", HUB_DATASET_A | {"paper_dois": [paper]}) as store:
+        cause = {"identifier": HUB_A, "dataset": HUB_A, "paper_doi": paper}
+        key = f"paper_retracted:hf-dataset:{DATA_REPO}:{paper}"
+        aid = opened(store, "paper_retracted", cause, key)
+        store.add_version("m", {}, "0" * 64, [HUB_DATASET_B | {"paper_dois": [paper]}])
+        reevaluate_version(store, "m", 2)
+        alert = store.get_alert(aid)
+        assert alert is not None and alert["state"] == "open"
+        assert alert["cause"]["identifier"] == HUB_B
+
+
+def test_a_new_revision_without_the_paper_tie_fixes_the_paper_retraction(root: Path) -> None:
+    paper = "10.1234/paper"
+    with fresh(root, "paper-untied", HUB_DATASET_A | {"paper_dois": [paper]}) as store:
+        cause = {"identifier": HUB_A, "dataset": HUB_A, "paper_doi": paper}
+        key = f"paper_retracted:hf-dataset:{DATA_REPO}:{paper}"
+        aid = opened(store, "paper_retracted", cause, key)
+        store.add_version("m", {}, "0" * 64, [HUB_DATASET_B])
+        reevaluate_version(store, "m", 2)
+        assert state(store, aid) == "fixed"
+
+
+def test_base_model_licence_baseline_survives_a_re_pin(root: Path) -> None:
+    """MIT seen at revision A is the baseline; Apache-2.0 seen after a re-pin to B is a change."""
+    url = model_info_url(REPO)
+    with fresh(root, "licence-baseline", BASE_A) as store:
+        run_check(store, Answers({url: _licensed("mit")}), ["m"], ["hf-hub"])
+        assert store.alerts_for("m") == []
+        store.add_version("m", {}, "0" * 64, [BASE_B])
+        reevaluate_version(store, "m", 2)
+        run_check(store, Answers({url: _licensed("apache-2.0")}), ["m"], ["hf-hub"])
+        (alert,) = store.alerts_for("m", ["open"])
+        assert alert["kind"] == "licence_changed"
+        assert alert["cause_key"] == "licence_changed:pkg:huggingface/owner/model"
+        assert alert["cause"]["identifier"] == PURL_B
+        assert alert["cause"]["recorded_licence"] == "MIT"
+
+
+def test_base_model_licence_alert_follows_a_re_pin_through_a_check(root: Path) -> None:
+    url = model_info_url(REPO)
+    with fresh(root, "licence-follow", BASE_A) as store:
+        run_check(store, Answers({url: _licensed("mit")}), ["m"], ["hf-hub"])
+        run_check(store, Answers({url: _licensed("apache-2.0")}), ["m"], ["hf-hub"])
+        (alert,) = store.alerts_for("m", ["open"])
+        store.add_version("m", {}, "0" * 64, [BASE_B])
+        reevaluate_version(store, "m", 2)
+        run_check(store, Answers({url: _licensed("apache-2.0")}), ["m"], ["hf-hub"])
+        assert [a["alert_id"] for a in store.alerts_for("m", ["open"])] == [alert["alert_id"]]
+        run_check(store, Answers({url: _licensed("mit")}), ["m"], ["hf-hub"])
+        assert state(store, alert["alert_id"]) == "cleared"
+
+
+def test_opening_a_store_rekeys_licence_and_paper_alerts(root: Path) -> None:
+    path = root / "old-licence" / "md.db"
+    paper = "10.1234/paper"
+    with fresh(root, "old-licence", BASE_A, HUB_DATASET_A | {"paper_dois": [paper]}) as store:
+        base = opened(store, "licence_changed", {"identifier": PURL_A, "item": PURL_A})
+        hub = opened(store, "licence_changed", {"identifier": HUB_A, "item": HUB_A})
+        doi = opened(store, "licence_changed", {"identifier": DOI, "item": DOI})
+        retracted = opened(
+            store,
+            "paper_retracted",
+            {"identifier": HUB_A, "dataset": HUB_A, "paper_doi": paper},
+            f"paper_retracted:{HUB_A}:{paper}",
+        )
+        doi_paper = opened(
+            store,
+            "paper_retracted",
+            {"identifier": DOI, "dataset": DOI, "paper_doi": paper},
+            f"paper_retracted:{DOI}:{paper}",
+        )
+    with Store(path, now=lambda: NOW) as store:
+        keys = {aid: store.get_alert(aid)["cause_key"] for aid in (base, hub, doi, retracted)}
+        keys[doi_paper] = store.get_alert(doi_paper)["cause_key"]
+    assert keys == {
+        base: "licence_changed:pkg:huggingface/owner/model",
+        hub: f"licence_changed:hf-dataset:{DATA_REPO}",
+        doi: f"licence_changed:{DOI}",
+        retracted: f"paper_retracted:hf-dataset:{DATA_REPO}:{paper}",
+        doi_paper: f"paper_retracted:{DOI}:{paper}",
+    }

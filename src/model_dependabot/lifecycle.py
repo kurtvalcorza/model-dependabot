@@ -47,7 +47,11 @@ from packaging.utils import canonicalize_name
 
 from model_dependabot.inventory.build import HUB_DATASET_PREFIX, huggingface_purl
 from model_dependabot.matching.severity import severity_of
-from model_dependabot.matching.versions import advisory_affects, affected_ranges, fixed_versions
+from model_dependabot.matching.versions import (
+    affected_ranges,
+    evaluate_advisory,
+    fixed_versions,
+)
 from model_dependabot.sources import (
     crossref,
     datacite,
@@ -283,12 +287,16 @@ def _cache(store: Store, record: VulnRecord, evidence_id: int) -> None:
 
 
 def _apply_osv(store: Store, run_id: int, read: _OsvRead, target: _Target) -> None:
-    batch_detail: dict[str, Any] = {}
-    if read.batch.response is not None:
-        batch_detail = {
-            "query_url": read.batch.response.url,
-            "query_sha256": store.put_body(read.batch.response.body),
-        }
+    stored: dict[int, str] = {}
+
+    def batch_detail_for(identifier: str) -> dict[str, Any]:
+        response = read.batch.response_for(identifier)
+        if response is None:
+            return {}
+        if id(response) not in stored:
+            stored[id(response)] = store.put_body(response.body)
+        return {"query_url": response.url, "query_sha256": stored[id(response)]}
+
     packages = {entry["identifier"]: entry for entry in pinned_packages(target.entries)}
     handled: set[str] = set()
 
@@ -297,9 +305,15 @@ def _apply_osv(store: Store, run_id: int, read: _OsvRead, target: _Target) -> No
             record = read.records[advisory_id]
             if withdrawn(record.advisory):
                 continue  # closed below if an alert is open; never raised
-            local = advisory_affects(record.advisory, entry["name"], entry["version"])
-            match = {"osv_match": True, "local_match": local, **batch_detail}
-            if local:
+            local = evaluate_advisory(record.advisory, entry["name"], entry["version"])
+            match = {
+                "osv_match": True,
+                "local_match": local.affected,
+                **batch_detail_for(identifier),
+            }
+            if not local.evaluated:
+                match["local_unevaluated"] = list(local.reasons)
+            if local.affected:
                 handled.add(package_cause_key(advisory_id, entry["name"]))
                 _raise_or_carry(store, run_id, target, entry, record, match)
             else:
@@ -312,7 +326,7 @@ def _apply_osv(store: Store, run_id: int, read: _OsvRead, target: _Target) -> No
         record = read.records[advisory_id]
         identifier = alert["cause"]["identifier"]
         if withdrawn(record.advisory):
-            detail = {"withdrawn": withdrawn(record.advisory), **batch_detail}
+            detail = {"withdrawn": withdrawn(record.advisory), **batch_detail_for(identifier)}
             evidence_id, _ = _evidence(store, run_id, record, identifier, detail)
             store.link_alert_evidence(alert["alert_id"], evidence_id)
             store.close_alert(alert["alert_id"], state="withdrawn")
@@ -325,12 +339,21 @@ def _apply_osv(store: Store, run_id: int, read: _OsvRead, target: _Target) -> No
         listed = advisory_id in read.batch.matches.get(identifier, [])
         if listed:
             continue  # OSV lists it, the local evaluation does not: recorded above as unmatched
-        if advisory_affects(record.advisory, entry["name"], entry["version"]):
-            match = {"osv_match": False, "local_match": True, **batch_detail}
+        local = evaluate_advisory(record.advisory, entry["name"], entry["version"])
+        if local.affected or not local.evaluated:
+            # OSV no longer lists it but the local check disagrees or cannot read the range:
+            # a watch event, and the alert stays open (no clearance without agreement).
+            match = {
+                "osv_match": False,
+                "local_match": local.affected,
+                **batch_detail_for(identifier),
+            }
+            if not local.evaluated:
+                match["local_unevaluated"] = list(local.reasons)
             _unmatched(store, run_id, target, identifier, record, match)
             continue
         # Both agree the pinned version is no longer affected: the source cleared it (FR-023).
-        detail = {"osv_match": False, "local_match": False, **batch_detail}
+        detail = {"osv_match": False, "local_match": False, **batch_detail_for(identifier)}
         linked = store.alert_evidence(alert["alert_id"])
         evidence_id, _ = _evidence(store, run_id, record, identifier, detail, linked)
         _cache(store, record, evidence_id)
@@ -419,6 +442,8 @@ def _unmatched(
         "osv_match": match["osv_match"],
         "local_match": match["local_match"],
     }
+    if match.get("local_unevaluated"):
+        advisories[record.advisory["id"]]["local_unevaluated"] = list(match["local_unevaluated"])
     detail["advisories"] = advisories
     linked = existing["evidence"] if existing else []
     evidence_id, _ = _evidence(store, run_id, record, identifier, match, linked)
@@ -793,7 +818,9 @@ def _read_hub(
     """Every verdict the run needs, read before anything changes (FR-016).
 
     A file with an open ``hub_scan`` alert has its clean verdict confirmed against the tree, so an
-    explicit safe verdict for the matching hash can clear the alert (FR-023).
+    explicit safe verdict for the matching hash can clear the alert (FR-023). So does a file pinned
+    at a revision other than the hub's head commit, because the hub's verdict describes the head
+    commit only: one tree request compares the head file's hash with the pinned hash.
     """
     alerted = {
         alert["cause"]["identifier"]
@@ -808,11 +835,24 @@ def _read_hub(
             repo, file = entry["hub_repo"], entry["hub_file"]
             if repo not in statuses:
                 statuses[repo] = security.status(repo)
-            confirm = entry["identifier"] in alerted
+            confirm = entry["identifier"] in alerted or _off_head(entry, statuses[repo])
             known = verdicts.get((repo, file))
             if known is None or (confirm and known.state == hub.CLEAN and not known.tree_response):
                 verdicts[(repo, file)] = security.verdict(statuses[repo], file, confirm=confirm)
     return verdicts
+
+
+def _off_head(entry: Mapping[str, Any], status: hub.SecurityStatus) -> bool:
+    """The hub answered for a commit other than the entry's pinned revision."""
+    return status.state == "answered" and entry.get("hub_revision") != status.commit
+
+
+def _off_head_reason(verdict: hub.FileVerdict) -> str:
+    if verdict.in_tree is False:
+        return "the file is not at the hub's head commit"
+    if verdict.in_tree:
+        return "the hub publishes no SHA-256 for the file at its head commit"
+    return "the tree at the hub's head commit could not be read"
 
 
 def _explicitly_safe(verdict: hub.FileVerdict, sha256: str) -> bool:
@@ -850,6 +890,32 @@ def _apply_hub(
             continue
         identifier = entry["identifier"]
         sha256 = identifier.removeprefix("sha256:")
+        if (
+            verdict.state == hub.CLEAN
+            and _off_head(entry, verdict.status)
+            and verdict.hub_sha256 != sha256
+        ):
+            # The clean verdict is for the head commit's file, not the pinned one.
+            detail = {
+                "scanner": HF_SCAN,
+                "verdict": verdict.state,
+                "level": verdict.level,
+                "scanners": verdict.scanners,
+                "hub_repo": verdict.repo,
+                "hub_file": verdict.file,
+                "hub_commit": verdict.status.commit,
+                "pinned_revision": entry.get("hub_revision"),
+                "location": _where(entry),
+            }
+            if verdict.in_tree and verdict.hub_sha256 is not None:
+                detail |= {"inventory_sha256": sha256, "hub_sha256": verdict.hub_sha256}
+                kind = HASH_MISMATCH
+            else:
+                detail["reason"] = _off_head_reason(verdict)
+                kind = HUB_SCAN_UNKNOWN
+            observations = _hub_observations(verdict, detail)
+            _watch(store, run_id, target, kind, identifier, detail, observations)
+            continue
         if verdict.state == hub.CLEAN:
             alert = store.find_open_alert(target.model_id, weight_cause_key(HUB_SCAN_ALERT, sha256))
             if alert is not None and _explicitly_safe(verdict, sha256):
@@ -926,10 +992,13 @@ def _package_finding(
             return True, entry
     cached = store.get_advisory(cause.get("source", SOURCE), cause["advisory_id"])
     for entry in pinned:
-        if cached is None or advisory_affects(
-            {"affected": cached["affected"] or []}, entry["name"], entry["version"]
-        ):
+        if cached is None:
             return True, entry
+        local = evaluate_advisory(
+            {"affected": cached["affected"] or []}, entry["name"], entry["version"]
+        )
+        if local.affected or not local.evaluated:
+            return True, entry  # an unreadable range is not evidence the cause is gone
     return False, pinned[0]
 
 
@@ -1006,6 +1075,10 @@ def reevaluate_version(store: Store, model_id: str, version: int) -> dict[str, l
             if _repository_scoped(alert["kind"], cause) and repository is not None:
                 # A state of the whole hub repository: any pinned revision of it still has it.
                 same = [entry for entry in entries if _in_repository(entry, repository)]
+                if alert["kind"] == PAPER_RETRACTED:
+                    # The paper must still be tied to the dataset (any revision of it).
+                    paper = cause.get("paper_doi")
+                    same = [e for e in same if paper in (e.get("paper_dois") or [])]
                 pinned = [entry for entry in same if entry["pinned"]]
                 if not pinned and same:
                     continue  # only a gap for the repository: neither fixed nor shown again
@@ -1139,6 +1212,16 @@ def base_model_repo(entry: Mapping[str, Any]) -> str:
 def hub_dataset_repo(repo: str) -> str:
     """A hub dataset's repository identity: ``hf-dataset:owner/name`` without a revision."""
     return f"{HUB_DATASET_PREFIX}{repo}"
+
+
+def _hub_scope(entry: Mapping[str, Any]) -> str | None:
+    """The hub repository identity a base model's or hub dataset's repository-level observations
+    (licence, paper tie) are keyed by (identity table); ``None`` for a DOI dataset."""
+    if entry["kind"] == "base_model":
+        return base_model_repo(entry)
+    if entry.get("hub_repo"):
+        return hub_dataset_repo(entry["hub_repo"])
+    return None
 
 
 # Alert kinds whose cause is a state of a whole hub repository (identity and clearance table).
@@ -1426,6 +1509,7 @@ def _apply_crossref(
     doi: str,
     role: str,
     work: crossref.CrossrefWork,
+    scope: str | None = None,
 ) -> None:
     updates = [u.as_dict() for u in work.updates] if work.outcome == "reachable" else None
     evidence_id = observed(CROSSREF, doi, work.response, updates=updates)["evidence_ref"]
@@ -1440,7 +1524,10 @@ def _apply_crossref(
         kind, cause_key = DATASET_RETRACTED, dataset_cause_key(DATASET_RETRACTED, doi)
         cause["doi"] = doi
     else:
-        kind, cause_key = PAPER_RETRACTED, dataset_cause_key(PAPER_RETRACTED, dataset, doi)
+        # Keyed by the dataset's repository when it is on the hub: the tie is to the dataset,
+        # not to one revision of it (identity and clearance table).
+        key_item = scope or dataset
+        kind, cause_key = PAPER_RETRACTED, dataset_cause_key(PAPER_RETRACTED, key_item, doi)
         cause["paper_doi"] = doi
     notices = [u.as_dict() for u in (*work.retractions, *work.notices)]
     if work.retractions:
@@ -1834,7 +1921,8 @@ def _apply_licence(
     item = entry["identifier"]
     seen = [o for o in observed.of_item(item) if o["source"] in LICENCE_SOURCES]
     seen = [o for o in seen if o["outcome"] == "reachable"]
-    reference = licence_reference(store, entry) if seen else None
+    scope = _hub_scope(entry)
+    reference = licence_reference(store, entry, scope) if seen else None
     if reference is None:
         return
     declared_any = any(o["declared_licence"] for o in seen)
@@ -1865,7 +1953,7 @@ def _apply_licence(
             changed.append(observation)
         elif finding == "same":
             same.append(observation)
-    key = dataset_cause_key(LICENCE_CHANGED, item)
+    key = dataset_cause_key(LICENCE_CHANGED, scope or item)
     existing = store.find_open_alert(target.model_id, key)
     returned = {o["source"] for o in same}
     reporting = [s for s in _reporting_sources(existing) if s not in returned]
@@ -1939,7 +2027,16 @@ def _apply_upstream(
         dataset = entry["identifier"]
         for paper in entry.get("paper_dois") or []:
             if paper in works:
-                _apply_crossref(store, target, observed, dataset, paper, "paper", works[paper])
+                _apply_crossref(
+                    store,
+                    target,
+                    observed,
+                    dataset,
+                    paper,
+                    "paper",
+                    works[paper],
+                    scope=_hub_scope(entry),
+                )
             _not_asked(store, target, observed, read, paper, dataset)
 
 
@@ -1962,10 +2059,16 @@ def _dataset_present(
 
 
 def _repository_scoped(kind: str, cause: Mapping[str, Any]) -> bool:
-    """Whether the cause is a state of a whole hub repository (identity and clearance table):
-    a disabled or unavailable base model, or a disabled hub dataset."""
-    return kind in REPOSITORY_ALERTS or (
-        kind == DATASET_REMOVED and cause.get("host") == "huggingface"
+    """Whether the cause is a state or observation of a whole hub repository (identity and
+    clearance table): a disabled or unavailable base model, a disabled hub dataset, a licence
+    read from a base model's or hub dataset's info, or a paper tied to a hub dataset."""
+    identifier = str(cause.get("identifier") or "")
+    on_hub = identifier.startswith((HUB_DATASET_PREFIX, "pkg:huggingface/"))
+    return (
+        kind in REPOSITORY_ALERTS
+        or (kind == DATASET_REMOVED and cause.get("host") == "huggingface")
+        or (kind == LICENCE_CHANGED and on_hub)
+        or (kind == PAPER_RETRACTED and identifier.startswith(HUB_DATASET_PREFIX))
     )
 
 
@@ -2024,6 +2127,9 @@ def _gap_for(
 def _repinned(kind: str, entry: Mapping[str, Any]) -> dict[str, Any]:
     """What a repository-wide cause shows of the revision the new version pins."""
     item = entry["identifier"]
+    if kind == LICENCE_CHANGED:
+        repo = entry["name"] if entry["kind"] == "base_model" else entry["hub_repo"]
+        return {"identifier": item, "item": item, "repo": repo}
     if kind in REPOSITORY_ALERTS:
         return {"identifier": item, "base_model": item, "repo": entry["name"]}
     return {"identifier": item, "dataset": item, "repo": entry["hub_repo"]}

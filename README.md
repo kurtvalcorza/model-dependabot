@@ -98,6 +98,12 @@ a scan that could not finish, a hub file whose hash no longer matches what was r
 of the base model, a newer version of a dataset, a licence that cannot be recognised. They never turn
 into alerts by repetition.
 
+A package alert needs OSV's match and a local evaluation of the same OSV record to agree. The local
+evaluation is a consistency check, not a second source: when the two disagree, or the record's ranges
+cannot be read, the result is a watch event that says which. The hub's scan verdict describes the
+repository's head commit; for a file pinned at another revision the head file's hash is compared with
+the pinned one before a clean result is accepted.
+
 ### Upstream checks
 
 | Alert | Raised when | Severity |
@@ -115,7 +121,8 @@ licence, disabled or unavailable alert closes as `cleared` when the source that 
 the cause in a successful, well-formed answer; a licence alert needs every source that reported the change
 to answer so, and a source that failed or was not asked keeps it open. `withdrawn` is used only for an
 OSV advisory marked withdrawn. Any of them closes as `fixed` when a new version no longer depends on the
-item. A disabled or unavailable base model and a disabled hub dataset are states of the repository, so
+item. A disabled or unavailable base model and a disabled hub dataset are states of the repository, and
+a base model's or hub dataset's licence and a paper tied to a hub dataset are read for the repository, so
 pinning another revision of the same repository keeps the alert open; an entry missing its pin (a gap)
 never counts as a fix.
 

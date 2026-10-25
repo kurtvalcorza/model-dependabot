@@ -93,10 +93,10 @@ New `kind` values, their cause keys and severities (FR-019, U9):
 | `kind` | Raised when | `cause_key` | Severity |
 | :-- | :-- | :-- | :-- |
 | `dataset_retracted` | Crossref lists a retraction, withdrawal or removal update for the dataset DOI | kind + dataset DOI | `HIGH` |
-| `paper_retracted` | The same for a paper DOI tied to a dataset | kind + dataset identifier + paper DOI | `HIGH` |
+| `paper_retracted` | The same for a paper DOI tied to a dataset | kind + dataset DOI + paper DOI; kind + `hf-dataset:owner/name`, without the revision, + paper DOI (hub) | `HIGH` |
 | `dataset_removed` | Zenodo answers 410 with a tombstone, or the hub reports the dataset disabled | kind + dataset DOI (Zenodo); kind + `hf-dataset:owner/name`, without the revision (hub) | `HIGH` |
 | `dataset_not_findable` | DataCite answers 404 for a DataCite DOI | kind + dataset DOI | `HIGH` |
-| `licence_changed` | The normalised set of declared licence entries, order ignored, differs from the recorded set (or the baseline observation's), both recognised; adding or reordering an entry that leaves the set equal raises nothing | kind + item (one alert per item) | `HIGH` |
+| `licence_changed` | The normalised set of declared licence entries, order ignored, differs from the recorded set (or the baseline observation's), both recognised; adding or reordering an entry that leaves the set equal raises nothing | kind + item (one alert per item): the dataset DOI, or for a base model or hub dataset its repository without the revision | `HIGH` |
 | `base_model_disabled` | The hub reports the base model disabled | kind + base-model purl without the version (`pkg:huggingface/owner/name`) | `MODERATE` |
 | `base_model_unavailable` | The refusal-span rule is met (U7) | kind + base-model purl without the version | `LOW` |
 
@@ -125,19 +125,25 @@ never counts as removal: the alert stays open, neither fixed nor carried forward
 | `hub_scan` | file SHA-256 | no longer has a file with that hash | the hub gives an explicit `safe` verdict for that hash | never |
 | `format_policy` | file SHA-256 | no longer has the file, or has a code-free file beside it | the owner's format policy is no longer `strict` | never |
 | `dataset_retracted` | dataset DOI | no longer pins the DOI | a successful, well-formed Crossref answer lists no retraction, withdrawal or removal | never: no source read here publishes an explicit withdrawal of a notice |
-| `paper_retracted` | dataset identifier and paper DOI | no longer pins the dataset identifier, or no longer ties the paper to it | as `dataset_retracted`, for the paper DOI | never |
+| `paper_retracted` | dataset DOI and paper DOI; for a hub dataset, its repository (`owner/name`, any revision) and paper DOI | no longer pins the dataset DOI or names the hub repository, or no longer ties the paper to it | as `dataset_retracted`, for the paper DOI | never |
 | `dataset_removed` (Zenodo) | dataset DOI | no longer pins the DOI | never | never |
 | `dataset_removed` (hub) | hub repository (`owner/name`), any revision | no longer names the repository | never | never |
 | `dataset_not_findable` | dataset DOI | no longer pins the DOI | never | never |
-| `licence_changed` | item (dataset DOI, hub dataset revision or base-model revision) and the sources reporting the change | no longer pins the item | every source that reported the change answers with the recorded licence set again | never |
+| `licence_changed` | item (dataset DOI; for a base model or hub dataset, its repository, any revision) and the sources reporting the change | no longer pins the DOI or names the repository | every source that reported the change answers with the recorded licence set again | never |
 | `base_model_disabled` | hub repository (`owner/name`), any revision | no longer names the repository | the hub reports `disabled: false` | never |
 | `base_model_unavailable` | hub repository (`owner/name`), any revision | no longer names the repository | any hub answer that is not a refusal | never |
 
 For a repository-wide kind, a new version that pins another revision of the same repository carries the
 alert forward to that revision; only depending on a different repository, or the hub's own clearance,
-closes it. Revision- and hash-scoped kinds keep exact-identifier comparison. A person can dismiss any open
+closes it. A licence read from a base model's or hub dataset's info and a paper tied to a hub dataset are
+observations of the repository, not of one revision: their alerts follow the repository in the same way,
+and the baseline licence (when the inventory records none) is the first licence observed for any revision
+of the repository, so a re-pin does not start a new baseline. A paper alert is carried forward only while
+the new version still ties that paper to the dataset. Revision- and hash-scoped kinds keep exact-identifier comparison. A person can dismiss any open
 alert with a listed reason (`dismissed`). An open repository-wide alert stored before this rule, with the
-revision in its cause key, is rekeyed by repository when the database is opened.
+revision in its cause key, is rekeyed by repository when the database is opened; this covers
+`base_model_disabled`, `base_model_unavailable`, a hub dataset's `dataset_removed` and `paper_retracted`,
+and a base model's or hub dataset's `licence_changed`.
 
 **Refusal-span rule** (U7): `base_model_unavailable` opens when an unbroken run of refusal observations from
 scheduled check runs, with no reachable observation from any run in between, spans at least 24 hours from
@@ -157,7 +163,7 @@ and extends it to two new kinds (U12). State transitions added to 001's:
  open (licence_changed) ── every reporting source returns to the recorded licence ─▶ cleared
  open (licence_changed) ── declared licence changes again ────────────────────▶ open, evidence added, declared licence updated
  open (dataset_retracted, paper_retracted) ── well-formed answer lists no retraction ─▶ cleared
- open (base_model_*, hub dataset_removed) ── new version pins another revision of the repository ─▶ open, carried forward
+ open (base_model_*, hub dataset_removed, hub licence_changed, hub paper_retracted) ── new version pins another revision of the repository ─▶ open, carried forward
  open (any kind above) ── new version names the item only in a gap ────────▶ open, unchanged
  open (any kind above) ── new version no longer depends on the item ─────────▶ fixed
  open (any kind above) ── person dismisses with a listed reason ──────────────▶ dismissed

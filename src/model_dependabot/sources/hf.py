@@ -208,6 +208,7 @@ class FileVerdict:
     file_status: dict[str, object] | None = None
     tree_response: Response | None = None
     reason: str | None = None
+    in_tree: bool | None = None  # whether the tree at the verdict's commit lists the file
 
 
 def security_status_url(repo: str, endpoint: str = HF_ENDPOINT) -> str:
@@ -272,7 +273,9 @@ class HubSecurity:
         """The verdict for one file; a listed file's hash and scanners come from the tree.
 
         A clean verdict is read from the tree too when ``confirm`` is set, so that an explicit
-        ``safe`` file status for the matching hash can clear an alert (FR-023).
+        ``safe`` file status for the matching hash can clear an alert (FR-023), and so that a
+        clean verdict for a head commit other than the pinned revision can be compared with the
+        pinned hash: the hub's security status describes the head commit only.
         """
         if status.state != "answered":
             return FileVerdict(status.repo, file, status.state, status, reason=status.reason)
@@ -286,14 +289,17 @@ class HubSecurity:
             return FileVerdict(status.repo, file, CLEAN, status, level)
         assert status.commit is not None
         response = self._tree(status.repo, status.commit, dirname(file))
-        sha256, file_status = None, None
+        sha256, file_status, in_tree = None, None, None
         if response.status == 200:
             try:
                 items = json.loads(response.body)
             except ValueError:
                 items = []
+            if isinstance(items, list):
+                in_tree = False
             for item in items if isinstance(items, list) else []:
                 if isinstance(item, dict) and item.get("path") == file:
+                    in_tree = True
                     lfs = item.get("lfs") if isinstance(item.get("lfs"), dict) else {}
                     oid = str(lfs.get("oid", "")).lower()
                     sha256 = oid if _SHA256.match(oid) else None
@@ -309,6 +315,7 @@ class HubSecurity:
             scanners=_scanners(file_status or {}),
             file_status=file_status,
             tree_response=response,
+            in_tree=in_tree,
         )
 
 

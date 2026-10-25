@@ -21,18 +21,29 @@ directly and validating it against the official schema keeps the output exact (c
 Dataset profiles (`trainedOn`, `ancestorOf` relationships fit well, but the JSON-LD serialisation is
 heavier and tooling is thinner); a custom format (rejected by constitution II).
 
-## R2. Package advisories: OSV.dev, matched by the source and re-checked locally
+## R2. Package advisories: OSV.dev, matched by the source and checked locally for consistency
 
 **Decision**: Query OSV.dev with `POST /v1/querybatch` (ecosystem `PyPI`, package name and exact
-version) to find candidate advisories, then fetch each with `GET /v1/vulns/{id}`. Recompute the match
-locally from the advisory's `affected[].ranges` (`introduced`, `fixed`, `last_affected` events) and
-`affected[].versions`, comparing with PEP 440 rules (`packaging` 26.3). Raise an alert only when OSV's
-match and the local recomputation agree; record a watch event when they disagree.
+version) to find candidate advisories, then fetch each with `GET /v1/vulns/{id}`. More than 1,000
+distinct packages in a run are sent as several batches of at most 1,000 queries; a result that carries
+`next_page_token` is followed by sending only those queries again with `page_token`, for at most ten
+further rounds, after which the source counts as failed. Then evaluate the same record locally from
+its `affected[].ranges` and `affected[].versions`, comparing with PEP 440 rules (`packaging` 26.3) and
+the schema's event rules: `introduced` opens a range (`"0"` means before every version), `fixed` closes
+it (exclusive), `last_affected` closes it (inclusive) and `limit` is an exclusive upper bound on the
+whole range (`"*"` means no bound; none given means `"*"`). Raise an alert only when OSV's match and the
+local evaluation agree; record an `advisory_unmatched` watch event when they disagree. A range the local
+evaluation cannot read (an event value that is not a PEP 440 version, an unknown event or no
+`introduced` event) is not "not affected": the watch event records why it could not be read, and an open
+alert is not cleared on it.
 
 **Rationale**: OSV is the open format the constitution names, carries `withdrawn`, `fixed` and
 `last_affected` (schema v1.9.2), aggregates the GitHub and PyPI advisory databases and states no rate
-limits (landscape §1). Two independent matches give precision (constitution IV) and evidence that can be
-shown (constitution I).
+limits (landscape §1). The local evaluation is a consistency check on the same OSV record, not a second
+source: it catches a disagreement between OSV's matcher and the record it serves (or a defect in either
+implementation), but it cannot confirm that the advisory is correct or that the feed is complete. It
+adds precision (constitution IV) and evidence that can be shown (constitution I); where its reading of
+the schema is incomplete it can only lower recall, by turning a match into a watch event.
 
 **Alternatives considered**: the GitHub advisory API alone (rate-limited, needs a token for volume);
 PyPI's per-release `vulnerabilities` array (a useful cross-check, but one request per package
@@ -89,6 +100,12 @@ verdict, the alert closes as `cleared` with the new verdict as evidence (FR-023)
 unrecognised later verdict changes nothing. Per-file hashes come from the tree API's `lfs.oid` and the
 revision from the model-info `sha` at that revision (`X-Repo-Commit` wins when a response carries
 one; neither the tree nor the model-info API sent it on 2026-10-24, see `tests/fixtures/hf/NOTES.md`).
+The security status describes the repository's head commit only. When it gives no issue for a file
+pinned at another revision, one request for the tree at the head commit compares the head file's
+SHA-256 with the pinned hash: if they match, the clean result stands; if they differ the result is a
+`hash_mismatch` watch event, and if the file is not at the head commit (or its hash or the tree cannot be
+read) a `hub_scan_unknown` watch event with the reason. A file pinned at the head commit needs no extra
+request.
 
 **Rationale**: the hub scans with several engines (landscape §2); using it adds coverage at no cost. Because
 the interface is undocumented, failing safe to watch events keeps a format change from producing false

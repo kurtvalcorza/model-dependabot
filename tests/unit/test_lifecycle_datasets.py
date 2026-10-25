@@ -423,7 +423,9 @@ def test_a_paper_tied_to_a_hub_dataset_is_checked_too(
     crossref(store, RETRACTED)
     check(store, derive_upstream(), "m", sources=("crossref",))
     (alert,) = alerts(store, "m")
-    assert alert["cause_key"] == f"paper_retracted:{MUXUE}:{RETRACTED}"
+    assert (
+        alert["cause_key"] == f"paper_retracted:hf-dataset:yavon/muxue:{RETRACTED}"
+    )  # by repository
 
 
 # An obviously fictional paper DOI under arXiv's DataCite prefix; doi.org's answer is derived.

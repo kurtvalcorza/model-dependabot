@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from model_dependabot.sources.fetcher import RecordedFetcher, SourceFailedError
+from model_dependabot.sources.fetcher import RecordedFetcher, Response, SourceFailedError
 from model_dependabot.sources.osv import (
+    BATCH_LIMIT,
+    MAX_PAGES,
     SOURCE,
     OsvClient,
     aliases,
@@ -120,3 +123,86 @@ def test_an_error_status_is_a_source_failure(tmp_path: Path) -> None:
     with pytest.raises(SourceFailedError) as caught:
         OsvClient(RecordedFetcher(tmp_path)).vuln("GHSA-none")
     assert caught.value.source == SOURCE
+
+
+# --- Batching and pagination (review methodology 5, phase B2) ------------------------------------
+
+
+class _FakeOsv:
+    """Answers querybatch POSTs from a function of the decoded query; records every request."""
+
+    def __init__(self, answer: Callable[[dict[str, Any]], dict[str, Any]]) -> None:
+        self.answer = answer
+        self.posts: list[dict[str, Any]] = []
+
+    def get(self, url: str) -> Response:
+        raise AssertionError(f"unexpected GET {url}")
+
+    def post(self, url: str, body: bytes) -> Response:
+        query = json.loads(body)
+        self.posts.append(query)
+        return Response(
+            status=200,
+            body=json.dumps(self.answer(query)).encode("utf-8"),
+            url=url,
+            retrieved_at=datetime(2026, 10, 25, tzinfo=UTC),
+        )
+
+
+def _many(count: int) -> list[dict[str, Any]]:
+    return [_package(f"pkg{index:05d}", "1.0") for index in range(count)]
+
+
+def test_more_than_one_batch_of_packages_is_split_and_merged() -> None:
+    def answer(query: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "results": [
+                {"vulns": [{"id": f"OSV-{q['package']['name']}"}]} for q in query["queries"]
+            ]
+        }
+
+    fake = _FakeOsv(answer)
+    result = OsvClient(fake).query(_many(2001))
+    assert [len(post["queries"]) for post in fake.posts] == [BATCH_LIMIT, BATCH_LIMIT, 1]
+    assert len(result.matches) == 2001
+    assert result.matches["pkg:pypi/pkg02000@1.0"] == ["OSV-pkg02000"]
+    assert len(result.responses) == 3
+    assert result.response_for("pkg:pypi/pkg02000@1.0") is result.responses[2]
+    assert result.response is result.responses[0]
+
+
+def test_a_paginated_answer_is_followed_for_that_query_only() -> None:
+    def answer(query: dict[str, Any]) -> dict[str, Any]:
+        results = []
+        for q in query["queries"]:
+            name = q["package"]["name"]
+            if name == "pkg00001" and "page_token" not in q:
+                results.append({"vulns": [{"id": "OSV-A"}], "next_page_token": "tok-1"})
+            elif name == "pkg00001" and q["page_token"] == "tok-1":
+                results.append({"vulns": [{"id": "OSV-B"}]})
+            else:
+                results.append({"vulns": []})
+        return {"results": results}
+
+    fake = _FakeOsv(answer)
+    result = OsvClient(fake).query(_many(3))
+    assert len(fake.posts) == 2
+    [follow] = fake.posts[1]["queries"]
+    assert follow == {
+        "package": {"name": "pkg00001", "ecosystem": "PyPI"},
+        "version": "1.0",
+        "page_token": "tok-1",
+    }
+    assert result.matches["pkg:pypi/pkg00001@1.0"] == ["OSV-A", "OSV-B"]
+    assert result.matches["pkg:pypi/pkg00000@1.0"] == []
+
+
+def test_endless_pagination_fails_the_source() -> None:
+    def answer(query: dict[str, Any]) -> dict[str, Any]:
+        return {"results": [{"vulns": [], "next_page_token": "again"} for _ in query["queries"]]}
+
+    fake = _FakeOsv(answer)
+    with pytest.raises(SourceFailedError) as raised:
+        OsvClient(fake).query(_many(1))
+    assert raised.value.source == SOURCE
+    assert len(fake.posts) == 1 + MAX_PAGES

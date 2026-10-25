@@ -25,7 +25,7 @@ GPT2_SHA = "607a30d783dfa663caf39e06633721c8d4cfcd7e"
 PURL = f"pkg:huggingface/openai-community/gpt2@{GPT2_SHA}"
 FIGSHARE = "10.6084/m9.figshare.34763127.v1"
 FIGSHARE_ID = "34763127"
-KEY = f"licence_changed:{PURL}"
+KEY = "licence_changed:pkg:huggingface/openai-community/gpt2"  # keyed by repository (003)
 
 
 @pytest.fixture

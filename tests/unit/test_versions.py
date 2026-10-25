@@ -11,6 +11,7 @@ import pytest
 from model_dependabot.matching.versions import (
     advisory_affects,
     affected_ranges,
+    evaluate_advisory,
     fixed_versions,
     version_affected,
 )
@@ -138,3 +139,101 @@ def test_no_fixed_version_published() -> None:
     }
     assert fixed_versions(advisory, "a") == []
     assert advisory_affects(advisory, "a", "99.0") is True
+
+
+# --- OSV ``limit`` events and unevaluable ranges (review F5, phase B1) ---------------------------
+
+
+@pytest.mark.parametrize(
+    ("version", "expected"),
+    [("0.9", False), ("1.0", True), ("1.9.9", True), ("2.0", False), ("3.0", False)],
+)
+def test_limit_is_an_exclusive_upper_bound(version: str, expected: bool) -> None:
+    affected = _range({"introduced": "1.0"}, {"limit": "2.0"})
+    assert version_affected(version, affected) is expected
+
+
+@pytest.mark.parametrize(("version", "expected"), [("0.9", False), ("1.5", True), ("99", True)])
+def test_limit_star_is_infinity(version: str, expected: bool) -> None:
+    affected = _range({"introduced": "1.0"}, {"limit": "*"})
+    assert version_affected(version, affected) is expected
+
+
+@pytest.mark.parametrize(
+    ("version", "expected"),
+    [("1.0", True), ("1.5", False), ("2.0", True), ("2.4", True), ("2.5", False), ("3.1", False)],
+)
+def test_limit_with_several_introduced_and_fixed_pairs(version: str, expected: bool) -> None:
+    affected = _range(
+        {"introduced": "1.0"},
+        {"fixed": "1.5"},
+        {"introduced": "2.0"},
+        {"fixed": "2.5"},
+        {"introduced": "3.0"},
+        {"limit": "3.1"},
+    )
+    assert version_affected(version, affected) is expected
+
+
+@pytest.mark.parametrize(("version", "expected"), [("1.2", True), ("1.4", False), ("1.7", False)])
+def test_limit_below_fixed_bounds_the_open_interval(version: str, expected: bool) -> None:
+    affected = _range({"introduced": "1.0"}, {"limit": "1.4"}, {"fixed": "1.6"})
+    assert version_affected(version, affected) is expected
+
+
+@pytest.mark.parametrize(("version", "expected"), [("1.5", True), ("2.5", True), ("3.0", False)])
+def test_several_limits_any_one_above_the_version_admits_it(version: str, expected: bool) -> None:
+    affected = _range({"introduced": "1.0"}, {"limit": "2.0"}, {"limit": "3.0"})
+    assert version_affected(version, affected) is expected
+
+
+def test_evaluation_separates_unevaluable_from_not_affected() -> None:
+    advisory = {
+        "affected": [
+            {
+                "package": {"ecosystem": "PyPI", "name": "pkg"},
+                "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "not a version!"}]}],
+            }
+        ]
+    }
+    unevaluable = evaluate_advisory(advisory, "pkg", "1.0")
+    assert unevaluable.affected is False
+    assert unevaluable.evaluated is False
+    assert any("not a version!" in reason for reason in unevaluable.reasons)
+
+    advisory["affected"][0]["ranges"][0]["events"] = [{"introduced": "2.0"}]
+    outside = evaluate_advisory(advisory, "pkg", "1.0")
+    assert outside.affected is False
+    assert outside.evaluated is True
+    assert outside.reasons == ()
+
+
+def test_an_unparseable_pinned_version_cannot_be_evaluated() -> None:
+    advisory = {
+        "affected": [
+            {
+                "package": {"ecosystem": "PyPI", "name": "pkg"},
+                "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}]}],
+            }
+        ]
+    }
+    result = evaluate_advisory(advisory, "pkg", "not-pep-440")
+    assert result.affected is False
+    assert result.evaluated is False
+
+
+def test_an_affected_range_wins_over_an_unevaluable_one() -> None:
+    advisory = {
+        "affected": [
+            {
+                "package": {"ecosystem": "PyPI", "name": "pkg"},
+                "ranges": [
+                    {"type": "ECOSYSTEM", "events": [{"introduced": "bogus!"}]},
+                    {"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "2.0"}]},
+                ],
+            }
+        ]
+    }
+    result = evaluate_advisory(advisory, "pkg", "1.0")
+    assert result.affected is True
+    assert result.evaluated is True
