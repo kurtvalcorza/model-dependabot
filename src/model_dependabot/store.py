@@ -74,6 +74,8 @@ WATCH_KINDS = (
     "licence_unrecognised",
     "licence_missing",
     "upstream_notice",
+    # feature 005 (contracts/registration-record.md)
+    "weight_file_absent",
 )
 TRIGGERS = ("scheduled", "on_demand")
 OUTCOMES = ("reachable", "refused", "not_found", "removed", "redirected")
@@ -108,6 +110,7 @@ CREATE TABLE IF NOT EXISTS model_versions (
     manifest_sha256 TEXT NOT NULL,
     inventory TEXT NOT NULL,
     base_dir TEXT,
+    registration_record_sha256 TEXT,
     PRIMARY KEY (model_id, version)
 );
 
@@ -353,6 +356,11 @@ class Store:
         if "used_at" not in self.columns("etag_cache"):
             with self.conn:
                 self.conn.execute("ALTER TABLE etag_cache ADD COLUMN used_at TEXT")
+        if "registration_record_sha256" not in self.columns("model_versions"):
+            with self.conn:
+                self.conn.execute(
+                    "ALTER TABLE model_versions ADD COLUMN registration_record_sha256 TEXT"
+                )
         self._widen_watch_kinds()
         self._rekey_repository_alerts()
 
@@ -503,17 +511,20 @@ class Store:
         entries: Iterable[Mapping[str, Any]],
         *,
         base_dir: Path | str | None = None,
+        registration_record_sha256: str | None = None,
     ) -> int:
         """Record the next version of a model with its inventory and entries, all or nothing.
 
         ``base_dir`` is the directory that local weight-file locations are relative to (the
         manifest's or the imported inventory's), so a check can find the files to scan.
+        ``registration_record_sha256`` is set when the local weight files were registered from a
+        registration record, without their bytes (feature 005).
         """
         with self.conn:
             version = (self.latest_version(model_id) or 0) + 1
             self.conn.execute(
                 "INSERT INTO model_versions (model_id, version, registered_at, manifest_sha256,"
-                " inventory, base_dir) VALUES (?, ?, ?, ?, ?, ?)",
+                " inventory, base_dir, registration_record_sha256) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     model_id,
                     version,
@@ -521,6 +532,7 @@ class Store:
                     manifest_sha256,
                     json.dumps(inventory),
                     None if base_dir is None else str(Path(base_dir).resolve()),
+                    registration_record_sha256,
                 ),
             )
             for entry in entries:

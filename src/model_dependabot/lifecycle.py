@@ -98,6 +98,12 @@ SCAN_SUSPICIOUS = "scan_suspicious"
 SCAN_INCOMPLETE = "scan_incomplete"
 HUB_SCAN_UNKNOWN = "hub_scan_unknown"
 HASH_MISMATCH = "hash_mismatch"
+WEIGHT_FILE_ABSENT = "weight_file_absent"
+RECORD_URL_PREFIX = "registration-record:sha256:"
+ABSENT_REASON = (
+    "the weight file's bytes are not on this machine: it was registered from a registration"
+    " record and scanned where the weights are"
+)
 
 PICKLESCAN = "picklescan"
 HF_SCAN = "hf-scan"
@@ -142,6 +148,7 @@ class _Target:
     entries: list[dict[str, Any]]
     summary: dict[str, Any]
     base_dir: str | None = None
+    record_sha256: str | None = None
 
 
 @dataclass
@@ -182,7 +189,16 @@ def run_check(
         }
         record = store.get_version(model_id, version) or {}
         entries = store.entries(model_id, version)
-        targets.append(_Target(model_id, version, entries, summary, record.get("base_dir")))
+        targets.append(
+            _Target(
+                model_id,
+                version,
+                entries,
+                summary,
+                record.get("base_dir"),
+                record.get("registration_record_sha256"),
+            )
+        )
 
     statuses: dict[str, str] = {}
     wanted = [source for source in sources if source in UPSTREAM_SOURCES]
@@ -494,7 +510,7 @@ class _Observation:
 
 def _store_observations(
     store: Store,
-    run_id: int,
+    run_id: int | None,
     identifier: str,
     observations: Sequence[_Observation],
     existing: Sequence[Mapping[str, Any]] = (),
@@ -531,7 +547,7 @@ def _store_observations(
 
 def _weight_alert(
     store: Store,
-    run_id: int,
+    run_id: int | None,
     target: _Target,
     kind: str,
     entry: Mapping[str, Any],
@@ -574,7 +590,7 @@ def _weight_alert(
 
 def _watch(
     store: Store,
-    run_id: int,
+    run_id: int | None,
     target: _Target,
     kind: str,
     identifier: str,
@@ -695,6 +711,7 @@ class _LocalScan:
     report: pickle_scan.ScanReport | None = None
     actual_sha256: str | None = None
     read_error: str | None = None
+    absent: bool = False
 
 
 def _local_path(target: _Target, location: str) -> Path:
@@ -731,7 +748,10 @@ def _read_local_scans(
                         if f"sha256:{scan.actual_sha256}" == entry["identifier"]:
                             scan.report = report
             except OSError as error:
-                scan.read_error = f"cannot read the file: {error.strerror or error}"
+                if target.record_sha256 is not None and not path.exists():
+                    scan.absent = True  # registered from a record: the bytes live elsewhere
+                else:
+                    scan.read_error = f"cannot read the file: {error.strerror or error}"
             scans[(target.model_id, target.version, entry["identifier"])] = scan
     return scans
 
@@ -746,6 +766,22 @@ def _apply_local_scans(
             continue
         url = scan.path.as_uri()
         location = entry["location"]
+        if scan.absent:
+            detail = {
+                "scanner": pickle_scan.SCANNER,
+                "location": location,
+                "reason": ABSENT_REASON,
+                "record_sha256": target.record_sha256,
+            }
+            observation = _Observation(
+                pickle_scan.SCANNER,
+                f"{RECORD_URL_PREFIX}{target.record_sha256}",
+                scan.retrieved_at,
+                _json_body(detail),
+                detail,
+            )
+            _watch(store, run_id, target, WEIGHT_FILE_ABSENT, identifier, detail, [observation])
+            continue
         if scan.report is None and scan.read_error is None:
             detail = {
                 "scanner": pickle_scan.SCANNER,
@@ -775,36 +811,94 @@ def _apply_local_scans(
 
         report = scan.report
         body = _json_body(report.as_record())
-        base = {
-            "scanner": report.scanner,
-            "scanner_version": report.scanner_version,
-            "location": location,
-            "format": entry["format"],
+        _apply_report(store, run_id, target, entry, report, url, scan.retrieved_at, body)
+
+
+def _apply_report(
+    store: Store,
+    run_id: int | None,
+    target: _Target,
+    entry: Mapping[str, Any],
+    report: pickle_scan.ScanReport,
+    url: str,
+    retrieved_at: Any,
+    body: bytes,
+) -> None:
+    """Alerts and watch events from one file's scan, made now or recorded where the file is."""
+    identifier = entry["identifier"]
+    location = entry["location"]
+    base = {
+        "scanner": report.scanner,
+        "scanner_version": report.scanner_version,
+        "location": location,
+        "format": entry["format"],
+    }
+    if report.dangerous:
+        detail = {
+            **base,
+            "dangerous": report.dangerous,
+            "suspicious": report.suspicious,
+            "complete": report.complete,
+            "position": report.position,
         }
-        if report.dangerous:
-            detail = {
-                **base,
-                "dangerous": report.dangerous,
-                "suspicious": report.suspicious,
-                "complete": report.complete,
-                "position": report.position,
-            }
-            cause = {"identifier": identifier, **detail}
-            observation = _Observation(report.scanner, url, scan.retrieved_at, body, detail)
-            _weight_alert(store, run_id, target, WEIGHT_SCAN_ALERT, entry, cause, [observation])
-        if report.suspicious:
-            detail = {**base, "suspicious": report.suspicious}
-            observation = _Observation(report.scanner, url, scan.retrieved_at, body, detail)
-            _watch(store, run_id, target, SCAN_SUSPICIOUS, identifier, detail, [observation])
-        if not report.complete:
-            detail = {
-                **base,
-                "position": report.position,
-                "size": report.size,
-                "reason": report.error,
-            }
-            observation = _Observation(report.scanner, url, scan.retrieved_at, body, detail)
-            _watch(store, run_id, target, SCAN_INCOMPLETE, identifier, detail, [observation])
+        cause = {"identifier": identifier, **detail}
+        observation = _Observation(report.scanner, url, retrieved_at, body, detail)
+        _weight_alert(store, run_id, target, WEIGHT_SCAN_ALERT, entry, cause, [observation])
+    if report.suspicious:
+        detail = {**base, "suspicious": report.suspicious}
+        observation = _Observation(report.scanner, url, retrieved_at, body, detail)
+        _watch(store, run_id, target, SCAN_SUSPICIOUS, identifier, detail, [observation])
+    if not report.complete:
+        detail = {
+            **base,
+            "position": report.position,
+            "size": report.size,
+            "reason": report.error,
+        }
+        observation = _Observation(report.scanner, url, retrieved_at, body, detail)
+        _watch(store, run_id, target, SCAN_INCOMPLETE, identifier, detail, [observation])
+
+
+def apply_recorded_scans(
+    store: Store,
+    model_id: str,
+    version: int,
+    record_sha256: str,
+    scans: Mapping[str, tuple[pickle_scan.ScanReport, Any, bytes]],
+) -> dict[str, list[int]]:
+    """Apply the local scans in a registration record to a version just registered from it.
+
+    ``scans`` maps each local file's manifest location to its recorded report, scan time and the
+    recorded scan as it stands in the record. The alerts and watch events are the ones a check's
+    local scan of the same bytes makes (shared ``_apply_report``); the evidence is the recorded
+    scan: source ``picklescan``, the record's SHA-256 in its URL, the scan time as its retrieval
+    time and the scanner version in its detail (constitution I). It belongs to no check run.
+    """
+    record = store.get_version(model_id, version) or {}
+    summary: dict[str, Any] = {
+        "model_id": model_id,
+        "version": version,
+        "opened": [],
+        "carried_forward": [],
+        "closed": [],
+        "watch_events": [],
+    }
+    target = _Target(
+        model_id,
+        version,
+        store.entries(model_id, version),
+        summary,
+        record.get("base_dir"),
+        record_sha256,
+    )
+    url = f"{RECORD_URL_PREFIX}{record_sha256}"
+    for entry in _code_capable(target.entries):
+        found = scans.get(entry.get("location") or "")
+        if entry.get("hub_repo") or found is None:
+            continue
+        report, scanned_at, body = found
+        _apply_report(store, None, target, entry, report, url, scanned_at, body)
+    return {key: summary[key] for key in ("opened", "carried_forward", "watch_events")}
 
 
 # --- hf-scan: the hub's verdicts ------------------------------------------------------------------
