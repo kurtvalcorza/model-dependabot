@@ -83,6 +83,8 @@ output; both may go before or after the command name.
 | Command | What it does |
 | :-- | :-- |
 | `register MANIFEST.toml [--model-id ID]` | Registers a model, or with `--model-id` a new version of it. Hashes local files, pins hub files to their commit and records gaps. A new version re-evaluates the previous version's open alerts straight away: alerts whose cause is gone close as `fixed`, the rest carry forward |
+| `record MANIFEST.toml -o FILE` | Where the weight files are: hashes and scans them and writes a registration record; see [Registering where the weights are not](#registering-where-the-weights-are-not) |
+| `register MANIFEST.toml --from-record FILE [--model-id ID]` | Registers from the manifest and a registration record without reading the weight files |
 | `import BOM.json --model-id ID` | Registers a version from an existing CycloneDX inventory |
 | `inventory show ID [--version N]` | Lists the entries with their identifiers and the gaps with their reasons |
 | `inventory export ID [--version N] -o FILE` | Writes the stored CycloneDX 1.7 inventory, validated against the official schema |
@@ -103,6 +105,30 @@ evaluation is a consistency check, not a second source: when the two disagree, o
 cannot be read, the result is a watch event that says which. The hub's scan verdict describes the
 repository's head commit; for a file pinned at another revision the head file's hash is compared with
 the pinned one before a clean result is accepted.
+
+### Registering where the weights are not
+
+Weight files often stay on the owner's machine (ignored by git) while checks run somewhere else, such
+as a hosted CI job. Registration then happens in two steps:
+
+```sh
+# on the machine with the weights: hash, classify and pickle-scan each local weight file
+model-dependabot record model.toml -o model.record.json
+
+# anywhere else, with only the manifest and the record
+model-dependabot register model.toml --from-record model.record.json
+model-dependabot check example-detector-v1 --source osv,hf-scan,hf-hub,hf-takedowns,crossref,datacite,zenodo,figshare
+```
+
+The record is plain JSON: each local file's manifest path, SHA-256, size, format, whether it can run
+code and, for one that can, the local scan's result with the scanner version and time. It holds no
+weight bytes and no other paths. `register --from-record` refuses a record whose model id, manifest or
+file list does not match, whose `record_sha256` is wrong or that lacks a scan for a file that can run
+code. The recorded scans count as if the files had been scanned at registration: the same alerts and
+watch events, with the recorded scan as evidence. A later `check` without `picklescan` reads no local
+file; with `picklescan`, a missing file is a `weight_file_absent` watch event, not an alert. To apply a
+newer scanner, record again where the weights are and register the record as a new version. The
+schema is in [contracts/registration-record.md](specs/001-inventory-alerts/contracts/registration-record.md).
 
 ### Upstream checks
 

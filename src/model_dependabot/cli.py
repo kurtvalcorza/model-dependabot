@@ -20,7 +20,20 @@ from typing import Any
 
 from model_dependabot.inventory.build import build_entries, record_licences
 from model_dependabot.inventory.cyclonedx import InventoryError, export_bom, import_bom, validate
-from model_dependabot.lifecycle import dismiss_alert, reevaluate_version, run_check
+from model_dependabot.inventory.record import (
+    CheckedRecord,
+    RecordError,
+    check_record,
+    load_record,
+    make_record,
+    write_record,
+)
+from model_dependabot.lifecycle import (
+    apply_recorded_scans,
+    dismiss_alert,
+    reevaluate_version,
+    run_check,
+)
 from model_dependabot.manifest import ManifestError, load_manifest
 from model_dependabot.reports import (
     SCOPE_ALL,
@@ -47,6 +60,7 @@ UPSTREAM_SOURCES = ("hf-hub", "hf-takedowns", "crossref", "datacite", "zenodo", 
 CHECK_SOURCES = ("osv", "picklescan", "hf-scan", *UPSTREAM_SOURCES)
 
 COMMANDS = (
+    "record",
     "register",
     "import",
     "inventory show",
@@ -126,9 +140,24 @@ def build_parser() -> argparse.ArgumentParser:
         sub.set_defaults(command_key=key)
         return sub
 
+    record = leaf(
+        commands,
+        "record",
+        "record",
+        "write a registration record: hash and scan the local weight files where they are",
+    )
+    record.add_argument("manifest", metavar="MANIFEST.toml")
+    record.add_argument("-o", "--out", dest="output", metavar="FILE", required=True)
+
     register = leaf(commands, "register", "register", "register a model or a new version")
     register.add_argument("manifest", metavar="MANIFEST.toml")
     register.add_argument("--model-id", metavar="ID")
+    register.add_argument(
+        "--from-record",
+        dest="from_record",
+        metavar="RECORD.json",
+        help="take the local weight files from a registration record; their bytes are not read",
+    )
 
     imported = leaf(commands, "import", "import", "register a version from a CycloneDX inventory")
     imported.add_argument("bom", metavar="BOM.json")
@@ -286,6 +315,7 @@ def _record(
     name: str | None = None,
     owner: str | None = None,
     base_dir: Path | None = None,
+    registration_record_sha256: str | None = None,
 ) -> int:
     """Record the next version with its validated CycloneDX 1.7 document (FR-004, FR-005)."""
     if store.get_model(model_id) is None:
@@ -293,7 +323,14 @@ def _record(
     version = (store.latest_version(model_id) or 0) + 1
     document = export_bom(model_id, version, entries)
     validate(document)
-    recorded = store.add_version(model_id, document, input_sha256, entries, base_dir=base_dir)
+    recorded = store.add_version(
+        model_id,
+        document,
+        input_sha256,
+        entries,
+        base_dir=base_dir,
+        registration_record_sha256=registration_record_sha256,
+    )
     if recorded != version:
         raise RuntimeError(f"expected to record version {version}, recorded {recorded}")
     return version
@@ -353,11 +390,55 @@ def make_handlers(
             return UrlFetcher(etag_cache=EtagCache(store))
         return UrlFetcher(etag_cache=EtagCache(store), utcnow=now)
 
-    def register(args: argparse.Namespace) -> CommandResult:
+    def record(args: argparse.Namespace) -> CommandResult:
         try:
             manifest = load_manifest(args.manifest)
-        except ManifestError as error:
+            made = make_record(manifest, now)
+        except (ManifestError, RecordError) as error:
             raise InvalidInputError(str(error)) from None
+        except OSError as error:
+            raise InvalidInputError(f"cannot read a weight file: {error}") from None
+        write_record(made, Path(args.output))
+        files = [
+            {
+                "location": item["location"],
+                "sha256": item["sha256"],
+                "format": item["format"],
+                "can_run_code": item["can_run_code"],
+                "verdict": None if item["scan"] is None else item["scan"]["verdict"],
+            }
+            for item in made["weights"]
+        ]
+        payload = {
+            "model_id": made["model_id"],
+            "output": args.output,
+            "record_sha256": made["record_sha256"],
+            "weights": files,
+        }
+        lines = [f"Recorded {made['model_id']} to {args.output} (sha256 {made['record_sha256']})"]
+        for item in files:
+            scanned = f", scan {item['verdict']}" if item["verdict"] else ""
+            lines.append(f"  {item['location']} [{item['format']}] {item['sha256']}{scanned}")
+        return CommandResult(payload, "\n".join(lines))
+
+    def _checked_record(args: argparse.Namespace) -> tuple[Any, CheckedRecord | None]:
+        """The manifest, and the registration record checked against it when one is given.
+
+        From a record, the local weight files need not be on this machine and are never read.
+        """
+        from_record = getattr(args, "from_record", None)
+        try:
+            manifest = load_manifest(args.manifest, weights_present=from_record is None)
+            if from_record is None:
+                return manifest, None
+            return manifest, check_record(manifest, load_record(from_record))
+        except (ManifestError, RecordError) as error:
+            raise InvalidInputError(str(error)) from None
+        except OSError as error:
+            raise InvalidInputError(f"cannot read {args.manifest}: {error}") from None
+
+    def register(args: argparse.Namespace) -> CommandResult:
+        manifest, checked = _checked_record(args)
         model_id = args.model_id or manifest.model_id
         with _open(args.db) as store:
             if args.model_id is None and store.get_model(model_id) is not None:
@@ -366,7 +447,8 @@ def make_handlers(
                     " register a new version"
                 )
             fetcher_ = _fetcher(store)
-            entries = build_entries(manifest, fetcher_)
+            local = None if checked is None else checked.local_entry
+            entries = build_entries(manifest, fetcher_, local=local)
             _route_dois(store, fetcher_, entries)
             record_licences(entries, fetcher_, store.get_routing)
             version = _record(
@@ -377,10 +459,22 @@ def make_handlers(
                 name=manifest.name,
                 owner=manifest.owner,
                 base_dir=Path(args.manifest).parent,
+                registration_record_sha256=None if checked is None else checked.record_sha256,
             )
             payload = _inventory_payload(model_id, version, store.entries(model_id, version))
             payload["alerts"] = reevaluate_version(store, model_id, version)
-        return CommandResult(payload, _inventory_text(payload, f"Registered {model_id} v{version}"))
+            heading = f"Registered {model_id} v{version}"
+            if checked is not None:
+                scans = {
+                    location: (scan.report, scan.scanned_at, scan.body)
+                    for location, scan in checked.scans.items()
+                }
+                payload["registration_record"] = {
+                    "record_sha256": checked.record_sha256,
+                    **apply_recorded_scans(store, model_id, version, checked.record_sha256, scans),
+                }
+                heading += f" from registration record {checked.record_sha256}"
+        return CommandResult(payload, _inventory_text(payload, heading))
 
     def import_inventory(args: argparse.Namespace) -> CommandResult:
         try:
@@ -503,6 +597,7 @@ def make_handlers(
         return CommandResult(payload, text)
 
     return {
+        "record": record,
         "register": register,
         "import": import_inventory,
         "inventory show": show,

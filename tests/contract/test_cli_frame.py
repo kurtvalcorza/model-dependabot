@@ -23,7 +23,8 @@ from model_dependabot.cli import (
 
 # One valid invocation per command in contracts/cli.md.
 INVOCATIONS = {
-    "register": ["register", "model.toml", "--model-id", "m"],
+    "record": ["record", "model.toml", "--out", "model.record.json"],
+    "register": ["register", "model.toml", "--model-id", "m", "--from-record", "r.json"],
     "import": ["import", "bom.json", "--model-id", "m"],
     "inventory show": ["inventory", "show", "m", "--version", "2"],
     "inventory export": ["inventory", "export", "m", "-o", "out.json"],

@@ -106,14 +106,14 @@ def _hub(text: str, where: str) -> str:
         raise ManifestError(f"{where}.hub: {error}") from None
 
 
-def _local(base: Path, text: str, where: str) -> Path:
+def _local(base: Path, text: str, where: str, *, present: bool = True) -> Path:
     path = (base / text).resolve()
-    if not path.is_file():
+    if present and not path.is_file():
         raise ManifestError(f"{where}: file not found: {text}")
     return path
 
 
-def _weight(base: Path, table: Mapping[str, Any], where: str) -> WeightSpec:
+def _weight(base: Path, table: Mapping[str, Any], where: str, present: bool) -> WeightSpec:
     path = _text(table, "path", where)
     hub = _text(table, "hub", where)
     revision = _text(table, "revision", where)
@@ -123,7 +123,8 @@ def _weight(base: Path, table: Mapping[str, Any], where: str) -> WeightSpec:
     if path is not None:
         if revision is not None or file is not None:
             raise ManifestError(f"{where}: 'revision' and 'file' are for hub files only")
-        return WeightSpec(path=_local(base, path, where), relative=Path(path).as_posix())
+        local = _local(base, path, where, present=present)
+        return WeightSpec(path=local, relative=Path(path).as_posix())
     if file is None:
         raise ManifestError(f"{where}: a hub weight file needs 'file'")
     return WeightSpec(hub_repo=_hub(hub or "", where), revision=revision, file=file)
@@ -167,8 +168,12 @@ def _dataset(table: Mapping[str, Any], where: str) -> DatasetSpec:
     )
 
 
-def load_manifest(path: Path | str) -> Manifest:
-    """Read and check a manifest; raise ``ManifestError`` if it is not valid."""
+def load_manifest(path: Path | str, *, weights_present: bool = True) -> Manifest:
+    """Read and check a manifest; raise ``ManifestError`` if it is not valid.
+
+    With ``weights_present`` false, local weight files need not exist on this machine: a
+    registration from a registration record never reads them.
+    """
     path = Path(path).resolve()
     try:
         raw = path.read_bytes()
@@ -187,7 +192,7 @@ def load_manifest(path: Path | str) -> Manifest:
         raise ManifestError("model.id is required")
 
     weights = tuple(
-        _weight(base, table, f"weights[{index}]")
+        _weight(base, table, f"weights[{index}]", weights_present)
         for index, table in enumerate(_tables(data.get("weights", []), "weights", _WEIGHT_KEYS))
     )
 

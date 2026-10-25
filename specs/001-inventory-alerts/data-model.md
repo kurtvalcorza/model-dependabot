@@ -23,6 +23,7 @@ Has many **Model versions**, numbered 1, 2, 3 in registration order.
 | `registered_at` | UTC timestamp |
 | `manifest_sha256` | Hash of the registration input (TOML manifest or imported inventory) |
 | `inventory` | The CycloneDX 1.7 document, stored as recorded; never changed (FR-005) |
+| `registration_record_sha256` | Set when the local weight files were registered from a [registration record](contracts/registration-record.md) without their bytes; empty otherwise |
 
 ## Inventory entry
 
@@ -76,6 +77,11 @@ For a `format_policy` alert the owner's recorded policy is the primary source (c
 is `format-policy`, `url` is empty, `retrieved_at` is the check time, `matched_identifier` is the file's
 SHA-256, `detail` holds the file's format, the policy value (`strict`), who set it and when
 (`format_policy_set_by`, `format_policy_set_at`), and `body_sha256` is the hash of that record as stored.
+
+For a scan taken from a [registration record](contracts/registration-record.md) the recorded local scan
+is the primary source: `source` is `picklescan`, `url` is `registration-record:sha256:<record_sha256>`,
+`retrieved_at` is the recorded scan time, `matched_identifier` is the file's SHA-256, `detail` is what a
+check's scan would hold (with the scanner version), the body is the recorded scan and `run_id` is empty.
 
 ## Alert
 
@@ -137,7 +143,7 @@ Dismissal reasons (fixed list): `not_used_at_runtime`, `risk_accepted`, `false_p
 | Field | Rule |
 | :-- | :-- |
 | `model_id`, `version`, `entry identifier` | |
-| `kind` | `pickle_format`, `scan_suspicious`, `scan_incomplete`, `hub_scan_unknown`, `advisory_unmatched` or `hash_mismatch` |
+| `kind` | `pickle_format`, `scan_suspicious`, `scan_incomplete`, `hub_scan_unknown`, `advisory_unmatched`, `hash_mismatch` or `weight_file_absent` (a `picklescan` check of a file registered from a record whose bytes are not on this machine; its `detail` holds the location, the reason and the record's SHA-256) |
 | `evidence` | As for alerts; for `scan_incomplete`, `detail` holds the scanner and the byte position it reached (FR-022) |
 | `first_seen`, `last_seen` | One record per cause, updated on each run |
 

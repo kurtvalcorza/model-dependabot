@@ -37,3 +37,7 @@ sha256 = "0000000000000000000000000000000000000000000000000000000000000000"   # 
 - Lock entries are pinned only with `==` and at least one `--hash` (research R10).
 - Unknown keys are an error (exit code 1), so typos do not silently drop dependencies.
 - Paths are resolved relative to the manifest file.
+- A local weight file must exist when the manifest is registered with `register` or recorded with
+  `record`. With `register --from-record` it need not: its hash, format and scan come from the
+  [registration record](registration-record.md), which must name the manifest's local weight files by
+  their `path` exactly as written here, in the same order.

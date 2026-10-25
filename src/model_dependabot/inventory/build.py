@@ -245,12 +245,22 @@ def _dataset(spec: DatasetSpec) -> dict[str, Any]:
     return new_entry("dataset", identifier=doi, pinned=True, hashes=hashes, paper_dois=papers)
 
 
-def build_entries(manifest: Manifest, fetcher: Fetcher | None = None) -> list[dict[str, Any]]:
-    """The inventory entries of a manifest, in kind order; gaps included, never raised."""
+def build_entries(
+    manifest: Manifest,
+    fetcher: Fetcher | None = None,
+    *,
+    local: Callable[[WeightSpec], dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """The inventory entries of a manifest, in kind order; gaps included, never raised.
+
+    ``local`` gives a local weight file's entry instead of hashing the file, for a registration
+    from a registration record (inventory/record.py), where the bytes are not on this machine.
+    """
     hub = None if fetcher is None else HuggingFace(fetcher)
+    local_weight = local or _local_weight
     entries: list[dict[str, Any]] = []
     for spec in manifest.weights:
-        entries.append(_local_weight(spec) if spec.path is not None else _hub_weight(spec, hub))
+        entries.append(local_weight(spec) if spec.path is not None else _hub_weight(spec, hub))
     if manifest.lock is not None:
         entries += _packages(manifest.lock)
     if manifest.base_model is not None:
