@@ -5,6 +5,10 @@ using anonymous read-only requests with User-Agent `heldout-corpus-research/0.1`
 The rules were written in `protocol.md` before any search ran. Every change made after collection started is
 appended there as amendments A1–A8. The owner approved the list on 2026-10-25 with 15 strikes; the counts below are the frozen corpus (see the Freeze section of `protocol.md`).
 
+> The record-level files (`corpus.json`) and the collection `scripts/` name third-party hub
+> repositories, so they are kept in the owner's private deployment repository. This folder keeps
+> the protocol, counts and aggregate results.
+
 ## Files
 
 - `protocol.md`: the sampling frames, inclusion and exclusion rules (E1–E5), label definitions, what each
@@ -52,7 +56,7 @@ The intervals are wide. A perfect 10/10 gives a Wilson 95% interval of [0.72, 1.
 
 - 5 of the 12 positives are EICAR or "eicar-street" style test repos. They are close relatives of the dev fixture
   `mcpotato/42-eicar-street`.
-- The two `same-owner` repos share one file sha256. Because hub_scan is scoped by file hash, they count as one unit.
+- Two of the repos share one file sha256. Because hub_scan is scoped by file hash, they count as one unit.
 - Some flagged files are not stored in LFS, so the hub exposes no sha256 for them. Those are marked UNCERTAIN.
 
 ## Sampling-bias risks (stated plainly)

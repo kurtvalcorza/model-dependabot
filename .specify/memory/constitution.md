@@ -85,4 +85,4 @@ follow semantic versioning: MAJOR when a principle is removed or redefined, MINO
 section is added or materially expanded, PATCH for clarifications. Each feature plan's Constitution
 Check verifies compliance; a justified exception is recorded in that plan's Complexity Tracking.
 
-**Version**: 1.0.2 | **Ratified**: 2026-10-23 | **Last Amended**: 2026-10-24
+**Version**: 1.0.3 | **Ratified**: 2026-10-23 | **Last Amended**: 2026-10-25
