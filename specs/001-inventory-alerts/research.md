@@ -37,6 +37,18 @@ evaluation cannot read (an event value that is not a PEP 440 version, an unknown
 `introduced` event) is not "not affected": the watch event records why it could not be read, and an open
 alert is not cleared on it.
 
+Records that are one vulnerability are one alert (feature 006). OSV can return several records for the
+same package version under different ids, for example a `PYSEC` record and a `GHSA` record that list
+each other in `aliases`. The records an affected version matches (OSV's match and the local
+evaluation agreeing, as above, for each record) are grouped by `aliases`: two records are in one group
+when one names the other or both name the same alias, directly or through other records, since the
+schema treats aliases as the same vulnerability. Each group raises one alert, known by its GHSA id if it
+has one (the lexicographically first if several), else by its lexicographically first id, so the choice
+depends only on the ids. The alert lists every id, has evidence from every record and takes the highest
+severity across them (R3), naming the record it came from. A withdrawn record leaves its group; the
+alert is withdrawn only when every record is. Grouping never raises an alert by itself: each record in
+a group has passed the same match as a record alone.
+
 **Rationale**: OSV is the open format the constitution names, carries `withdrawn`, `fixed` and
 `last_affected` (schema v1.9.2), aggregates the GitHub and PyPI advisory databases and states no rate
 limits (landscape §1). The local evaluation is a consistency check on the same OSV record, not a second
@@ -45,9 +57,18 @@ implementation), but it cannot confirm that the advisory is correct or that the 
 adds precision (constitution IV) and evidence that can be shown (constitution I); where its reading of
 the schema is incomplete it can only lower recall, by turning a match into a watch event.
 
+A live run on 2026-10-25 shows why the grouping is needed: one lock file gave 61 open alerts for
+54 distinct vulnerabilities, 7 of them each raised twice under a `PYSEC` and a `GHSA` id. The same run
+shows why evidence is compared by content: three `GET /v1/vulns/{id}` requests for one advisory, two
+to three seconds apart, returned bodies with different SHA-256 values but identical parsed JSON. Evidence
+for a JSON body therefore also records the hash of its canonical form, and a response with the same
+canonical hash from the same URL is the same evidence (data-model.md, Evidence).
+
 **Alternatives considered**: the GitHub advisory API alone (rate-limited, needs a token for volume);
 PyPI's per-release `vulnerabilities` array (a useful cross-check, but one request per package
-version); OSV bulk downloads (better at fleet scale; kept for a later feature via `modified_id.csv`).
+version); keeping one alert per record and leaving duplicates to the reader (rejected: the
+owner sees the same flaw twice and counts are wrong); grouping only records that name each other
+directly (rejected: a third record joined through one of them would raise a second alert); OSV bulk downloads (better at fleet scale; kept for a later feature via `modified_id.csv`).
 
 ## R3. Severity
 

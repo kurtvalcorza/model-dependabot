@@ -50,10 +50,11 @@ failures; scripts read the JSON instead.
       "state": "open",
       "severity": "HIGH",
       "severity_origin": "database_specific",
-      "cause": {"advisory_id": "GHSA-xxxx-xxxx-xxxx", "aliases": ["CVE-2026-0000"], "package": "pillow", "version": "12.3.0", "fixed": ["13.0.0"]},
+      "cause": {"advisory_id": "GHSA-xxxx-xxxx-xxxx", "advisory_ids": ["GHSA-xxxx-xxxx-xxxx", "PYSEC-2026-0000"], "aliases": ["PYSEC-2026-0000", "CVE-2026-0000"], "package": "pillow", "version": "12.3.0", "fixed": ["13.0.0"], "severity_from": "GHSA-xxxx-xxxx-xxxx"},
       "opened_in_version": 1,
       "evidence": [
-        {"source": "osv.dev", "url": "https://api.osv.dev/v1/vulns/GHSA-xxxx-xxxx-xxxx", "retrieved_at": "2026-10-23T08:00:00Z", "matched_identifier": "pkg:pypi/pillow@12.3.0", "body_sha256": "…", "detail": {"local_match": true}}
+        {"source": "osv.dev", "url": "https://api.osv.dev/v1/vulns/GHSA-xxxx-xxxx-xxxx", "retrieved_at": "2026-10-23T08:00:00Z", "matched_identifier": "pkg:pypi/pillow@12.3.0", "body_sha256": "…", "canonical_sha256": "…", "detail": {"local_match": true}},
+        {"source": "osv.dev", "url": "https://api.osv.dev/v1/vulns/PYSEC-2026-0000", "retrieved_at": "2026-10-23T08:00:00Z", "matched_identifier": "pkg:pypi/pillow@12.3.0", "body_sha256": "…", "canonical_sha256": "…", "detail": {"local_match": true}}
       ]
     }
   ],
@@ -84,10 +85,24 @@ or `cleared`, with the fields that outcome needs and the others `null`):
       "dismissal_reason": null,
       "dismissed_by": null,
       "note": null,
-      "evidence": [{"source": "inventory", "url": "", "retrieved_at": "2026-10-24T09:00:00Z", "matched_identifier": "pkg:pypi/pillow@12.3.0", "body_sha256": "…", "detail": {"previous_version": 1, "version": 2, "found": false}}]
+      "evidence": [{"source": "inventory", "url": "", "retrieved_at": "2026-10-24T09:00:00Z", "matched_identifier": "pkg:pypi/pillow@12.3.0", "body_sha256": "…", "canonical_sha256": "…", "detail": {"previous_version": 1, "version": 2, "found": false}}]
     }
   ]
 }
 ```
+
+A `package_advisory` alert stands for one vulnerability. When OSV returns several records for the
+same package version that alias each other, the alert's `cause.advisory_ids` lists every id, primary
+first: `cause.advisory_id` is that primary id (the GHSA id if there is one, the lexicographically
+first if several, else the lexicographically first id) and `cause_key` is built from it. `aliases`,
+`affected` and `fixed` are the union over the records, `severity` is the highest of them and
+`cause.severity_from` names the record it came from, and there is one evidence entry per record. An
+alert with one record has `advisory_ids` of one id.
+
+Each evidence entry has `body_sha256`, the SHA-256 of the stored raw response, and
+`canonical_sha256`, the SHA-256 of the body's canonical JSON form (sorted keys, no insignificant
+whitespace, UTF-8), or `null` for a body that is not JSON. A consumer that compares an alert's
+evidence between runs should compare `canonical_sha256` where it is set: a source may serve the same
+JSON with different bytes, and such a response is not stored as new evidence.
 
 Field names in the JSON are stable within a major version of the tool.

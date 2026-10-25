@@ -28,6 +28,7 @@ EVIDENCE_FIELDS = (
     "matched_identifier",
     "original_sha256",
     "body_sha256",
+    "canonical_sha256",
     "redacted_fields",
     "detail",
 )
@@ -137,7 +138,10 @@ def history_report(store: Store, model_id: str) -> dict[str, Any]:
 def _cause_text(kind: str, cause: Mapping[str, Any]) -> str:
     if kind == "package_advisory":
         fixed = ", ".join(cause.get("fixed") or []) or "none published"
-        return f"{cause['advisory_id']} {cause['package']}=={cause['version']} (fixed: {fixed})"
+        others = [i for i in cause.get("advisory_ids") or [] if i != cause["advisory_id"]]
+        also = f" (also {', '.join(others)})" if others else ""
+        package = f"{cause['package']}=={cause['version']}"
+        return f"{cause['advisory_id']}{also} {package} (fixed: {fixed})"
     if cause.get("location") is not None:
         return f"{kind} {cause['location']} ({cause.get('identifier')})"
     # The upstream kinds (feature 002) name a base model or dataset, not a file.

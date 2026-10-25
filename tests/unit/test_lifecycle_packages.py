@@ -91,6 +91,7 @@ def test_an_affected_version_gets_one_alert_per_advisory(store: Store) -> None:
     assert (alert["opened_in_version"], alert["current_version"]) == (1, 1)
     assert alert["cause"] == {
         "advisory_id": CP9V,
+        "advisory_ids": [CP9V],  # one record: a group of one (feature 006)
         "aliases": ["CVE-2026-112405"],
         "source": "osv.dev",
         "package": "pillow",
@@ -100,6 +101,7 @@ def test_an_affected_version_gets_one_alert_per_advisory(store: Store) -> None:
             {"type": "ECOSYSTEM", "events": [{"introduced": "12.0.0"}, {"fixed": "13.0.0"}]}
         ],
         "fixed": ["13.0.0"],
+        "severity_from": CP9V,
     }
     [evidence] = store.alert_evidence(alert["alert_id"])
     assert evidence["source"] == "osv.dev"

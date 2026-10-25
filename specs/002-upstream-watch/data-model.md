@@ -120,7 +120,7 @@ never counts as removal: the alert stays open, neither fixed nor carried forward
 
 | `kind` | Identity scope | Closes as `fixed` when a new version | Closes as `cleared` when | Closes as `withdrawn` when |
 | :-- | :-- | :-- | :-- | :-- |
-| `package_advisory` | advisory and package, at the pinned version | no longer pins an affected version of the package | OSV and the local evaluation agree the pinned version is unaffected | OSV marks the advisory withdrawn |
+| `package_advisory` | vulnerability (the alias group of OSV records, keyed by its primary id) and package, at the pinned version | no longer pins a version of the package affected by any record of the group | OSV and the local evaluation agree the pinned version is unaffected by every record of the group not withdrawn; or another open alert of the model is kept for the same group (merged: a note names it) | OSV marks every record of the group withdrawn |
 | `weight_file_scan` | file SHA-256 | no longer has a file with that hash | never: a local scan finding stays until the file goes | never |
 | `hub_scan` | file SHA-256 | no longer has a file with that hash | the hub gives an explicit `safe` verdict for that hash | never |
 | `format_policy` | file SHA-256 | no longer has the file, or has a code-free file beside it | the owner's format policy is no longer `strict` | never |
@@ -144,6 +144,12 @@ alert with a listed reason (`dismissed`). An open repository-wide alert stored b
 revision in its cause key, is rekeyed by repository when the database is opened; this covers
 `base_model_disabled`, `base_model_unavailable`, a hub dataset's `dataset_removed` and `paper_retracted`,
 and a base model's or hub dataset's `licence_changed`.
+
+A `package_advisory` alert's identity is its vulnerability, not one OSV record (001 data-model.md,
+Alert; feature 006): records that alias each other are one cause, keyed by the group's primary id
+(the GHSA id if there is one, the lexicographically first if several, else the lexicographically
+first id). When the primary id changes the open alert is rekeyed, not raised again; open alerts
+written before the rule, one per record, are merged at the next check as the Alert rules say.
 
 **Answer identity** (hub): a hub answer is about the repository it names, not the one asked for.
 Model and dataset info, security status and revision answers name their repository in `id` (model

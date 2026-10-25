@@ -14,6 +14,15 @@ closes its alerts as ``withdrawn`` with the withdrawn record as evidence (FR-009
 withdrawn records out of query answers, so the advisory of every open alert is fetched by id on each
 run.
 
+One alert per vulnerability (feature 006): records OSV returns for the same package version that
+alias each other, directly or through other records, form one group and raise one alert, keyed by
+the group's primary id (``primary_advisory_id``) and listing every id in ``cause.advisory_ids``,
+with the highest severity across them and every record as evidence. Open alerts stored for ids
+that are now one group are merged at the next check: one is kept and the others close as
+``cleared`` with a note naming it. Evidence is reused when a record's content is unchanged, compared
+by the canonical hash of its JSON (``store.same_evidence``), so bytes that differ only in layout
+add no evidence.
+
 Weight files (research R4, R5; FR-011 to FR-013, FR-021, FR-022): every pinned code-capable file
 gets a ``pickle_format`` watch event, and under the owner's ``strict`` format policy a
 ``format_policy`` alert when no code-free file is beside it in the version. These two rules read
@@ -35,7 +44,6 @@ dismisses an alert with a listed reason.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -46,7 +54,7 @@ from urllib.parse import unquote
 from packaging.utils import canonicalize_name
 
 from model_dependabot.inventory.build import HUB_DATASET_PREFIX, hash_stream, huggingface_purl
-from model_dependabot.matching.severity import severity_of
+from model_dependabot.matching.severity import severity_of, severity_rank
 from model_dependabot.matching.versions import (
     affected_ranges,
     evaluate_advisory,
@@ -74,7 +82,7 @@ from model_dependabot.sources.osv import (
     pinned_packages,
     withdrawn,
 )
-from model_dependabot.store import DISMISSAL_REASONS, Store
+from model_dependabot.store import DISMISSAL_REASONS, Store, content_key, same_evidence
 from model_dependabot.upstream.changes import (
     LICENCE_SOURCES,
     appeared,
@@ -252,13 +260,55 @@ def _read_osv(store: Store, client: OsvClient, targets: list[_Target]) -> _OsvRe
     for target in targets:
         for alert in store.alerts_for(target.model_id, ["open"]):
             if alert["kind"] == PACKAGE_ALERT:
-                wanted.add(alert["cause"]["advisory_id"])
+                wanted.update(advisory_ids_of(alert))
     records = {advisory_id: client.vuln(advisory_id) for advisory_id in sorted(wanted)}
     return _OsvRead(batch, records)
 
 
-def _sha256(body: bytes) -> str:
-    return hashlib.sha256(body).hexdigest()
+def advisory_ids_of(alert: Mapping[str, Any]) -> list[str]:
+    """Every OSV record a package alert stands for, primary first (one before feature 006)."""
+    cause = alert["cause"]
+    return list(cause.get("advisory_ids") or [cause["advisory_id"]])
+
+
+def primary_advisory_id(ids: Sequence[str]) -> str:
+    """The id an alias group is known by: the first GHSA id if there is one, else the first id.
+
+    "First" is lexicographic, so the choice depends only on the ids (feature 006, E2).
+    """
+    ghsa = sorted(advisory_id for advisory_id in ids if advisory_id.startswith("GHSA-"))
+    return ghsa[0] if ghsa else sorted(ids)[0]
+
+
+def _ordered_ids(ids: Sequence[str]) -> list[str]:
+    primary = primary_advisory_id(ids)
+    return [primary, *sorted(set(ids) - {primary})]
+
+
+def alias_groups(records: Sequence[VulnRecord]) -> list[list[VulnRecord]]:
+    """The records that are one vulnerability, each group ordered primary first.
+
+    Two records are one vulnerability when one names the other in ``aliases``, or both name the
+    same alias, directly or through other records (the alias relation is symmetric and
+    transitive). A record that shares no alias with another is a group of its own.
+    """
+    parent: dict[str, str] = {}
+
+    def root(name: str) -> str:
+        parent.setdefault(name, name)
+        while parent[name] != name:
+            parent[name] = parent[parent[name]]
+            name = parent[name]
+        return name
+
+    for record in records:
+        for alias in aliases(record.advisory):
+            parent[root(alias)] = root(record.advisory["id"])
+    groups: dict[str, dict[str, VulnRecord]] = {}
+    for record in records:
+        groups.setdefault(root(record.advisory["id"]), {})[record.advisory["id"]] = record
+    ordered = [[group[i] for i in _ordered_ids(list(group))] for group in groups.values()]
+    return sorted(ordered, key=lambda group: group[0].advisory["id"])
 
 
 def _evidence(
@@ -269,10 +319,13 @@ def _evidence(
     detail: Mapping[str, Any],
     existing: Sequence[Mapping[str, Any]] = (),
 ) -> tuple[int, bool]:
-    """The evidence id for this record, reusing an identical record already linked."""
-    digest = _sha256(record.response.body)
+    """The evidence id for this record, reusing a record of the same content already linked.
+
+    A JSON body is compared by its canonical hash, so a re-serialised but unchanged advisory is the
+    same evidence (feature 006, E1).
+    """
     for evidence in existing:
-        if evidence["url"] == record.response.url and evidence["body_sha256"] == digest:
+        if same_evidence(evidence, SOURCE, record.response.url, record.response.body):
             return int(evidence["evidence_id"]), False
     evidence_id = store.add_evidence(
         source=SOURCE,
@@ -302,78 +355,128 @@ def _cache(store: Store, record: VulnRecord, evidence_id: int) -> None:
     )
 
 
-def _apply_osv(store: Store, run_id: int, read: _OsvRead, target: _Target) -> None:
-    stored: dict[int, str] = {}
+@dataclass
+class _OsvApply:
+    """One model's OSV pass: the batch detail stored once and the open alerts already settled."""
 
-    def batch_detail_for(identifier: str) -> dict[str, Any]:
-        response = read.batch.response_for(identifier)
+    store: Store
+    run_id: int
+    read: _OsvRead
+    target: _Target
+    open_alerts: list[dict[str, Any]]
+    claimed: set[int] = field(default_factory=set)
+    stored: dict[int, str] = field(default_factory=dict)
+
+    def batch_detail_for(self, identifier: str) -> dict[str, Any]:
+        response = self.read.batch.response_for(identifier)
         if response is None:
             return {}
-        if id(response) not in stored:
-            stored[id(response)] = store.put_body(response.body)
-        return {"query_url": response.url, "query_sha256": stored[id(response)]}
+        if id(response) not in self.stored:
+            self.stored[id(response)] = self.store.put_body(response.body)
+        return {"query_url": response.url, "query_sha256": self.stored[id(response)]}
 
+    def related(self, package: str, ids: Sequence[str]) -> list[dict[str, Any]]:
+        """Open alerts of this package about any of ``ids``, not yet settled in this pass."""
+        name = canonicalize_name(package)
+        return [
+            alert
+            for alert in self.open_alerts
+            if alert["alert_id"] not in self.claimed
+            and canonicalize_name(alert["cause"]["package"]) == name
+            and set(advisory_ids_of(alert)) & set(ids)
+        ]
+
+
+def _apply_osv(store: Store, run_id: int, read: _OsvRead, target: _Target) -> None:
+    open_alerts = [
+        alert
+        for alert in store.alerts_for(target.model_id, ["open"])
+        if alert["kind"] == PACKAGE_ALERT
+    ]
+    run = _OsvApply(store, run_id, read, target, open_alerts)
     packages = {entry["identifier"]: entry for entry in pinned_packages(target.entries)}
-    handled: set[str] = set()
 
     for identifier, entry in packages.items():
+        affected: list[VulnRecord] = []
+        details: dict[str, dict[str, Any]] = {}
         for advisory_id in read.batch.matches.get(identifier, []):
             record = read.records[advisory_id]
             if withdrawn(record.advisory):
-                continue  # closed below if an alert is open; never raised
+                continue  # closed below if no other record keeps its alert open; never raised
             local = evaluate_advisory(record.advisory, entry["name"], entry["version"])
             match = {
                 "osv_match": True,
                 "local_match": local.affected,
-                **batch_detail_for(identifier),
+                **run.batch_detail_for(identifier),
             }
             if not local.evaluated:
                 match["local_unevaluated"] = list(local.reasons)
             if local.affected:
-                handled.add(package_cause_key(advisory_id, entry["name"]))
-                _raise_or_carry(store, run_id, target, entry, record, match)
+                affected.append(record)
+                details[advisory_id] = match
             else:
                 _unmatched(store, run_id, target, identifier, record, match)
+        for group in alias_groups(affected):
+            _raise_or_carry(run, entry, group, details)
 
-    for alert in store.alerts_for(target.model_id, ["open"]):
-        if alert["kind"] != PACKAGE_ALERT or alert["cause_key"] in handled:
+    for alert in open_alerts:
+        if alert["alert_id"] in run.claimed:
             continue
-        advisory_id = alert["cause"]["advisory_id"]
-        record = read.records[advisory_id]
         identifier = alert["cause"]["identifier"]
-        if withdrawn(record.advisory):
-            detail = {"withdrawn": withdrawn(record.advisory), **batch_detail_for(identifier)}
-            evidence_id, _ = _evidence(store, run_id, record, identifier, detail)
-            store.link_alert_evidence(alert["alert_id"], evidence_id)
-            store.close_alert(alert["alert_id"], state="withdrawn")
-            _cache(store, record, evidence_id)
-            target.summary["closed"].append(alert["alert_id"])
+        records = [read.records[advisory_id] for advisory_id in advisory_ids_of(alert)]
+        live = [record for record in records if not withdrawn(record.advisory)]
+        if not live:
+            # Every record the alert stands for is withdrawn (FR-009).
+            evidence_ids = [_withdrawal(run, alert, record) for record in records]
+            _close(store, target, alert, "withdrawn", evidence_ids)
             continue
         entry = packages.get(identifier)
         if entry is None:
             continue  # the package changed in this version: settled at registration
-        listed = advisory_id in read.batch.matches.get(identifier, [])
-        if listed:
+        listed = set(read.batch.matches.get(identifier, []))
+        if any(record.advisory["id"] in listed for record in live):
             continue  # OSV lists it, the local evaluation does not: recorded above as unmatched
-        local = evaluate_advisory(record.advisory, entry["name"], entry["version"])
-        if local.affected or not local.evaluated:
-            # OSV no longer lists it but the local check disagrees or cannot read the range:
-            # a watch event, and the alert stays open (no clearance without agreement).
-            match = {
-                "osv_match": False,
-                "local_match": local.affected,
-                **batch_detail_for(identifier),
-            }
-            if not local.evaluated:
-                match["local_unevaluated"] = list(local.reasons)
-            _unmatched(store, run_id, target, identifier, record, match)
+        undecided = False
+        for record in live:
+            local = evaluate_advisory(record.advisory, entry["name"], entry["version"])
+            if local.affected or not local.evaluated:
+                # OSV no longer lists it but the local check disagrees or cannot read the range:
+                # a watch event, and the alert stays open (no clearance without agreement).
+                match = {
+                    "osv_match": False,
+                    "local_match": local.affected,
+                    **run.batch_detail_for(identifier),
+                }
+                if not local.evaluated:
+                    match["local_unevaluated"] = list(local.reasons)
+                _unmatched(store, run_id, target, identifier, record, match)
+                undecided = True
+        if undecided:
             continue
-        # Both agree the pinned version is no longer affected: the source cleared it (FR-023).
-        detail = {"osv_match": False, "local_match": False, **batch_detail_for(identifier)}
+        # OSV and the local evaluation agree the pinned version is no longer affected by any
+        # record the alert stands for: the source cleared it (FR-023).
         linked = store.alert_evidence(alert["alert_id"])
-        evidence_id, _ = _evidence(store, run_id, record, identifier, detail, linked)
-        _cache(store, record, evidence_id)
-        _close(store, target, alert, "cleared", [evidence_id])
+        evidence_ids = []
+        for record in records:
+            if withdrawn(record.advisory):
+                evidence_ids.append(_withdrawal(run, alert, record))
+                continue
+            detail = {"osv_match": False, "local_match": False, **run.batch_detail_for(identifier)}
+            evidence_id, _ = _evidence(store, run_id, record, identifier, detail, linked)
+            _cache(store, record, evidence_id)
+            evidence_ids.append(evidence_id)
+        _close(store, target, alert, "cleared", evidence_ids)
+
+
+def _withdrawal(run: _OsvApply, alert: Mapping[str, Any], record: VulnRecord) -> int:
+    """Evidence that ``record`` is withdrawn, linked to ``alert`` and cached."""
+    identifier = alert["cause"]["identifier"]
+    detail = {"withdrawn": withdrawn(record.advisory), **run.batch_detail_for(identifier)}
+    linked = run.store.alert_evidence(alert["alert_id"])
+    evidence_id, _ = _evidence(run.store, run.run_id, record, identifier, detail, linked)
+    run.store.link_alert_evidence(alert["alert_id"], evidence_id)
+    _cache(run.store, record, evidence_id)
+    return evidence_id
 
 
 def _close(
@@ -382,39 +485,87 @@ def _close(
     alert: Mapping[str, Any],
     state: str,
     evidence_ids: Sequence[int],
+    note: str | None = None,
 ) -> None:
     """Close an alert on the source's own observation, kept as evidence (constitution III)."""
     for evidence_id in evidence_ids:
         store.link_alert_evidence(alert["alert_id"], evidence_id)
-    store.close_alert(alert["alert_id"], state=state)
+    store.close_alert(alert["alert_id"], state=state, note=note)
     target.summary["closed"].append(alert["alert_id"])
 
 
-def _raise_or_carry(
-    store: Store,
-    run_id: int,
-    target: _Target,
-    entry: Mapping[str, Any],
-    record: VulnRecord,
-    detail: Mapping[str, Any],
-) -> None:
-    advisory = record.advisory
+def _group_cause(entry: Mapping[str, Any], group: Sequence[VulnRecord]) -> dict[str, Any]:
+    """The cause of one alert for an alias group: every id and the union of what they publish."""
     name, version = entry["name"], entry["version"]
-    severity, origin = severity_of(advisory)
-    cause = {
-        "advisory_id": advisory["id"],
-        "aliases": aliases(advisory),
+    ids = [record.advisory["id"] for record in group]
+    alias_list: list[str] = []
+    affected: list[Any] = []
+    fixed: list[str] = []
+    for record in group:
+        others = [] if record is group[0] else [record.advisory["id"]]
+        for alias in [*others, *aliases(record.advisory)]:
+            if alias != ids[0] and alias not in alias_list:
+                alias_list.append(alias)
+        for item in affected_ranges(record.advisory, name):
+            if item not in affected:
+                affected.append(item)
+        for value in fixed_versions(record.advisory, name):
+            if value not in fixed:
+                fixed.append(value)
+    return {
+        "advisory_id": ids[0],
+        "advisory_ids": ids,
+        "aliases": alias_list,
         "source": SOURCE,
         "package": name,
         "version": version,
         "identifier": entry["identifier"],
-        "affected": affected_ranges(advisory, name),
-        "fixed": fixed_versions(advisory, name),
+        "affected": affected,
+        "fixed": fixed,
     }
-    cause_key = package_cause_key(advisory["id"], name)
-    existing = store.find_open_alert(target.model_id, cause_key)
-    if existing is None:
-        evidence_id, _ = _evidence(store, run_id, record, entry["identifier"], detail)
+
+
+def _group_severity(group: Sequence[VulnRecord]) -> tuple[str, str, str]:
+    """The highest severity across the records, its origin and the record it came from (R3)."""
+    rated = [(*severity_of(record.advisory), record.advisory["id"]) for record in group]
+    return min(rated, key=lambda item: severity_rank(item[0]))  # min keeps the first of a tie
+
+
+def _raise_or_carry(
+    run: _OsvApply,
+    entry: Mapping[str, Any],
+    group: Sequence[VulnRecord],
+    details: Mapping[str, Mapping[str, Any]],
+) -> None:
+    """One alert for an alias group: raise it, carry it forward or merge earlier ones into it."""
+    store, target = run.store, run.target
+    cause = _group_cause(entry, group)
+    severity, origin, severity_from = _group_severity(group)
+    cause["severity_from"] = severity_from
+    cause_key = package_cause_key(cause["advisory_id"], entry["name"])
+    related = run.related(entry["name"], cause["advisory_ids"])
+    keeper = next((alert for alert in related if alert["cause_key"] == cause_key), None)
+    if keeper is None and related:
+        keeper = min(related, key=lambda alert: alert["alert_id"])
+    if keeper is None:
+        keeper = store.find_open_alert(target.model_id, cause_key)
+    linked = store.alert_evidence(keeper["alert_id"]) if keeper else []
+    evidence_ids = []
+    for record in group:
+        detail = details[record.advisory["id"]]
+        evidence_id, _ = _evidence(store, run.run_id, record, entry["identifier"], detail, linked)
+        evidence_ids.append(evidence_id)
+    for alert in related:
+        if keeper is None or alert["alert_id"] == keeper["alert_id"]:
+            continue
+        # The same vulnerability under another id: merged into the kept alert, with the records
+        # that show it as evidence (constitution III).
+        note = (
+            f"merged into alert {keeper['alert_id']} ({cause['advisory_id']}): OSV lists"
+            f" {', '.join(advisory_ids_of(alert))} as the same vulnerability"
+        )
+        _close(store, target, alert, "cleared", evidence_ids, note)
+    if keeper is None:
         alert_id = store.insert_alert(
             model_id=target.model_id,
             kind=PACKAGE_ALERT,
@@ -423,23 +574,30 @@ def _raise_or_carry(
             severity=severity,
             severity_origin=origin,
             opened_in_version=target.version,
-            evidence_ids=[evidence_id],
+            evidence_ids=evidence_ids,
         )
         target.summary["opened"].append(alert_id)
     else:
-        alert_id = existing["alert_id"]
-        linked = store.alert_evidence(alert_id)
-        evidence_id, _ = _evidence(store, run_id, record, entry["identifier"], detail, linked)
-        store.link_alert_evidence(alert_id, evidence_id)
+        alert_id = keeper["alert_id"]
+        for evidence_id in evidence_ids:
+            store.link_alert_evidence(alert_id, evidence_id)
+        for advisory_id in advisory_ids_of(keeper):
+            record = run.read.records.get(advisory_id)
+            if record is not None and withdrawn(record.advisory):
+                _withdrawal(run, keeper, record)  # a withdrawn alias, kept as evidence
         store.update_open_alert(
             alert_id,
-            current_version=max(existing["current_version"], target.version),
+            current_version=max(keeper["current_version"], target.version),
             severity=severity,
             severity_origin=origin,
             cause=cause,
+            cause_key=cause_key,
         )
         target.summary["carried_forward"].append(alert_id)
-    _cache(store, record, evidence_id)
+    run.claimed.update(alert["alert_id"] for alert in related)
+    run.claimed.add(alert_id)
+    for record, evidence_id in zip(group, evidence_ids, strict=True):
+        _cache(store, record, evidence_id)
 
 
 def _unmatched(
@@ -518,15 +676,12 @@ def _store_observations(
     """Evidence ids for the observations, reusing identical records already linked."""
     ids = []
     for item in observations:
-        digest = _sha256(item.body)
         detail = json.loads(json.dumps(item.detail))
         reused = next(
             (
                 int(evidence["evidence_id"])
                 for evidence in existing
-                if evidence["source"] == item.source
-                and evidence["url"] == item.url
-                and evidence["body_sha256"] == digest
+                if same_evidence(evidence, item.source, item.url, item.body)
                 and evidence["detail"] == detail
             ),
             None,
@@ -1093,15 +1248,17 @@ def _package_finding(
     for entry in pinned:
         if entry["identifier"] == cause["identifier"]:
             return True, entry
-    cached = store.get_advisory(cause.get("source", SOURCE), cause["advisory_id"])
+    source = cause.get("source", SOURCE)
+    cached = [store.get_advisory(source, advisory_id) for advisory_id in advisory_ids_of(alert)]
     for entry in pinned:
-        if cached is None:
-            return True, entry
-        local = evaluate_advisory(
-            {"affected": cached["affected"] or []}, entry["name"], entry["version"]
-        )
-        if local.affected or not local.evaluated:
-            return True, entry  # an unreadable range is not evidence the cause is gone
+        for advisory in cached:  # every record of an alias group (feature 006)
+            if advisory is None:
+                return True, entry
+            local = evaluate_advisory(
+                {"affected": advisory["affected"] or []}, entry["name"], entry["version"]
+            )
+            if local.affected or not local.evaluated:
+                return True, entry  # an unreadable range is not evidence the cause is gone
     return False, pinned[0]
 
 
@@ -1524,13 +1681,13 @@ class _Observed:
 
 
 def _link_new(store: Store, alert_id: int, evidence_ids: Sequence[int]) -> None:
-    """Link evidence an alert does not already hold (same source, URL and stored body)."""
-    held = {(e["source"], e["url"], e["body_sha256"]) for e in store.alert_evidence(alert_id)}
+    """Link evidence an alert does not already hold (same source, URL and body content)."""
+    held = {(e["source"], e["url"], content_key(e)) for e in store.alert_evidence(alert_id)}
     for evidence_id in evidence_ids:
         evidence = store.get_evidence(evidence_id)
         if evidence is None:
             continue
-        key = (evidence["source"], evidence["url"], evidence["body_sha256"])
+        key = (evidence["source"], evidence["url"], content_key(evidence))
         if key not in held:
             store.link_alert_evidence(alert_id, evidence_id)
             held.add(key)
