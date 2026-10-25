@@ -54,7 +54,13 @@ def test_a_307_to_another_namespace_is_redirected_with_the_target_and_not_follow
     assert dataset.response.status == 307
     assert dataset.moved_to == "defunct-datasets/the_pile_books3"
     assert dataset.response.redirected_to == dataset_info_url("defunct-datasets/the_pile_books3")
-    assert [url for _, url, _ in fetcher.requests] == [dataset_info_url("the_pile_books3")]
+    # The redirect is not followed; its target is read once, by name (FR-005, held-out HO-100).
+    assert [url for _, url, _ in fetcher.requests] == [
+        dataset_info_url("the_pile_books3"),
+        dataset_info_url("defunct-datasets/the_pile_books3"),
+    ]
+    assert dataset.target is not None
+    assert (dataset.target.outcome, dataset.target.disabled) == ("reachable", False)
 
 
 def test_a_licence_list_of_one_reads_as_that_licence() -> None:

@@ -302,6 +302,13 @@ def test_moves_refusals_and_404s_are_watch_events_never_alerts(
                 "body": "Temporary Redirect.",
                 "redirected_to": target,
             },
+            # The move's target is read too (FR-005): the recorded target answer, renamed.
+            "moved-target": {
+                "url": target,
+                "status": 200,
+                "body": fixture_json("hf_upstream/dataset-moved-target")
+                | {"id": "defunct-datasets/books3"},
+            },
             "fig-404": {
                 "url": article_url("29500136"),
                 "status": 404,
@@ -453,3 +460,53 @@ def test_a_paper_doi_registered_with_datacite_records_paper_not_found_never_an_a
     assert [e["source"] for e in event["evidence"]] == ["doi-ra"]
     # The dataset DOI itself is read at DataCite, so it is not reported as not asked.
     assert ("dataset_unreachable", ZENODO_FINDABLE) not in events
+
+
+BOOKS3 = "the_pile_books3"
+BOOKS3_TARGET = "defunct-datasets/the_pile_books3"
+
+
+def test_a_move_to_an_enabled_repository_is_dataset_moved_only(
+    store: Store, derive_upstream: Callable[..., Path]
+) -> None:
+    # The recorded answers: the_pile_books3 307 to defunct-datasets/, which answers disabled: false.
+    register(store, "m", [hub_dataset(BOOKS3)])
+    outcome = check(store, derive_upstream(), "m", sources=("hf-hub",))
+    assert outcome.sources == {"hf-hub": "ok"}
+    assert alerts(store, "m") == []
+    [event] = store.watch_events("m")
+    assert event["kind"] == "dataset_moved"
+    assert (event["detail"]["to"], event["detail"]["target_disabled"]) == (BOOKS3_TARGET, False)
+    urls = {e["url"] for e in event["evidence"]}
+    assert urls == {dataset_info_url(BOOKS3), dataset_info_url(BOOKS3_TARGET)}
+
+
+def test_a_move_to_a_disabled_repository_opens_dataset_removed_on_the_pinned_name(
+    store: Store, derive_upstream: Callable[..., Path]
+) -> None:
+    # HO-100: derived from the recorded target answer with disabled: true (the muxue shape).
+    disabled = {"hf_upstream/dataset-moved-target": lambda body: body | {"disabled": True}}
+    register(store, "m", [hub_dataset(BOOKS3)])
+    check(store, derive_upstream(changes=disabled), "m", sources=("hf-hub",))
+    [alert] = alerts(store, "m")
+    assert alert["kind"] == "dataset_removed"
+    assert alert["cause_key"] == f"dataset_removed:hf-dataset:{BOOKS3}"
+    assert (alert["cause"]["repo"], alert["cause"]["moved_to"]) == (BOOKS3, BOOKS3_TARGET)
+    assert alert["cause"]["reason"] == "no reason given"
+    assert_policy_high(alert)
+    urls = {e["url"] for e in store.alert_evidence(alert["alert_id"])}
+    assert urls == {dataset_info_url(BOOKS3), dataset_info_url(BOOKS3_TARGET)}
+    assert [e["kind"] for e in store.watch_events("m")] == ["dataset_moved"]
+
+
+def test_a_move_whose_target_cannot_be_read_is_dataset_moved_only(
+    store: Store, derive_upstream: Callable[..., Path]
+) -> None:
+    failed = {"hf_upstream/dataset-moved-target": "timed out"}
+    register(store, "m", [hub_dataset(BOOKS3)])
+    outcome = check(store, derive_upstream(errors=failed), "m", sources=("hf-hub",))
+    assert outcome.sources == {"hf-hub": "ok"}
+    assert alerts(store, "m") == []
+    [event] = store.watch_events("m")
+    assert event["kind"] == "dataset_moved"
+    assert event["detail"]["target_error"]

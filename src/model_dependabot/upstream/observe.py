@@ -51,12 +51,17 @@ def observe(
     answer: Response | SourceFailedError,
     *,
     detail: dict[str, Any] | None = None,
+    outcome: str | None = None,
     **fields: Any,
 ) -> dict[str, Any] | None:
-    """Store the answer as evidence and one observation; return it, or ``None`` on failure."""
+    """Store the answer as evidence and one observation; return it, or ``None`` on failure.
+
+    ``outcome`` overrides the one read from the status: a base model's redirect whose target the
+    hub refuses is recorded as ``refused``, with the redirect's status and ``redirected_to``.
+    """
     if isinstance(answer, SourceFailedError):
         return None
-    outcome = outcome_for(source, answer.status)
+    outcome = outcome or outcome_for(source, answer.status)
     if outcome is None:
         return None
     evidence_id = store.add_response_evidence(

@@ -65,6 +65,7 @@ WATCH_KINDS = (
     "card_changed",
     "base_model_refused",
     "base_model_unrecognised",
+    "base_model_moved",
     "dataset_new_version",
     "dataset_replaced",
     "dataset_moved",
@@ -352,7 +353,35 @@ class Store:
         if "used_at" not in self.columns("etag_cache"):
             with self.conn:
                 self.conn.execute("ALTER TABLE etag_cache ADD COLUMN used_at TEXT")
+        self._widen_watch_kinds()
         self._rekey_repository_alerts()
+
+    def _widen_watch_kinds(self) -> None:
+        """Rebuild ``watch_events`` when its ``kind`` check predates a kind in ``WATCH_KINDS``.
+
+        SQLite cannot change a CHECK constraint in place, so a database written before a watch kind
+        was added (``base_model_moved``, held-out scoring 2026-10-25) has its table rebuilt with
+        the current schema, every row and id kept (the SQLite twelve-step procedure).
+        """
+        row = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'watch_events'"
+        ).fetchone()
+        if row is None or all(f"'{kind}'" in row["sql"] for kind in WATCH_KINDS):
+            return
+        start = SCHEMA.index("CREATE TABLE IF NOT EXISTS watch_events (")
+        ddl = SCHEMA[start : SCHEMA.index(");", start) + 2]
+        ddl = ddl.replace("IF NOT EXISTS watch_events (", "watch_events_widened (", 1)
+        self.conn.execute("PRAGMA foreign_keys = OFF")
+        try:
+            with self.conn:
+                self.conn.execute(ddl)
+                self.conn.execute("INSERT INTO watch_events_widened SELECT * FROM watch_events")
+                self.conn.execute("DROP TABLE watch_events")
+                self.conn.execute("ALTER TABLE watch_events_widened RENAME TO watch_events")
+                if self.conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
+                    raise sqlite3.IntegrityError("watch_events rebuild broke a foreign key")
+        finally:
+            self.conn.execute("PRAGMA foreign_keys = ON")
 
     def _rekey_repository_alerts(self) -> None:
         """Key open repository-wide alerts by repository, not revision (003, identity table).

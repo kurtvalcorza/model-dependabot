@@ -46,6 +46,10 @@ class ZenodoRecord:
     licence: str | None = None
     newer: str | None = None
     newer_response: Response | None = None
+    # The newer version's declared licence, for the dataset_new_version watch event only.
+    newer_licence: str | None = None
+    newer_licence_response: Response | None = None
+    newer_licence_error: str | None = None
 
 
 def _licence(body: bytes) -> str | None:
@@ -126,4 +130,22 @@ class Zenodo:
         latest = self.fetcher.get(link, follow_redirects=False)
         newer = newest_record(latest)
         newer = newer if newer != record_id else None
-        return replace(record, newer=newer, newer_response=latest if newer else None)
+        if newer is None:
+            return record
+        return replace(
+            record, newer=newer, newer_response=latest, **self._licence_of(newer, latest)
+        )
+
+    def _licence_of(self, newer: str, latest: Response) -> dict[str, Any]:
+        """The newer version's declared licence: from ``links.latest``'s answer when it is the
+        record, else from one request for the record. A failure leaves only its reason, so the
+        watch event still names the newer version (FR-007)."""
+        answer = latest
+        if latest.status != 200:
+            try:
+                answer = self.fetcher.get(record_url(newer))
+            except SourceFailedError as error:
+                return {"newer_licence_error": error.reason}
+        if answer.status != 200:
+            return {"newer_licence_error": f"HTTP {answer.status} for record {newer}"}
+        return {"newer_licence": _licence(answer.body), "newer_licence_response": answer}

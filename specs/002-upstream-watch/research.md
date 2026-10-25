@@ -104,7 +104,10 @@ scope, the public takedown log `huggingface-legal/takedown-notices` `index.csv` 
 store's `etag_cache` table, so a later run revalidates with `If-None-Match`; review C2, 2026-10-25)
 and searched for the dataset's path; a match adds the entry's `date` (labelled `notice_date`) and its `reported_content`
 to the evidence, which points to the log by its URL and the notice date. A 307 redirect to another namespace (such as `defunct-datasets/`) records a `dataset_moved`
-watch event, never an alert. HTTP 401, 403 or 404 records a `dataset_unreachable` watch event.
+watch event, never an alert by itself. The target is then read once, by the name in the redirect and
+without following a further redirect (one more request per moved dataset per run); a disabled target raises
+the removal alert for the pinned dataset (held-out scoring 2026-10-25, HO-100). A renamed base model is read
+the same way and records `base_model_moved` (HO-097; data-model.md, Identity and clearance). HTTP 401, 403 or 404 records a `dataset_unreachable` watch event.
 
 **Rationale**: **Live-tested** (landscape §9, re-checked 2026-10-24): `yavon/muxue` returns 200 with
 `disabled: true, private: false`; a nonexistent dataset returns 401; `the_pile_books3` returns 307 to
@@ -184,7 +187,9 @@ fail-safe to a watch event (T042) stays for any other shape.
 licences; **live-tested**) with its SHA-256. A declared licence is normalised in this order: exact SPDX
 identifier ignoring case; SPDX full name ignoring case; an entry in `licences/aliases.toml`, a short in-repo
 table of repository-specific spellings (for example Figshare's `CC BY 4.0` to `CC-BY-4.0`), each with the
-source that uses it. Licence expressions (`MIT OR Apache-2.0`) are normalised term by term with operators
+source that uses it. The held-out scoring pass of 2026-10-25 (`research/heldout/results/2026-10-25.md`)
+added Zenodo's `cc-zero` and DataCite's rights text `Creative Commons Zero - CC0 1.0`, both to `CC0-1.0`;
+no fixture records either, so their tests derive the shapes from recorded answers. Licence expressions (`MIT OR Apache-2.0`) are normalised term by term with operators
 upper-cased; the term after `WITH` is matched, ignoring case, against the vendored SPDX exceptions list
 (`exceptions.json` of the same tag, 86 exceptions, with its SHA-256), so `<licence> WITH <exception>` can
 alert on a real change, and an unknown exception leaves the expression unrecognised (owner decision of

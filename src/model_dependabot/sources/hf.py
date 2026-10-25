@@ -13,7 +13,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from posixpath import dirname
 from urllib.parse import quote, unquote, urlsplit
 
@@ -384,14 +385,34 @@ class HubDataset:
     sha: str | None = None
     licence: str | None = None
     moved_to: str | None = None
+    # A move's target, read once without following a further redirect (FR-005), or why it was not.
+    target: HubDataset | None = None
+    target_error: str | None = None
 
 
-def _moved_to(target: str | None) -> str | None:
+def _moved_to(target: str | None, prefix: str = "/api/datasets/") -> str | None:
     if not target:
         return None
     path = urlsplit(target).path
-    prefix = "/api/datasets/"
     return unquote(path[len(prefix) :]) if path.startswith(prefix) else None
+
+
+def _read_target[T: (HubDataset, HubModel)](answer: T, read: Callable[[str], T]) -> T:
+    """``answer``, a redirect, with its target read once by the name the redirect gives.
+
+    The target is read like the pinned name: no redirect is followed and the answer must name the
+    target (answer identity). A target that cannot be read, or that redirects again, is recorded
+    as ``target_error``; the redirect alone then opens and closes nothing (data-model.md).
+    """
+    if answer.moved_to is None:
+        return replace(answer, target_error="the redirect names no repository")
+    try:
+        target = read(answer.moved_to)
+    except SourceFailedError as error:
+        return replace(answer, target_error=f"the new name could not be read: {error.reason}")
+    if target.outcome == "redirected":
+        return replace(answer, target_error="the new name redirects again (not followed)")
+    return replace(answer, target=target)
 
 
 def parse_dataset(repo: str, response: Response) -> HubDataset:
@@ -425,10 +446,15 @@ def parse_dataset(repo: str, response: Response) -> HubDataset:
 
 
 def read_dataset(fetcher: Fetcher, repo: str, endpoint: str = HF_ENDPOINT) -> HubDataset:
-    """One dataset's info; a move is returned as it is, never followed (research U5)."""
-    return parse_dataset(
-        repo, fetcher.get(dataset_info_url(repo, endpoint), follow_redirects=False)
-    )
+    """One dataset's info; a move is never followed, but its target is read once (U5, FR-005)."""
+
+    def read(name: str) -> HubDataset:
+        return parse_dataset(
+            name, fetcher.get(dataset_info_url(name, endpoint), follow_redirects=False)
+        )
+
+    dataset = read(repo)
+    return _read_target(dataset, read) if dataset.outcome == "redirected" else dataset
 
 
 MODEL_EXPAND = DATASET_EXPAND + "&expand[]=lastModified"
@@ -456,6 +482,10 @@ class HubModel:
     card_hash: str | None = None
     new_version: str | None = None
     unrecognised: str | None = None
+    moved_to: str | None = None
+    # A rename's target, read once without following a further redirect, or why it was not.
+    target: HubModel | None = None
+    target_error: str | None = None
 
 
 # Research U7: a disabled model answers HTTP 200 with ``disabled: true`` (recorded in
@@ -477,7 +507,8 @@ def card_hash(card: object) -> str:
 def parse_model(repo: str, response: Response) -> HubModel:
     status = response.status
     if 300 <= status < 400:
-        return HubModel(repo, response, "redirected")
+        target = _moved_to(response.redirected_to, "/api/models/")
+        return HubModel(repo, response, "redirected", moved_to=target)
     if status in (401, 403, 404):
         return HubModel(repo, response, "refused")
     if status != 200:
@@ -517,5 +548,12 @@ def parse_model(repo: str, response: Response) -> HubModel:
 
 
 def read_model(fetcher: Fetcher, repo: str, endpoint: str = HF_ENDPOINT) -> HubModel:
-    """A base model's info; a redirect is returned as it is, never followed."""
-    return parse_model(repo, fetcher.get(model_info_url(repo, endpoint), follow_redirects=False))
+    """A base model's info; a rename is never followed, but its target is read once."""
+
+    def read(name: str) -> HubModel:
+        return parse_model(
+            name, fetcher.get(model_info_url(name, endpoint), follow_redirects=False)
+        )
+
+    model = read(repo)
+    return _read_target(model, read) if model.outcome == "redirected" else model

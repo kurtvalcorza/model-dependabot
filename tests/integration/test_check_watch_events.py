@@ -76,6 +76,13 @@ EXTRA = {
         "body": "Temporary Redirect.",
         "redirected_to": dataset_info_url("defunct-datasets/books3"),
     },
+    # Record 18180184, where the older record's links.latest leads: the recorded older version
+    # renumbered (its licence is read for the dataset_new_version event).
+    "zenodo-newer": {
+        "url": "https://zenodo.org/api/records/18180184",
+        "status": 200,
+        "body": fixture_json("zenodo/older-version") | {"id": 18180184},
+    },
     "moved-target": {
         "url": dataset_info_url("defunct-datasets/books3"),
         "status": 200,

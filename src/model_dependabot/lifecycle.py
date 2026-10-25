@@ -1184,6 +1184,7 @@ BASE_MODEL_DISABLED = "base_model_disabled"
 BASE_MODEL_UNAVAILABLE = "base_model_unavailable"
 BASE_MODEL_REFUSED = "base_model_refused"
 BASE_MODEL_UNRECOGNISED = "base_model_unrecognised"
+BASE_MODEL_MOVED = "base_model_moved"
 BASE_MODEL_NEW_REVISION = "base_model_new_revision"
 BASE_MODEL_NEW_VERSION_POINTER = "base_model_new_version_pointer"
 GATING_CHANGED = "gating_changed"
@@ -1636,7 +1637,9 @@ def _apply_doi_dataset(
         evidence_id = observation["evidence_ref"]
         if removal.outcome == "reachable":
             latest = removal.newer_response
-            _dataset_versions(store, target, observed, doi, observation, latest=latest)
+            _dataset_versions(
+                store, target, observed, doi, observation, latest=latest, record=removal
+            )
         # Asked by its own record id: doi.org's and DataCite's answers support Zenodo's.
         support = supporting + observed.agency(read, doi) if doi in read.zenodo_by_doi else []
         if removal.outcome == "removed":
@@ -1699,16 +1702,28 @@ def _apply_hub_dataset(
     )
     evidence_id = observation["evidence_ref"]
     status = dataset.response.status
+    evidence = [evidence_id]
+    moved: dict[str, Any] = {}
     if dataset.outcome == "redirected":
         detail = {"source": HF_HUB, "http_status": status, "from": repo, "to": dataset.moved_to}
         detail["redirected_to"] = dataset.response.redirected_to
-        _upstream_watch(store, target, DATASET_MOVED, item, detail, [evidence_id])
-        return
-    if dataset.outcome == "refused":
+        answer = dataset.target
+        if answer is None:
+            detail["target_error"] = dataset.target_error
+        else:
+            # FR-005: the target is read once; its answer is evidence of the move.
+            evidence.append(_target_evidence(store, observed, item, answer.response))
+            detail |= _target_detail(answer)
+        _upstream_watch(store, target, DATASET_MOVED, item, detail, evidence)
+        if answer is None or answer.outcome != "reachable" or not answer.disabled:
+            return
+        # A move to a disabled repository is a removal of the pinned repository (FR-005).
+        moved = {"moved_to": dataset.moved_to}
+    elif dataset.outcome == "refused":
         detail = {"source": HF_HUB, "http_status": status}
         _upstream_watch(store, target, DATASET_UNREACHABLE, item, detail, [evidence_id])
         return
-    if not dataset.disabled:
+    elif not dataset.disabled:
         return
     key = dataset_cause_key(DATASET_REMOVED, hub_dataset_repo(repo))
     cause: dict[str, Any] = {
@@ -1719,7 +1734,7 @@ def _apply_hub_dataset(
         "disabled": True,
         "notice_date": None,
         "reason": NO_REASON,
-    }
+    } | moved
     if notice is not None:
         cause |= {
             "notice_date": notice["notice_date"],
@@ -1732,7 +1747,25 @@ def _apply_hub_dataset(
         if existing is not None:
             kept = ("notice_date", "notice_label", "reported_content")
             cause |= {name: existing["cause"][name] for name in kept if name in existing["cause"]}
-    _upstream_alert(store, target, DATASET_REMOVED, key, cause, [evidence_id, *notice_evidence])
+    _upstream_alert(store, target, DATASET_REMOVED, key, cause, [*evidence, *notice_evidence])
+
+
+def _target_evidence(store: Store, observed: _Observed, item: str, response: Response) -> int:
+    """A redirect target's answer, stored as evidence for the pinned item (no observation)."""
+    return store.add_response_evidence(
+        response, source=HF_HUB, matched_identifier=item, run_id=observed.run_id
+    )
+
+
+def _target_detail(answer: Any) -> dict[str, Any]:
+    """What a redirect target answered, for the move's watch event."""
+    detail: dict[str, Any] = {
+        "target_http_status": answer.response.status,
+        "target_outcome": answer.outcome,
+    }
+    if answer.outcome == "reachable":
+        detail["target_disabled"] = answer.disabled
+    return detail
 
 
 def _apply_base_model(
@@ -1745,6 +1778,9 @@ def _apply_base_model(
     """The base model on the hub: disabled, refused or reachable (research U7; FR-011 to FR-013)."""
     model = (reads.get(HF_HUB) or {}).get(("model", entry["name"]))
     if model is None:
+        return
+    if model.outcome == "redirected":
+        _apply_moved_base_model(store, target, observed, entry, model)
         return
     item = entry["identifier"]
     reachable = model.outcome == "reachable"
@@ -1773,24 +1809,83 @@ def _apply_base_model(
         _close(store, target, unavailable, "cleared", evidence)
     if not reachable:
         return
+    _disabled_state(store, target, entry, base, model, evidence)
+    _base_model_events(store, target, entry, observation)
+
+
+def _disabled_state(
+    store: Store,
+    target: _Target,
+    entry: Mapping[str, Any],
+    base: Mapping[str, Any],
+    model: hub.HubModel,
+    evidence: list[int],
+) -> None:
+    """A reachable answer's ``disabled``: an alert, its clearance or the U7 fail-safe event."""
+    item = entry["identifier"]
+    key = dataset_cause_key(BASE_MODEL_DISABLED, base_model_repo(entry))
     if model.unrecognised is not None:
         # U7's fail-safe: not the recorded shape of a disabled model, so no alert.
         detail = {"source": HF_HUB, "http_status": model.response.status}
         detail |= {"disabled": _disabled_value(model.response), "reason": model.unrecognised}
         _upstream_watch(store, target, BASE_MODEL_UNRECOGNISED, item, detail, evidence)
     elif model.disabled:
-        key = dataset_cause_key(BASE_MODEL_DISABLED, base_model_repo(entry))
-        cause = base | {"disabled": True, "source": HF_HUB}
+        cause = dict(base) | {"disabled": True, "source": HF_HUB}
         severity = BASE_MODEL_SEVERITY[BASE_MODEL_DISABLED]
         _upstream_alert(store, target, BASE_MODEL_DISABLED, key, cause, evidence, severity)
     elif model.disabled is False:
         # The hub reports the model enabled again: the cause is gone (constitution 1.0.2).
-        disabled = store.find_open_alert(
-            target.model_id, dataset_cause_key(BASE_MODEL_DISABLED, base_model_repo(entry))
-        )
+        disabled = store.find_open_alert(target.model_id, key)
         if disabled is not None:
             _close(store, target, disabled, "cleared", evidence)
-    _base_model_events(store, target, entry, observation)
+
+
+def _apply_moved_base_model(
+    store: Store,
+    target: _Target,
+    observed: _Observed,
+    entry: Mapping[str, Any],
+    model: hub.HubModel,
+) -> None:
+    """A renamed base model: the hub redirects the pinned name (held-out scoring HO-097).
+
+    A ``base_model_moved`` watch event names the target. The target's answer, read once, decides
+    the rest, keyed by the pinned repository so a re-pin to the new name carries an alert forward:
+    disabled opens ``base_model_disabled``; a refusal counts towards the refusal-span rule; any
+    other reachable answer ends a refusal run and clears as a reachable answer does. A redirect
+    whose target cannot be read writes no observation, so it opens, closes and ends nothing.
+    """
+    item = entry["identifier"]
+    detail: dict[str, Any] = {
+        "source": HF_HUB,
+        "http_status": model.response.status,
+        "from": entry["name"],
+        "to": model.moved_to,
+        "redirected_to": model.response.redirected_to,
+    }
+    answer = model.target
+    if answer is None:
+        detail["target_error"] = model.target_error
+        evidence = [_target_evidence(store, observed, item, model.response)]
+        _upstream_watch(store, target, BASE_MODEL_MOVED, item, detail, evidence)
+        return
+    refused = answer.outcome == "refused"
+    observation = observed(HF_HUB, item, model.response, outcome="refused" if refused else None)
+    evidence = [observation["evidence_ref"]]
+    evidence.append(_target_evidence(store, observed, item, answer.response))
+    detail |= _target_detail(answer)
+    _upstream_watch(store, target, BASE_MODEL_MOVED, item, detail, evidence)
+    base = {"identifier": item, "base_model": item, "repo": entry["name"]}
+    base["moved_to"] = model.moved_to
+    if refused:
+        _apply_refusal(store, target, entry, base, observation, evidence[1:])
+        return
+    unavailable = store.find_open_alert(
+        target.model_id, dataset_cause_key(BASE_MODEL_UNAVAILABLE, base_model_repo(entry))
+    )
+    if unavailable is not None:
+        _close(store, target, unavailable, "cleared", evidence)
+    _disabled_state(store, target, entry, base, answer, evidence)
 
 
 def _base_model_events(
@@ -1838,8 +1933,13 @@ def _dataset_versions(
     observation: Mapping[str, Any],
     replaced_by: Sequence[str] = (),
     latest: Response | None = None,
+    record: zenodo.ZenodoRecord | None = None,
 ) -> None:
-    """FR-007: a newer version or a replacing record is a watch event naming it, never an alert."""
+    """FR-007: a newer version or a replacing record is a watch event naming it, never an alert.
+
+    For a Zenodo record, the event also shows the newer version's declared licence, as declared
+    and normalised (``record``); it is shown, never compared, so it raises nothing (FR-007).
+    """
     evidence = [observation["evidence_ref"]]
     source = observation["source"]
     if appeared(previous_answer(store, observation), observation, "head_revision"):
@@ -1852,6 +1952,24 @@ def _dataset_versions(
                     latest, source=source, matched_identifier=doi, run_id=observed.run_id
                 )
             )
+        if record is not None and record.newer_licence_response is not None:
+            licence = normalise(record.newer_licence)
+            detail |= {
+                "newer_declared_licence": record.newer_licence,
+                "newer_licence": licence.normalised,
+                "newer_licence_form": licence.form,
+            }
+            if record.newer_licence_response is not latest:
+                evidence.append(
+                    store.add_response_evidence(
+                        record.newer_licence_response,
+                        source=source,
+                        matched_identifier=doi,
+                        run_id=observed.run_id,
+                    )
+                )
+        elif record is not None and record.newer_licence_error:
+            detail["newer_licence_error"] = record.newer_licence_error
         _upstream_watch(store, target, DATASET_NEW_VERSION, doi, detail, evidence)
     if replaced_by:
         before = _recorded(store, target, DATASET_REPLACED, doi)
@@ -1875,8 +1993,13 @@ def _apply_refusal(
     entry: Mapping[str, Any],
     base: Mapping[str, Any],
     observation: Mapping[str, Any],
+    target_evidence: Sequence[int] = (),
 ) -> None:
-    """The refusal-span rule (research U7, FR-012): an alert, or a ``base_model_refused`` event."""
+    """The refusal-span rule (research U7, FR-012): an alert, or a ``base_model_refused`` event.
+
+    ``target_evidence`` is this run's answer of a renamed base model's target, which the hub
+    refused; the observation is then the redirect, recorded as ``refused``.
+    """
     item = entry["identifier"]
     run = refusal_run(store.observations(item, HF_HUB))
     key = dataset_cause_key(BASE_MODEL_UNAVAILABLE, base_model_repo(entry))
@@ -1887,6 +2010,7 @@ def _apply_refusal(
                 "observed_at": refusal["observed_at"],
                 "http_status": refusal["http_status"],
             }
+            | ({"redirected_to": refusal["redirected_to"]} if refusal.get("redirected_to") else {})
             for refusal in run.refusals
         ]
         cause = dict(base) | {
@@ -1897,6 +2021,7 @@ def _apply_refusal(
             "latest_refused_at": refusals[-1]["observed_at"],
         }
         evidence = [refusal["evidence_ref"] for refusal in run.refusals]
+        evidence.extend(target_evidence)
         severity = BASE_MODEL_SEVERITY[BASE_MODEL_UNAVAILABLE]
         _upstream_alert(
             store, target, BASE_MODEL_UNAVAILABLE, key, cause, evidence, severity, each=True
@@ -1912,7 +2037,10 @@ def _apply_refusal(
         "scheduled_refusals_in_run": len(run.refusals),
         "first_refused_at": run.refusals[0]["observed_at"] if run.refusals else None,
     }
-    _upstream_watch(store, target, BASE_MODEL_REFUSED, item, detail, [observation["evidence_ref"]])
+    if observation.get("redirected_to"):
+        detail["redirected_to"] = observation["redirected_to"]
+    evidence = [observation["evidence_ref"], *target_evidence]
+    _upstream_watch(store, target, BASE_MODEL_REFUSED, item, detail, evidence)
 
 
 def _apply_licence(
