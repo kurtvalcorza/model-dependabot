@@ -1,0 +1,757 @@
+{
+  "generated_utc": "2026-10-25T05:07:04Z",
+  "cells": {
+    "base_model_disabled": {
+      "TN": 4,
+      "relabelled": 0,
+      "FN": 1,
+      "TP": 1,
+      "sensitivity": [
+        1,
+        2,
+        [
+          0.095,
+          0.905
+        ]
+      ],
+      "specificity": [
+        4,
+        4,
+        [
+          0.51,
+          1.0
+        ]
+      ],
+      "precision": [
+        1,
+        1,
+        [
+          0.207,
+          1.0
+        ]
+      ]
+    },
+    "base_model_unavailable": {
+      "watch_event_observed": 15,
+      "FN": 15,
+      "relabelled": 0,
+      "TN": 6,
+      "sensitivity": [
+        0,
+        15,
+        [
+          0.0,
+          0.204
+        ]
+      ],
+      "specificity": [
+        6,
+        6,
+        [
+          0.61,
+          1.0
+        ]
+      ],
+      "precision": [
+        0,
+        0,
+        null
+      ]
+    },
+    "dataset_removed (hub)": {
+      "TP": 20,
+      "relabelled": 0,
+      "TN": 6,
+      "FN": 1,
+      "sensitivity": [
+        20,
+        21,
+        [
+          0.773,
+          0.992
+        ]
+      ],
+      "specificity": [
+        6,
+        6,
+        [
+          0.61,
+          1.0
+        ]
+      ],
+      "precision": [
+        20,
+        20,
+        [
+          0.839,
+          1.0
+        ]
+      ]
+    },
+    "dataset_removed (zenodo)": {
+      "TN": 10,
+      "relabelled": 0,
+      "sensitivity": [
+        0,
+        0,
+        null
+      ],
+      "specificity": [
+        10,
+        10,
+        [
+          0.722,
+          1.0
+        ]
+      ],
+      "precision": [
+        0,
+        0,
+        null
+      ]
+    },
+    "dataset_retracted": {
+      "TP": 1,
+      "relabelled": 0,
+      "TN": 3,
+      "sensitivity": [
+        1,
+        1,
+        [
+          0.207,
+          1.0
+        ]
+      ],
+      "specificity": [
+        3,
+        3,
+        [
+          0.439,
+          1.0
+        ]
+      ],
+      "precision": [
+        1,
+        1,
+        [
+          0.207,
+          1.0
+        ]
+      ]
+    },
+    "hub_scan": {
+      "TP": 4,
+      "relabelled": 0,
+      "TN": 12,
+      "sensitivity": [
+        4,
+        4,
+        [
+          0.51,
+          1.0
+        ]
+      ],
+      "specificity": [
+        12,
+        12,
+        [
+          0.758,
+          1.0
+        ]
+      ],
+      "precision": [
+        4,
+        4,
+        [
+          0.51,
+          1.0
+        ]
+      ]
+    },
+    "hub_scan [UNCERTAIN]": {
+      "FN": 3,
+      "relabelled": 0,
+      "sensitivity": [
+        0,
+        3,
+        [
+          0.0,
+          0.561
+        ]
+      ],
+      "specificity": [
+        0,
+        0,
+        null
+      ],
+      "precision": [
+        0,
+        0,
+        null
+      ]
+    },
+    "licence_changed": {
+      "TN": 10,
+      "relabelled": 0,
+      "FN": 5,
+      "sensitivity": [
+        0,
+        5,
+        [
+          0.0,
+          0.434
+        ]
+      ],
+      "specificity": [
+        10,
+        10,
+        [
+          0.722,
+          1.0
+        ]
+      ],
+      "precision": [
+        0,
+        0,
+        null
+      ]
+    },
+    "licence_changed [UNCERTAIN]": {
+      "FN": 4,
+      "relabelled": 0,
+      "sensitivity": [
+        0,
+        4,
+        [
+          0.0,
+          0.49
+        ]
+      ],
+      "specificity": [
+        0,
+        0,
+        null
+      ],
+      "precision": [
+        0,
+        0,
+        null
+      ]
+    },
+    "package_advisory": {
+      "TP": 10,
+      "relabelled": 0,
+      "TN": 9,
+      "sensitivity": [
+        10,
+        10,
+        [
+          0.722,
+          1.0
+        ]
+      ],
+      "specificity": [
+        9,
+        9,
+        [
+          0.701,
+          1.0
+        ]
+      ],
+      "precision": [
+        10,
+        10,
+        [
+          0.722,
+          1.0
+        ]
+      ]
+    },
+    "package_advisory (withdrawn)": {
+      "correct_no_alert": 10,
+      "relabelled": 0,
+      "sensitivity": [
+        0,
+        0,
+        null
+      ],
+      "specificity": [
+        0,
+        0,
+        null
+      ],
+      "precision": [
+        0,
+        0,
+        null
+      ],
+      "withdrawn_correct": [
+        10,
+        10,
+        [
+          0.722,
+          1.0
+        ]
+      ]
+    },
+    "paper_retracted": {
+      "TN": 11,
+      "relabelled": 0,
+      "TP": 7,
+      "sensitivity": [
+        7,
+        7,
+        [
+          0.646,
+          1.0
+        ]
+      ],
+      "specificity": [
+        11,
+        11,
+        [
+          0.741,
+          1.0
+        ]
+      ],
+      "precision": [
+        7,
+        7,
+        [
+          0.646,
+          1.0
+        ]
+      ]
+    }
+  },
+  "errors_and_misses": [
+    {
+      "id": "HO-100",
+      "cell": "dataset_removed (hub)",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "alert_open:dataset_removed",
+      "observed_alerts": [],
+      "observed_watch": [
+        "dataset_moved"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-145",
+      "cell": "licence_changed [UNCERTAIN]",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "UNCERTAIN: alert_open:licence_changed if the tool maps Zenodo \"other-*\" ids, else watch_event (unrecognised licence)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "dataset_new_version"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-155",
+      "cell": "licence_changed",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "alert_open:licence_changed when pinned at record 15016289 and the newer version is observed (spelling-only differences raise nothing)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "dataset_new_version"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-156",
+      "cell": "licence_changed",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "alert_open:licence_changed when pinned at record 4521172 and the newer version is observed (spelling-only differences raise nothing)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "dataset_new_version"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-157",
+      "cell": "licence_changed [UNCERTAIN]",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "UNCERTAIN: alert_open:licence_changed if the tool maps Zenodo \"other-*\" ids, else watch_event (unrecognised licence)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "dataset_new_version"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-158",
+      "cell": "licence_changed [UNCERTAIN]",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "UNCERTAIN: alert_open:licence_changed if the tool maps Zenodo \"other-*\" ids, else watch_event (unrecognised licence)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "dataset_new_version"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-159",
+      "cell": "licence_changed [UNCERTAIN]",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "UNCERTAIN: alert_open:licence_changed if the tool maps Zenodo \"other-*\" ids, else watch_event (unrecognised licence)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "dataset_new_version"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-160",
+      "cell": "licence_changed",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "alert_open:licence_changed when pinned at record 2536573 and the newer version is observed (spelling-only differences raise nothing)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "dataset_new_version"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-161",
+      "cell": "licence_changed",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "alert_open:licence_changed when pinned at record 268334 and the newer version is observed (spelling-only differences raise nothing)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "dataset_new_version",
+        "licence_unrecognised"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-162",
+      "cell": "licence_changed",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "alert_open:licence_changed when pinned at record 1422265 and the newer version is observed (spelling-only differences raise nothing)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "dataset_new_version"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-038",
+      "cell": "hub_scan [UNCERTAIN]",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "alert_open:hub_scan (UNCERTAIN: non-LFS file, hub exposes no sha256; tool may emit a hash watch event instead)",
+      "observed_alerts": [],
+      "observed_watch": [],
+      "check_rc": 0,
+      "gaps": [
+        {
+          "kind": "weight_file",
+          "identifier": null,
+          "pinned": false,
+          "gap_reason": "no SHA-256 from the hub",
+          "location": "https://huggingface.co/alltrue-ai/christina-small-test-malicious-lambda-layer/resolve/96921f99b8c41c50772720d6a126c9b31823ce8b/config.json",
+          "size": 2390,
+          "format": "unknown",
+          "hub_repo": "alltrue-ai/christina-small-test-malicious-lambda-layer",
+          "hub_file": "config.json"
+        }
+      ]
+    },
+    {
+      "id": "HO-040",
+      "cell": "hub_scan [UNCERTAIN]",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "UNCERTAIN: repo-level level says unsafe but file status is \"suspicious\" (caution -> watch_event)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "hub_scan_unknown"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-049",
+      "cell": "hub_scan [UNCERTAIN]",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "alert_open:hub_scan (UNCERTAIN: non-LFS file, hub exposes no sha256; tool may emit a hash watch event instead)",
+      "observed_alerts": [],
+      "observed_watch": [],
+      "check_rc": 0,
+      "gaps": [
+        {
+          "kind": "weight_file",
+          "identifier": null,
+          "pinned": false,
+          "gap_reason": "no SHA-256 from the hub",
+          "location": "https://huggingface.co/shaq4prez/malicious-olmo3-poc/resolve/ff7d4f819ef920d5387e7d3e90264f1f68f26b0d/.metadata",
+          "size": 234,
+          "format": "unknown",
+          "hub_repo": "shaq4prez/malicious-olmo3-poc",
+          "hub_file": ".metadata"
+        }
+      ]
+    },
+    {
+      "id": "HO-054",
+      "cell": "base_model_unavailable",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "watch_event (alert_open:base_model_unavailable only after >=24h of scheduled refusals)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "base_model_refused"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-055",
+      "cell": "base_model_unavailable",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "watch_event (alert_open:base_model_unavailable only after >=24h of scheduled refusals)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "base_model_refused"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-056",
+      "cell": "base_model_unavailable",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "watch_event (alert_open:base_model_unavailable only after >=24h of scheduled refusals)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "base_model_refused"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-057",
+      "cell": "base_model_unavailable",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "watch_event (alert_open:base_model_unavailable only after >=24h of scheduled refusals)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "base_model_refused"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-059",
+      "cell": "base_model_unavailable",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "watch_event (alert_open:base_model_unavailable only after >=24h of scheduled refusals)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "base_model_refused"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-063",
+      "cell": "base_model_unavailable",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "watch_event (alert_open:base_model_unavailable only after >=24h of scheduled refusals)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "base_model_refused"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-064",
+      "cell": "base_model_unavailable",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "watch_event (alert_open:base_model_unavailable only after >=24h of scheduled refusals)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "base_model_refused"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-074",
+      "cell": "base_model_unavailable",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "watch_event (alert_open:base_model_unavailable only after >=24h of scheduled refusals)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "base_model_refused"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-076",
+      "cell": "base_model_unavailable",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "watch_event (alert_open:base_model_unavailable only after >=24h of scheduled refusals)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "base_model_refused"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-078",
+      "cell": "base_model_unavailable",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "watch_event (alert_open:base_model_unavailable only after >=24h of scheduled refusals)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "base_model_refused"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-080",
+      "cell": "base_model_unavailable",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "watch_event (alert_open:base_model_unavailable only after >=24h of scheduled refusals)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "base_model_refused"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-082",
+      "cell": "base_model_unavailable",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "watch_event (alert_open:base_model_unavailable only after >=24h of scheduled refusals)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "base_model_refused"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-083",
+      "cell": "base_model_unavailable",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "watch_event (alert_open:base_model_unavailable only after >=24h of scheduled refusals)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "base_model_refused"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-085",
+      "cell": "base_model_unavailable",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "watch_event (alert_open:base_model_unavailable only after >=24h of scheduled refusals)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "base_model_refused"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-086",
+      "cell": "base_model_unavailable",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "watch_event (alert_open:base_model_unavailable only after >=24h of scheduled refusals)",
+      "observed_alerts": [],
+      "observed_watch": [
+        "base_model_refused"
+      ],
+      "check_rc": 0,
+      "gaps": []
+    },
+    {
+      "id": "HO-097",
+      "cell": "base_model_disabled",
+      "label": "positive",
+      "outcome": "FN",
+      "expected": "alert_open:base_model_disabled",
+      "observed_alerts": [],
+      "observed_watch": [],
+      "check_rc": 0,
+      "gaps": []
+    }
+  ],
+  "false_closure_same_day_recheck": {
+    "package_advisory": {
+      "false_closures": 0,
+      "rechecked": 10
+    },
+    "dataset_removed (hub)": {
+      "false_closures": 0,
+      "rechecked": 20
+    },
+    "dataset_retracted": {
+      "false_closures": 0,
+      "rechecked": 1
+    },
+    "paper_retracted": {
+      "false_closures": 0,
+      "rechecked": 7
+    },
+    "hub_scan": {
+      "false_closures": 0,
+      "rechecked": 4
+    },
+    "base_model_disabled": {
+      "false_closures": 0,
+      "rechecked": 1
+    }
+  },
+  "drift": {
+    "records": 153,
+    "stable": 153,
+    "drifted": 0,
+    "note": "HO-155 first fetch failed (network), retried stable"
+  }
+}

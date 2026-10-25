@@ -436,6 +436,8 @@ def make_handlers(
             outcome = run_check(
                 store, _fetcher(store), model_ids, args.sources, scope=scope, trigger=trigger
             )
+            # Research U13: keep the ETag cache bounded; bodies evidence refers to stay.
+            store.prune_etag_cache()
         payload = {
             "run_id": outcome.run_id,
             "scope": scope,

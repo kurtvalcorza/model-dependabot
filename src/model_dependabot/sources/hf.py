@@ -13,7 +13,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from posixpath import dirname
 from urllib.parse import quote, unquote, urlsplit
 
@@ -74,6 +75,25 @@ class HubFileResult:
     commit: str | None
     file: HubFile | None
     gap_reason: str | None = None
+
+
+def answered_for(repo: str, info: object) -> str | None:
+    """Why an answer is for another repository, or ``None`` when it is for ``repo`` or names none.
+
+    Model and dataset info, security status and revision answers name their repository in ``id``
+    (model answers also in ``modelId``). The hub treats repository ids case-insensitively, so case
+    is ignored. An answer naming another repository is unreadable for ``repo`` (data-model.md,
+    Identity and clearance); one with no such field is read as before.
+    """
+    if not isinstance(info, dict):
+        return None
+    for name in ("id", "modelId"):
+        if name not in info:
+            continue
+        value = info[name]
+        if not isinstance(value, str) or value.lower() != repo.lower():
+            return f"the answer is for {value!r}"
+    return None
 
 
 def _refusal(response: Response) -> str | None:
@@ -137,12 +157,16 @@ class HuggingFace:
         response, gap = self._get(url)
         if response is None or gap is not None:
             return RevisionResult(commit=None, gap_reason=gap)
+        try:
+            info = json.loads(response.body)
+        except ValueError:
+            info = None
+        other = answered_for(repo, info)
+        if other is not None:
+            return RevisionResult(commit=None, gap_reason=f"hub {other}, not {repo}")
         commit = response.headers.get("X-Repo-Commit")
         if commit is None:
-            try:
-                commit = json.loads(response.body).get("sha")
-            except (ValueError, AttributeError):
-                commit = None
+            commit = info.get("sha") if isinstance(info, dict) else None
         if not is_commit(commit):
             return RevisionResult(commit=None, gap_reason="hub gave no commit for the revision")
         return RevisionResult(commit=commit)
@@ -222,6 +246,9 @@ def _parse_status(repo: str, response: Response) -> SecurityStatus:
         info = json.loads(response.body)
     except ValueError:
         return SecurityStatus(repo, response, MISSING, reason="response is not JSON")
+    other = answered_for(repo, info)
+    if other is not None:
+        return SecurityStatus(repo, response, UNRECOGNISED, reason=other)
     status = info.get("securityRepoStatus") if isinstance(info, dict) else None
     if not isinstance(status, dict):
         return SecurityStatus(repo, response, MISSING, reason="no securityRepoStatus in response")
@@ -358,14 +385,34 @@ class HubDataset:
     sha: str | None = None
     licence: str | None = None
     moved_to: str | None = None
+    # A move's target, read once without following a further redirect (FR-005), or why it was not.
+    target: HubDataset | None = None
+    target_error: str | None = None
 
 
-def _moved_to(target: str | None) -> str | None:
+def _moved_to(target: str | None, prefix: str = "/api/datasets/") -> str | None:
     if not target:
         return None
     path = urlsplit(target).path
-    prefix = "/api/datasets/"
     return unquote(path[len(prefix) :]) if path.startswith(prefix) else None
+
+
+def _read_target[T: (HubDataset, HubModel)](answer: T, read: Callable[[str], T]) -> T:
+    """``answer``, a redirect, with its target read once by the name the redirect gives.
+
+    The target is read like the pinned name: no redirect is followed and the answer must name the
+    target (answer identity). A target that cannot be read, or that redirects again, is recorded
+    as ``target_error``; the redirect alone then opens and closes nothing (data-model.md).
+    """
+    if answer.moved_to is None:
+        return replace(answer, target_error="the redirect names no repository")
+    try:
+        target = read(answer.moved_to)
+    except SourceFailedError as error:
+        return replace(answer, target_error=f"the new name could not be read: {error.reason}")
+    if target.outcome == "redirected":
+        return replace(answer, target_error="the new name redirects again (not followed)")
+    return replace(answer, target=target)
 
 
 def parse_dataset(repo: str, response: Response) -> HubDataset:
@@ -383,6 +430,9 @@ def parse_dataset(repo: str, response: Response) -> HubDataset:
         raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}: {error}") from None
     if not isinstance(info, dict):
         raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}")
+    other = answered_for(repo, info)
+    if other is not None:
+        raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}: {other}")
     sha = info.get("sha")
     return HubDataset(
         repo,
@@ -396,10 +446,15 @@ def parse_dataset(repo: str, response: Response) -> HubDataset:
 
 
 def read_dataset(fetcher: Fetcher, repo: str, endpoint: str = HF_ENDPOINT) -> HubDataset:
-    """One dataset's info; a move is returned as it is, never followed (research U5)."""
-    return parse_dataset(
-        repo, fetcher.get(dataset_info_url(repo, endpoint), follow_redirects=False)
-    )
+    """One dataset's info; a move is never followed, but its target is read once (U5, FR-005)."""
+
+    def read(name: str) -> HubDataset:
+        return parse_dataset(
+            name, fetcher.get(dataset_info_url(name, endpoint), follow_redirects=False)
+        )
+
+    dataset = read(repo)
+    return _read_target(dataset, read) if dataset.outcome == "redirected" else dataset
 
 
 MODEL_EXPAND = DATASET_EXPAND + "&expand[]=lastModified"
@@ -427,6 +482,10 @@ class HubModel:
     card_hash: str | None = None
     new_version: str | None = None
     unrecognised: str | None = None
+    moved_to: str | None = None
+    # A rename's target, read once without following a further redirect, or why it was not.
+    target: HubModel | None = None
+    target_error: str | None = None
 
 
 # Research U7: a disabled model answers HTTP 200 with ``disabled: true`` (recorded in
@@ -448,7 +507,8 @@ def card_hash(card: object) -> str:
 def parse_model(repo: str, response: Response) -> HubModel:
     status = response.status
     if 300 <= status < 400:
-        return HubModel(repo, response, "redirected")
+        target = _moved_to(response.redirected_to, "/api/models/")
+        return HubModel(repo, response, "redirected", moved_to=target)
     if status in (401, 403, 404):
         return HubModel(repo, response, "refused")
     if status != 200:
@@ -459,6 +519,9 @@ def parse_model(repo: str, response: Response) -> HubModel:
         raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}: {error}") from None
     if not isinstance(info, dict):
         raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}")
+    other = answered_for(repo, info)
+    if other is not None:
+        raise SourceFailedError(DATASET_SOURCE, f"unreadable answer for {repo}: {other}")
     sha = info.get("sha")
     # The reader always asks for expand[]=disabled; an answer without it is not the recorded
     # shape, so it is unrecognised (a watch event), never false (which would clear an alert).
@@ -485,5 +548,12 @@ def parse_model(repo: str, response: Response) -> HubModel:
 
 
 def read_model(fetcher: Fetcher, repo: str, endpoint: str = HF_ENDPOINT) -> HubModel:
-    """A base model's info; a redirect is returned as it is, never followed."""
-    return parse_model(repo, fetcher.get(model_info_url(repo, endpoint), follow_redirects=False))
+    """A base model's info; a rename is never followed, but its target is read once."""
+
+    def read(name: str) -> HubModel:
+        return parse_model(
+            name, fetcher.get(model_info_url(name, endpoint), follow_redirects=False)
+        )
+
+    model = read(repo)
+    return _read_target(model, read) if model.outcome == "redirected" else model

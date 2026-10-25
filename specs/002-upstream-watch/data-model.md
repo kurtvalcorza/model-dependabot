@@ -48,8 +48,8 @@ A failed request writes no observation (FR-018).
 | :-- | :-- |
 | `run_id`, `source` | The check run and the source that answered |
 | `item` | The inventory identifier (base-model purl, dataset DOI or `hf-dataset:` reference) |
-| `http_status` | As received; a redirect records the status of the first response and `redirected_to` |
-| `outcome` | `reachable`, `refused` (HTTP 401, 403 or 404 from the hub), `not_found` (404 from DataCite, Crossref or Figshare), `removed` (Zenodo 410), `redirected`. Only a DataCite `not_found` can open an alert (`dataset_not_findable`); a Crossref `not_found` records a watch event (`dataset_unreachable` for a dataset DOI, `paper_not_found` for a tied paper DOI), as does a Figshare one |
+| `http_status` | As received; a redirect records the status of the first response and `redirected_to` (the target's own answer is stored as evidence, not as an observation) |
+| `outcome` | `reachable`, `refused` (HTTP 401, 403 or 404 from the hub), `not_found` (404 from DataCite, Crossref or Figshare), `removed` (Zenodo 410), `redirected`. A base model's redirect whose target the hub refuses is recorded as `refused` (with the redirect's status and `redirected_to`), so it counts in the refusal-span rule; a base model's redirect whose target cannot be read writes no observation, like a failed request. Only a DataCite `not_found` can open an alert (`dataset_not_findable`); a Crossref `not_found` records a watch event (`dataset_unreachable` for a dataset DOI, `paper_not_found` for a tied paper DOI), as does a Figshare one |
 | `disabled` | Hub items: true or false |
 | `gated` | Hub items: `false`, `auto` or `manual` |
 | `head_revision` | Hub items: `sha`; datasets with a version link: the newest version's DOI or record |
@@ -127,11 +127,11 @@ never counts as removal: the alert stays open, neither fixed nor carried forward
 | `dataset_retracted` | dataset DOI | no longer pins the DOI | a successful, well-formed Crossref answer lists no retraction, withdrawal or removal | never: no source read here publishes an explicit withdrawal of a notice |
 | `paper_retracted` | dataset DOI and paper DOI; for a hub dataset, its repository (`owner/name`, any revision) and paper DOI | no longer pins the dataset DOI or names the hub repository, or no longer ties the paper to it | as `dataset_retracted`, for the paper DOI | never |
 | `dataset_removed` (Zenodo) | dataset DOI | no longer pins the DOI | never | never |
-| `dataset_removed` (hub) | hub repository (`owner/name`), any revision | no longer names the repository | never | never |
+| `dataset_removed` (hub) | hub repository (`owner/name`) as pinned, any revision; a move to a disabled repository is keyed by the pinned name | no longer names the repository | never | never |
 | `dataset_not_findable` | dataset DOI | no longer pins the DOI | never | never |
 | `licence_changed` | item (dataset DOI; for a base model or hub dataset, its repository, any revision) and the sources reporting the change | no longer pins the DOI or names the repository | every source that reported the change answers with the recorded licence set again | never |
-| `base_model_disabled` | hub repository (`owner/name`), any revision | no longer names the repository | the hub reports `disabled: false` | never |
-| `base_model_unavailable` | hub repository (`owner/name`), any revision | no longer names the repository | any hub answer that is not a refusal | never |
+| `base_model_disabled` | hub repository (`owner/name`) as pinned, any revision; a rename to a disabled repository is keyed by the pinned name | no longer names the repository | the hub reports `disabled: false`, for the pinned name or, after a rename, for the new name | never |
+| `base_model_unavailable` | hub repository (`owner/name`) as pinned, any revision; refusals of a renamed repository's new name count for the pinned name | no longer names the repository | any hub answer that is not a refusal; after a rename, the new name's answer decides, and a redirect whose new name cannot be read clears nothing | never |
 
 For a repository-wide kind, a new version that pins another revision of the same repository carries the
 alert forward to that revision; only depending on a different repository, or the hub's own clearance,
@@ -145,12 +145,26 @@ revision in its cause key, is rekeyed by repository when the database is opened;
 `base_model_disabled`, `base_model_unavailable`, a hub dataset's `dataset_removed` and `paper_retracted`,
 and a base model's or hub dataset's `licence_changed`.
 
+**Answer identity** (hub): a hub answer is about the repository it names, not the one asked for.
+Model and dataset info, security status and revision answers name their repository in `id` (model
+answers also in `modelId`), spelt as the hub spells it (`tests/fixtures/hf/`, `tests/fixtures/hf_upstream/`).
+When a 200 answer names another repository, compared ignoring case as the hub does, it is unreadable:
+model or dataset info fails the `hf-hub` source for the run (no observation, so nothing opens or
+closes), a security status is `unrecognised` (a watch event) and a revision is a gap. An answer that
+names no repository, such as a tree listing, is read as before. A renamed repository still surfaces as
+a move, because model and dataset info never follow redirects (U5); the move's target is then read once by
+the name the redirect gives, under the same rule, and a target answer naming another repository, failing or
+redirecting again is recorded in the move's watch event as `target_error` (it fails nothing else). The rule guards against a 200
+answer that a redirect elsewhere or a misrouted response delivers for the wrong repository.
+
 **Refusal-span rule** (U7): `base_model_unavailable` opens when an unbroken run of refusal observations from
 scheduled check runs, with no reachable observation from any run in between, spans at least 24 hours from
 its first to its latest refusal. On-demand refusals neither count towards the span nor break the run; a
 reachable observation from any run ends it; failed requests write no observation and are ignored. Any hub
-answer other than a refusal ends a refusal run and clears `base_model_unavailable`, including a redirect
-or a 200 with `disabled: true`; a disabled model is then reported by `base_model_disabled`, which closes
+answer other than a refusal ends a refusal run and clears `base_model_unavailable`, including a 200 with
+`disabled: true`. A redirect (a renamed base model) is judged by its target's answer, read once: a refused
+target is a refusal of the pinned base model, a reachable one ends the run and clears, and a redirect alone (the
+target cannot be read) writes no observation, so it neither ends a run nor clears an alert; a disabled model is then reported by `base_model_disabled`, which closes
 as `cleared` with that observation as evidence when a later hub answer reports `disabled: false`
 (constitution 1.0.2).
 
@@ -189,9 +203,10 @@ New `kind` values (FR-007, FR-010, FR-013, U5 to U8):
 | `card_changed` | `card_hash` changes |
 | `base_model_refused` | A refusal that does not (yet) meet the refusal-span rule |
 | `base_model_unrecognised` | A hub answer of a shape this feature does not read (for example a `disabled` value that is not `true` or `false`): recorded, never an alert (U7 fail-safe) |
-| `dataset_new_version` | A newer version or record is linked |
+| `base_model_moved` | The hub redirects the pinned base model to another name (a rename); `detail` names `from`, `to` and `redirected_to`, and the target's `target_http_status`, `target_outcome` and `target_disabled`, or `target_error` when it could not be read. The redirect and the target's answer are its evidence. The target's answer then applies to the pinned base model (identity and clearance) |
+| `dataset_new_version` | A newer version or record is linked. For a Zenodo record, `detail` also shows the newer version's declared licence (`newer_declared_licence`, as declared; `newer_licence` and `newer_licence_form`, normalised as in U8), read from `links.latest`'s answer or, when that is a redirect, from one request for the newer record in each run; `newer_licence_error` says why it could not be read. It is shown, never compared: no alert (FR-007). DataCite's newer versions are not read, so their events show no licence |
 | `dataset_replaced` | DataCite lists `IsObsoletedBy` |
-| `dataset_moved` | The hub redirects the dataset to another namespace |
+| `dataset_moved` | The hub redirects the dataset to another namespace; the target is read once and `detail` shows its `target_http_status`, `target_outcome` and `target_disabled`, or `target_error`. A disabled target also raises `dataset_removed` (FR-005) |
 | `dataset_unreachable` | The hub refuses a dataset, Figshare answers 404, Crossref answers 404 for a Crossref-registered dataset DOI, Zenodo answers 404 for a record asked by its DOI (U4), or no source can be asked about a dataset DOI (constitution IV: its agency is unknown, `none` or one no source reads, and the Zenodo exception of U1 does not apply); `detail.reason` names why (for example `doi.org reports the DOI does not exist`) and doi.org's answer in the run is the evidence |
 | `paper_not_found` | Crossref answers 404 for a Crossref-registered paper DOI tied to a dataset, or no source can be asked about a tied paper DOI (its agency is unknown, `none`, DataCite, whose DOIs no retraction source reads, or one no source reads), with `detail.reason` as above (for a DataCite paper DOI `registered with DataCite, which no retraction source reads`, with doi.org's answer in the run as the evidence) |
 | `licence_unrecognised` | A declared licence entry cannot be normalised, so the declared set differs from the recorded one only in an unrecognised entry |

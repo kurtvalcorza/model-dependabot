@@ -11,9 +11,9 @@ Feature 002 adds upstream observations, the DOI routing cache and the takedown l
 ``original_sha256`` and ``redacted_fields`` (research U10). Tables are created with
 ``CREATE TABLE IF NOT EXISTS``, so a fresh database has them; a database created by feature 001
 is not migrated. The ETag cache (``etag_cache``, read through ``EtagCache``) is created the same
-way, so an existing database gains it when opened. One data migration runs on open: open
-repository-wide alerts written with a revision in their cause key are rekeyed by repository
-(``_rekey_repository_alerts``).
+way, so an existing database gains it when opened; its ``used_at`` column, added after the table,
+is added to an older table on open. One data migration runs on open: open repository-wide alerts
+written with a revision in their cause key are rekeyed by repository (``_rekey_repository_alerts``).
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import os
 import re
 import sqlite3
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import TracebackType
 from typing import Any
@@ -65,6 +65,7 @@ WATCH_KINDS = (
     "card_changed",
     "base_model_refused",
     "base_model_unrecognised",
+    "base_model_moved",
     "dataset_new_version",
     "dataset_replaced",
     "dataset_moved",
@@ -79,6 +80,10 @@ OUTCOMES = ("reachable", "refused", "not_found", "removed", "redirected")
 LICENCE_FORMS = ("spdx", "expression", "unrecognised", "none")
 REPOSITORIES = ("zenodo", "figshare", "other")
 TAKEDOWN_FIELDS = ("date", "reported_content")
+# Research U13: ``check`` drops ETag cache entries no run has looked up for this many days. A
+# quarter is longer than any schedule the service is run on, so only URLs that have left every
+# model's scope (a re-pinned file, a dropped dataset) age out.
+ETAG_CACHE_MAX_AGE_DAYS = 90
 
 
 def _in(values: tuple[str, ...]) -> str:
@@ -266,7 +271,8 @@ CREATE TABLE IF NOT EXISTS etag_cache (
     body_sha256 TEXT NOT NULL,
     original_sha256 TEXT NOT NULL,
     redacted_fields TEXT NOT NULL,
-    retrieved_at TEXT NOT NULL
+    retrieved_at TEXT NOT NULL,
+    used_at TEXT
 );
 
 -- FR-005: a recorded model version and its inventory never change.
@@ -344,7 +350,38 @@ class Store:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
+        if "used_at" not in self.columns("etag_cache"):
+            with self.conn:
+                self.conn.execute("ALTER TABLE etag_cache ADD COLUMN used_at TEXT")
+        self._widen_watch_kinds()
         self._rekey_repository_alerts()
+
+    def _widen_watch_kinds(self) -> None:
+        """Rebuild ``watch_events`` when its ``kind`` check predates a kind in ``WATCH_KINDS``.
+
+        SQLite cannot change a CHECK constraint in place, so a database written before a watch kind
+        was added (``base_model_moved``, held-out scoring 2026-10-25) has its table rebuilt with
+        the current schema, every row and id kept (the SQLite twelve-step procedure).
+        """
+        row = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'watch_events'"
+        ).fetchone()
+        if row is None or all(f"'{kind}'" in row["sql"] for kind in WATCH_KINDS):
+            return
+        start = SCHEMA.index("CREATE TABLE IF NOT EXISTS watch_events (")
+        ddl = SCHEMA[start : SCHEMA.index(");", start) + 2]
+        ddl = ddl.replace("IF NOT EXISTS watch_events (", "watch_events_widened (", 1)
+        self.conn.execute("PRAGMA foreign_keys = OFF")
+        try:
+            with self.conn:
+                self.conn.execute(ddl)
+                self.conn.execute("INSERT INTO watch_events_widened SELECT * FROM watch_events")
+                self.conn.execute("DROP TABLE watch_events")
+                self.conn.execute("ALTER TABLE watch_events_widened RENAME TO watch_events")
+                if self.conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
+                    raise sqlite3.IntegrityError("watch_events rebuild broke a foreign key")
+        finally:
+            self.conn.execute("PRAGMA foreign_keys = ON")
 
     def _rekey_repository_alerts(self) -> None:
         """Key open repository-wide alerts by repository, not revision (003, identity table).
@@ -569,6 +606,44 @@ class Store:
         if hashlib.sha256(body).hexdigest() != digest:
             raise ValueError(f"evidence body {digest} no longer matches its SHA-256")
         return body
+
+    def discard_body(self, digest: str) -> bool:
+        """Delete a stored body that no evidence record and no ETag cache entry refers to.
+
+        A body an evidence record refers to is never deleted (Principle I). Returns whether a file
+        was deleted; a body already gone is not an error, so this is safe to repeat.
+        """
+        referenced = self.conn.execute(
+            "SELECT 1 FROM evidence WHERE body_sha256 = ?"
+            " UNION ALL SELECT 1 FROM etag_cache WHERE body_sha256 = ? LIMIT 1",
+            (digest, digest),
+        ).fetchone()
+        if referenced is not None:
+            return False
+        try:
+            (self.evidence_dir / digest).unlink()
+        except FileNotFoundError:
+            return False
+        return True
+
+    def prune_etag_cache(self, max_age_days: int = ETAG_CACHE_MAX_AGE_DAYS) -> int:
+        """Drop ETag cache entries unused for ``max_age_days`` and their unreferenced bodies.
+
+        An entry is used when it is stored or looked up; one stored before use times were kept
+        ages from its retrieval. Returns how many entries were dropped.
+        """
+        cutoff = utc_text(self._now() - timedelta(days=max_age_days))
+        with self.conn:
+            rows = self.conn.execute(
+                "SELECT url, body_sha256 FROM etag_cache WHERE COALESCE(used_at, retrieved_at) < ?",
+                (cutoff,),
+            ).fetchall()
+            self.conn.executemany(
+                "DELETE FROM etag_cache WHERE url = ?", [(row["url"],) for row in rows]
+            )
+        for digest in {row["body_sha256"] for row in rows}:
+            self.discard_body(digest)
+        return len(rows)
 
     def add_evidence(
         self,
@@ -1078,6 +1153,10 @@ class EtagCache(MutableMapping[str, Response]):
     ``304`` then serves the cached response with the new retrieval time. The body is written to
     the evidence store by its SHA-256, so only the redacted body is ever kept. A row whose body is
     missing or no longer matches its hash is a miss, and the next request is unconditional.
+
+    A lookup that finds a body marks the entry used, so ``Store.prune_etag_cache`` drops only
+    entries no run has needed for ``ETAG_CACHE_MAX_AGE_DAYS``. Replacing or deleting an entry
+    deletes its previous body unless evidence or another entry refers to it.
     """
 
     def __init__(self, store: Store) -> None:
@@ -1091,6 +1170,10 @@ class EtagCache(MutableMapping[str, Response]):
             body = self._store.read_body(row["body_sha256"])
         except (OSError, ValueError):
             raise KeyError(url) from None
+        with self._store.conn:
+            self._store.conn.execute(
+                "UPDATE etag_cache SET used_at = ? WHERE url = ?", (self._store._stamp(), url)
+            )
         return Response(
             status=row["status"],
             body=body,
@@ -1109,10 +1192,12 @@ class EtagCache(MutableMapping[str, Response]):
             raise ValueError("only a response with an ETag can be cached")
         headers = {k: v for k, v in response.headers.items() if k not in _UNCACHED_HEADERS}
         digest = self._store.put_body(response.body)
+        previous = self._body_of(url)
         with self._store.conn:
             self._store.conn.execute(
                 "INSERT OR REPLACE INTO etag_cache (url, etag, status, headers, body_sha256,"
-                " original_sha256, redacted_fields, retrieved_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                " original_sha256, redacted_fields, retrieved_at, used_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     url,
                     etag,
@@ -1122,14 +1207,26 @@ class EtagCache(MutableMapping[str, Response]):
                     response.original_sha256,
                     json.dumps(list(response.redacted_fields)),
                     utc_text(response.retrieved_at),
+                    self._store._stamp(),
                 ),
             )
+        if previous is not None and previous != digest:
+            self._store.discard_body(previous)
+
+    def _body_of(self, url: str) -> str | None:
+        row = self._store.conn.execute(
+            "SELECT body_sha256 FROM etag_cache WHERE url = ?", (url,)
+        ).fetchone()
+        return None if row is None else str(row["body_sha256"])
 
     def __delitem__(self, url: str) -> None:
+        previous = self._body_of(url)
         with self._store.conn:
             deleted = self._store.conn.execute("DELETE FROM etag_cache WHERE url = ?", (url,))
         if deleted.rowcount == 0:
             raise KeyError(url)
+        if previous is not None:
+            self._store.discard_body(previous)
 
     def __iter__(self) -> Iterator[str]:
         rows = self._store.conn.execute("SELECT url FROM etag_cache ORDER BY url").fetchall()

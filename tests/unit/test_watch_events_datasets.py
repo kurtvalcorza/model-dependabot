@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 
+from conftest import fixture_json
 from model_dependabot.lifecycle import run_check
 from model_dependabot.sources import datacite, zenodo
 from model_dependabot.sources.fetcher import RecordedFetcher
@@ -29,6 +30,17 @@ OBSOLETED = "10.1594/pangaea.958394"
 REPLACING = "10.1594/pangaea.997226"
 PREVIOUS = "10.6084/m9.figshare.29500136.v2"
 CONCEPT = "10.6084/m9.figshare.29500136"
+
+
+def newer_record(licence: str = "cc-zero") -> dict[str, dict[str, Any]]:
+    """Record 18180184, where ``links.latest`` leads; not recorded, so derived from the recorded
+    older version with its id and declared licence changed (the newer version's licence is read,
+    one request, for the watch event only)."""
+    body = fixture_json("zenodo/older-version")
+    body["id"] = 18180184
+    body["metadata"]["license"] = {"id": licence}
+    url = zenodo.record_url("18180184")
+    return {"newer": {"url": url, "status": 200, "body": body}}
 
 
 @pytest.fixture
@@ -55,7 +67,7 @@ def events(store: Store, kind: str) -> list[dict[str, Any]]:
 def test_zenodo_reads_the_newest_version_from_links_latest(
     derive_upstream: Callable[..., Path],
 ) -> None:
-    record = zenodo.Zenodo(RecordedFetcher(derive_upstream())).record("8176941")
+    record = zenodo.Zenodo(RecordedFetcher(derive_upstream(extra=newer_record()))).record("8176941")
     assert (record.outcome, record.newer) == ("reachable", "18180184")
     assert record.newer_response is not None
     assert record.newer_response.status == 301
@@ -92,7 +104,7 @@ def test_a_newer_zenodo_version_is_one_watch_event_naming_it(
     store: Store, derive_upstream: Callable[..., Path]
 ) -> None:
     register(store, OLDER, "zenodo", "8176941")
-    root = derive_upstream()
+    root = derive_upstream(extra=newer_record())
     check(store, root, "zenodo")
     check(store, root, "zenodo")
     [event] = events(store, "dataset_new_version")
@@ -137,3 +149,32 @@ def test_datacite_is_obsoleted_by_is_one_dataset_replaced_naming_the_record(
     assert len(event["evidence"]) == 1
     assert events(store, "dataset_new_version") == []
     assert store.alerts_for("m") == []
+
+
+def test_a_newer_zenodo_version_shows_its_declared_licence_and_stays_a_watch_event(
+    store: Store, derive_upstream: Callable[..., Path]
+) -> None:
+    # The pinned record declares cc-by-4.0; the newer one cc-zero. FR-007: never an alert.
+    register(store, OLDER, "zenodo", "8176941")
+    check(store, derive_upstream(extra=newer_record("cc-zero")), "zenodo")
+    [event] = events(store, "dataset_new_version")
+    detail = event["detail"]
+    assert detail["newer_declared_licence"] == "cc-zero"
+    assert (detail["newer_licence"], detail["newer_licence_form"]) == ("CC0-1.0", "spdx")
+    assert zenodo.record_url("18180184") in {e["url"] for e in event["evidence"]}
+    assert store.alerts_for("m") == []
+    assert [e["kind"] for e in store.watch_events("m")] == ["dataset_new_version"]
+
+
+def test_a_newer_zenodo_version_that_cannot_be_read_still_names_it(
+    store: Store, derive_upstream: Callable[..., Path]
+) -> None:
+    register(store, OLDER, "zenodo", "8176941")
+    extra = newer_record()
+    extra["newer"] |= {"status": 500, "body": {"status": 500}}
+    outcome = check(store, derive_upstream(extra=extra), "zenodo")
+    assert outcome.sources == {"zenodo": "ok"}
+    [event] = events(store, "dataset_new_version")
+    assert event["detail"]["newer"] == "18180184"
+    assert "newer_licence" not in event["detail"]
+    assert event["detail"]["newer_licence_error"]

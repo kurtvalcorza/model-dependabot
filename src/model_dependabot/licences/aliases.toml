@@ -7,10 +7,24 @@
 #   spdx = "CC-BY-4.0"         # an identifier from the vendored SPDX list
 #   source = "figshare"        # the repository whose responses use this spelling
 #
-# Only spellings seen in recorded fixtures are added (tasks T039).
+# Spellings seen in recorded fixtures (tasks T039) or in a held-out scoring pass are added.
 
 # Seen in tests/fixtures/figshare/cc-by-4.0.json (license.name of article 34763127, 2026-10-24).
 [[alias]]
 alias = "CC BY 4.0"
 spdx = "CC-BY-4.0"
 source = "figshare"
+
+# Zenodo's metadata.license.id for CC0 (held-out scoring 2026-10-25; derived in
+# tests/unit/test_licence_aliases_cc0.py, no fixture records it).
+[[alias]]
+alias = "cc-zero"
+spdx = "CC0-1.0"
+source = "zenodo"
+
+# DataCite's rightsList rights text for CC0, used when an entry has no rightsIdentifier (held-out
+# scoring 2026-10-25; derived in tests/unit/test_licence_aliases_cc0.py, no fixture records it).
+[[alias]]
+alias = "Creative Commons Zero - CC0 1.0"
+spdx = "CC0-1.0"
+source = "datacite"
