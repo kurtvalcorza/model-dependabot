@@ -71,7 +71,16 @@ A source that failed in a run cannot close or change any alert in that run (FR-0
 | `retrieved_at` | UTC timestamp |
 | `matched_identifier` | The exact inventory identifier matched (FR-019) |
 | `body_sha256` | Hash of the stored raw response (content-addressed file) |
+| `canonical_sha256` | For a JSON body, the hash of its canonical form (the parsed value written with sorted keys, no insignificant whitespace, UTF-8); empty for a body that is not JSON (feature 006) |
 | `detail` | For example the local range evaluation (and why a range could not be read), or the scanner's dangerous globals |
+
+Evidence identity: two responses from the same `source` and `url` are the same evidence when their
+`canonical_sha256` values are equal, or, for bodies that are not JSON, their `body_sha256` values. A
+check that reads an unchanged record reuses the evidence already linked, so an alert's evidence set
+changes only when the content does; the raw bytes of the first response stay the stored body
+(constitution I). A database written before feature 006 gains the column when it is opened, and each
+existing row gets its canonical hash from its stored body where the body is still there and is JSON;
+a row whose body is gone or is not JSON keeps an empty value and is compared by `body_sha256`.
 
 For a `format_policy` alert the owner's recorded policy is the primary source (constitution I): `source`
 is `format-policy`, `url` is empty, `retrieved_at` is the check time, `matched_identifier` is the file's
@@ -90,7 +99,7 @@ check's scan would hold (with the scanner version), the body is the recorded sca
 | `alert_id` | |
 | `model_id`, `opened_in_version`, `current_version` | The version that first showed the cause, and the latest version still showing it |
 | `kind` | `package_advisory`, `weight_file_scan`, `hub_scan` or `format_policy` |
-| `cause_key` | For `package_advisory`: `kind` plus advisory id plus normalised package name; for `weight_file_scan`, `hub_scan` and `format_policy`: `kind` plus file SHA-256 |
+| `cause_key` | For `package_advisory`: `kind` plus the primary advisory id of its alias group plus normalised package name; for `weight_file_scan`, `hub_scan` and `format_policy`: `kind` plus file SHA-256 |
 | `severity` | `package_advisory`: per research R3; `weight_file_scan`: `HIGH`; `hub_scan`: `HIGH`; `format_policy`: `MODERATE` |
 | `severity_origin` | `package_advisory`: per research R3; `weight_file_scan`, `hub_scan` and `format_policy`: `policy` (a fixed rule of this service, not a value from the source) |
 | `state` | `open`, `fixed`, `dismissed`, `withdrawn` or `cleared` |
@@ -101,6 +110,23 @@ Rules:
 
 - At most one `open` alert per `model_id` and `cause_key` (FR-010): one open alert per model, advisory
   and package, carried forward across versions.
+- One `package_advisory` alert per vulnerability (feature 006). OSV records returned for the same
+  package version that alias each other, directly or through other records (one names the other in
+  `aliases`, or both name the same alias), form one alias group and raise one alert. Its primary id is
+  the GHSA id if the group has one (the lexicographically first if several), else the
+  lexicographically first id; `cause.advisory_ids` lists every id, primary first, then the others in
+  lexicographic order. `aliases`, `affected` and `fixed` are the union over the records; `severity` is
+  the highest across them (research R3 per record), with `severity_origin` from that record and
+  `cause.severity_from` naming it; the evidence is one record per OSV record. When a group's primary id
+  changes (a new GHSA record joins, or the primary is withdrawn) the open alert is kept and rekeyed.
+- Open alerts stored for ids that are now one group (before feature 006 each record had its own):
+  at the next check the one keyed by the primary id is kept (else the oldest is kept and rekeyed) and
+  each other closes as `cleared`, with a note naming the merged alert and the group's records as
+  evidence; the source itself shows the cause is the same one (constitution III).
+- A merged alert closes as `withdrawn` only when every record of its group is withdrawn, and as
+  `cleared` only when OSV and the local evaluation agree the pinned version is unaffected by every
+  record that is not withdrawn. A withdrawn record of a group that still matches is linked as evidence
+  and dropped from `advisory_ids`; the alert stays open.
 - An alert is raised only on a confirmed match: for packages, OSV's match and the local consistency
   check on the same OSV record agree (research R2); for weight files, a `dangerous` scan result or an explicit hub "unsafe" verdict
   for the matching hash (R4, R5); under the `strict` format policy, a code-capable file with no
@@ -120,7 +146,8 @@ Rules:
             confirmed match
  (none) ───────────────────────▶ open
  open ── new version without the cause ─────────▶ fixed      (closed_by_version = that version)
- open ── advisory withdrawn ────────────────────▶ withdrawn  (withdrawal kept as evidence)
+ open ── advisory withdrawn (every record of its alias group) ──▶ withdrawn  (withdrawal kept as evidence)
+ open ── another alert of the same model now in its alias group is kept ──▶ cleared  (note names the kept alert; the group's records kept as evidence)
  open ── advisory ranges narrowed past the pinned version (OSV and local agree) ──▶ cleared  (new response kept as evidence)
  open ── hub verdict for the matching hash changes from unsafe to explicit safe ──▶ cleared  (new verdict kept as evidence)
  open ── format policy changed from strict to default ──▶ cleared  (recorded policy kept as evidence)

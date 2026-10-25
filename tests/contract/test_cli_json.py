@@ -32,8 +32,16 @@ ALERT_KEYS = {
     "opened_in_version",
     "evidence",
 }
-CAUSE_KEYS = {"advisory_id", "aliases", "package", "version", "fixed"}
-EVIDENCE_KEYS = {"source", "url", "retrieved_at", "matched_identifier", "body_sha256", "detail"}
+CAUSE_KEYS = {"advisory_id", "advisory_ids", "aliases", "package", "version", "fixed"}
+EVIDENCE_KEYS = {
+    "source",
+    "url",
+    "retrieved_at",
+    "matched_identifier",
+    "body_sha256",
+    "canonical_sha256",
+    "detail",
+}
 WATCH_KEYS = {"kind", "identifier", "detail"}
 HISTORY_KEYS = {"model_id", "current_version", "history"}
 HISTORY_ITEM_KEYS = {
@@ -105,6 +113,7 @@ def _check_evidence(evidence: list[dict[str, Any]]) -> None:
         assert set(record) >= EVIDENCE_KEYS
         assert record["retrieved_at"].endswith("Z")
         assert len(record["body_sha256"]) == 64
+        assert record["canonical_sha256"] is None or len(record["canonical_sha256"]) == 64
         assert record["matched_identifier"]
 
 

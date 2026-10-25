@@ -13,7 +13,13 @@ from pathlib import Path
 
 import pytest
 
-from model_dependabot.reports import alerts_report, alerts_text, history_report, history_text
+from model_dependabot.reports import (
+    _cause_text,
+    alerts_report,
+    alerts_text,
+    history_report,
+    history_text,
+)
 from model_dependabot.store import Store
 
 START = datetime(2026, 10, 24, 8, 0, tzinfo=UTC)
@@ -200,3 +206,17 @@ def test_empty_history(store: Store) -> None:
     report = history_report(store, MODEL)
     assert report["history"] == []
     assert "History (0)" in history_text(report)
+
+
+def test_a_merged_package_alert_names_every_id() -> None:
+    cause = {
+        "advisory_id": "GHSA-aaaa-bbbb-cccc",
+        "advisory_ids": ["GHSA-aaaa-bbbb-cccc", "PYSEC-2026-1"],
+        "package": "pillow",
+        "version": "12.3.0",
+        "fixed": ["13.0.0"],
+    }
+    text = _cause_text("package_advisory", cause)
+    assert text == "GHSA-aaaa-bbbb-cccc (also PYSEC-2026-1) pillow==12.3.0 (fixed: 13.0.0)"
+    one = _cause_text("package_advisory", {**cause, "advisory_ids": ["GHSA-aaaa-bbbb-cccc"]})
+    assert one == "GHSA-aaaa-bbbb-cccc pillow==12.3.0 (fixed: 13.0.0)"

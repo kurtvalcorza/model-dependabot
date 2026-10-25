@@ -102,7 +102,11 @@ into alerts by repetition.
 
 A package alert needs OSV's match and a local evaluation of the same OSV record to agree. The local
 evaluation is a consistency check, not a second source: when the two disagree, or the record's ranges
-cannot be read, the result is a watch event that says which. The hub's scan verdict describes the
+cannot be read, the result is a watch event that says which. Alerts count vulnerabilities, not
+records: when OSV returns several records for the same package version that alias each other (for
+example a `PYSEC` and a `GHSA` id for one flaw), they raise one alert that lists every id, known by
+the GHSA id where there is one, with the highest of their severities and each record as evidence.
+The hub's scan verdict describes the
 repository's head commit; for a file pinned at another revision the head file's hash is compared with
 the pinned one before a clean result is accepted.
 
@@ -277,7 +281,10 @@ Every alert and watch event links to its evidence: the source, the URL, when it 
 identifier matched (for example `pkg:pypi/pillow@12.3.0` or `sha256:...`) and the SHA-256 of the raw
 response. The database is one SQLite file (`--db`); the raw responses are kept as files in an `evidence/`
 folder beside it, each named by its SHA-256, so any alert can be traced back to exactly what a source
-said at the time. A recorded model version and its inventory are immutable. Back up the database and the
+said at the time. For a JSON response the evidence also keeps `canonical_sha256`, the hash of its
+canonical form (sorted keys, no insignificant whitespace), and a later response from the same URL
+with the same canonical hash is the same evidence, so an advisory served again with different bytes
+but the same content adds nothing. A recorded model version and its inventory are immutable. Back up the database and the
 `evidence/` folder together.
 
 Personal data is removed before a response is stored: the takedown log keeps only `date` and

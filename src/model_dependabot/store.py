@@ -14,6 +14,12 @@ is not migrated. The ETag cache (``etag_cache``, read through ``EtagCache``) is 
 way, so an existing database gains it when opened; its ``used_at`` column, added after the table,
 is added to an older table on open. One data migration runs on open: open repository-wide alerts
 written with a revision in their cause key are rekeyed by repository (``_rekey_repository_alerts``).
+
+Feature 006 adds the evidence field ``canonical_sha256``: for a body that is JSON, the SHA-256 of
+its canonical form (``canonical_sha256``), so two responses from the same source and URL that
+differ only in key order or whitespace count as the same evidence (``same_evidence``). The raw
+bytes are still the stored body. A database without the column gains it on open, and its rows get
+the hash from their stored bodies where the body is still there and is JSON.
 """
 
 from __future__ import annotations
@@ -159,7 +165,8 @@ CREATE TABLE IF NOT EXISTS evidence (
     detail TEXT,
     run_id INTEGER REFERENCES check_runs (run_id),
     original_sha256 TEXT NOT NULL CHECK (length(original_sha256) = 64),
-    redacted_fields TEXT NOT NULL DEFAULT '[]'
+    redacted_fields TEXT NOT NULL DEFAULT '[]',
+    canonical_sha256 TEXT CHECK (canonical_sha256 IS NULL OR length(canonical_sha256) = 64)
 );
 
 CREATE TABLE IF NOT EXISTS upstream_observations (
@@ -341,6 +348,32 @@ def _loads(text: str | None) -> Any:
     return None if text is None else json.loads(text)
 
 
+def canonical_sha256(body: bytes) -> str | None:
+    """The SHA-256 of a JSON body in canonical form, or ``None`` for a body that is not JSON.
+
+    The canonical form is the parsed value written with sorted keys, no insignificant whitespace
+    and UTF-8 without escaping, so it changes only when the content does (feature 006, E1).
+    """
+    try:
+        value = json.loads(body.decode("utf-8"))
+    except ValueError:  # UnicodeDecodeError and JSONDecodeError are both ValueErrors
+        return None
+    text = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def content_key(evidence: Mapping[str, Any]) -> str:
+    """What makes two evidence bodies the same: the canonical hash for JSON, else the raw hash."""
+    return str(evidence.get("canonical_sha256") or evidence["body_sha256"])
+
+
+def same_evidence(evidence: Mapping[str, Any], source: str, url: str, body: bytes) -> bool:
+    """Whether ``body`` from ``source`` at ``url`` is the content ``evidence`` already holds."""
+    if evidence["source"] != source or evidence["url"] != url:
+        return False
+    return content_key(evidence) == (canonical_sha256(body) or hashlib.sha256(body).hexdigest())
+
+
 class Store:
     """The service's database and evidence store, opened from a database path."""
 
@@ -361,8 +394,36 @@ class Store:
                 self.conn.execute(
                     "ALTER TABLE model_versions ADD COLUMN registration_record_sha256 TEXT"
                 )
+        if "canonical_sha256" not in self.columns("evidence"):
+            self._add_canonical_hashes()
         self._widen_watch_kinds()
         self._rekey_repository_alerts()
+
+    def _add_canonical_hashes(self) -> None:
+        """Add ``evidence.canonical_sha256`` to an older database and fill it where it can (006).
+
+        A row whose body is no longer in the evidence store, or is not JSON, keeps an empty value
+        and is compared by its raw hash, as before.
+        """
+        with self.conn:
+            self.conn.execute(
+                "ALTER TABLE evidence ADD COLUMN canonical_sha256 TEXT"
+                " CHECK (canonical_sha256 IS NULL OR length(canonical_sha256) = 64)"
+            )
+            digests = [
+                row["body_sha256"]
+                for row in self.conn.execute("SELECT DISTINCT body_sha256 FROM evidence")
+            ]
+            for digest in digests:
+                try:
+                    canonical = canonical_sha256(self.read_body(digest))
+                except (OSError, ValueError):
+                    continue
+                if canonical is not None:
+                    self.conn.execute(
+                        "UPDATE evidence SET canonical_sha256 = ? WHERE body_sha256 = ?",
+                        (canonical, digest),
+                    )
 
     def _widen_watch_kinds(self) -> None:
         """Rebuild ``watch_events`` when its ``kind`` check predates a kind in ``WATCH_KINDS``.
@@ -673,14 +734,15 @@ class Store:
         """Store ``body`` (already redacted where research U10 applies) and its evidence record.
 
         ``original_sha256`` is the hash of the response as received; it defaults to the stored
-        body's hash, which is right for every source with nothing to redact.
+        body's hash, which is right for every source with nothing to redact. A JSON body also gets
+        its ``canonical_sha256`` (feature 006).
         """
         digest = self.put_body(body)
         with self.conn:
             cursor = self.conn.execute(
                 "INSERT INTO evidence (source, url, retrieved_at, matched_identifier, body_sha256,"
-                " detail, run_id, original_sha256, redacted_fields)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " detail, run_id, original_sha256, redacted_fields, canonical_sha256)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     source,
                     url,
@@ -691,6 +753,7 @@ class Store:
                     run_id,
                     original_sha256 or digest,
                     json.dumps(sorted(redacted_fields)),
+                    canonical_sha256(body),
                 ),
             )
         return int(cursor.lastrowid)
@@ -869,13 +932,25 @@ class Store:
         severity: str,
         severity_origin: str,
         cause: Mapping[str, Any],
+        cause_key: str | None = None,
     ) -> None:
-        """Carry an open alert forward with the source's current values (FR-010)."""
+        """Carry an open alert forward with the source's current values (FR-010).
+
+        ``cause_key`` rekeys it, as when an alias group's primary id changes (feature 006).
+        """
         with self.conn:
             cursor = self.conn.execute(
                 "UPDATE alerts SET current_version = ?, severity = ?, severity_origin = ?,"
-                " cause = ? WHERE alert_id = ? AND state = 'open'",
-                (current_version, severity, severity_origin, json.dumps(cause), alert_id),
+                " cause = ?, cause_key = COALESCE(?, cause_key)"
+                " WHERE alert_id = ? AND state = 'open'",
+                (
+                    current_version,
+                    severity,
+                    severity_origin,
+                    json.dumps(cause),
+                    cause_key,
+                    alert_id,
+                ),
             )
         if cursor.rowcount != 1:
             raise ValueError(f"alert {alert_id} is not open")
