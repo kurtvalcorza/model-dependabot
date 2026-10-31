@@ -12,7 +12,10 @@ rather than raised again (FR-010): its current version, severity and fixed versi
 source, and a changed record is added as new evidence beside the earlier one. A withdrawn advisory
 closes its alerts as ``withdrawn`` with the withdrawn record as evidence (FR-009). OSV leaves
 withdrawn records out of query answers, so the advisory of every open alert is fetched by id on each
-run.
+run. A record OSV answers ``404`` for is gone, not withdrawn and not unaffected: it records an
+``advisory_gone`` watch event with the 404 as evidence, raises nothing, and an alert that stands for
+it stays open until a person dismisses it or a newer version drops the package (review F1, amended
+2026-10-31). The rest of the OSV read is applied as usual.
 
 One alert per vulnerability (feature 006): records OSV returns for the same package version that
 alias each other, directly or through other records, form one group and raise one alert, keyed by
@@ -76,6 +79,7 @@ from model_dependabot.sources.fetcher import Fetcher, Response, SourceFailedErro
 from model_dependabot.sources.osv import (
     SOURCE,
     BatchAnswer,
+    GoneRecord,
     OsvClient,
     VulnRecord,
     aliases,
@@ -97,6 +101,7 @@ from model_dependabot.upstream.observe import observe
 
 PACKAGE_ALERT = "package_advisory"
 UNMATCHED = "advisory_unmatched"
+GONE = "advisory_gone"
 
 WEIGHT_SCAN_ALERT = "weight_file_scan"
 HUB_SCAN_ALERT = "hub_scan"
@@ -163,6 +168,7 @@ class _Target:
 class _OsvRead:
     batch: BatchAnswer
     records: dict[str, VulnRecord]
+    gone: dict[str, GoneRecord] = field(default_factory=dict)
 
 
 def run_check(
@@ -261,8 +267,15 @@ def _read_osv(store: Store, client: OsvClient, targets: list[_Target]) -> _OsvRe
         for alert in store.alerts_for(target.model_id, ["open"]):
             if alert["kind"] == PACKAGE_ALERT:
                 wanted.update(advisory_ids_of(alert))
-    records = {advisory_id: client.vuln(advisory_id) for advisory_id in sorted(wanted)}
-    return _OsvRead(batch, records)
+    records: dict[str, VulnRecord] = {}
+    gone: dict[str, GoneRecord] = {}
+    for advisory_id in sorted(wanted):
+        found = client.vuln(advisory_id)
+        if isinstance(found, GoneRecord):
+            gone[advisory_id] = found  # a 404 by id: the record is gone (review F1)
+        else:
+            records[advisory_id] = found
+    return _OsvRead(batch, records, gone)
 
 
 def advisory_ids_of(alert: Mapping[str, Any]) -> list[str]:
@@ -400,6 +413,9 @@ def _apply_osv(store: Store, run_id: int, read: _OsvRead, target: _Target) -> No
         affected: list[VulnRecord] = []
         details: dict[str, dict[str, Any]] = {}
         for advisory_id in read.batch.matches.get(identifier, []):
+            if advisory_id in read.gone:
+                _gone(run, identifier, read.gone[advisory_id])  # listed, but nothing to match
+                continue
             record = read.records[advisory_id]
             if withdrawn(record.advisory):
                 continue  # closed below if no other record keeps its alert open; never raised
@@ -420,9 +436,14 @@ def _apply_osv(store: Store, run_id: int, read: _OsvRead, target: _Target) -> No
             _raise_or_carry(run, entry, group, details)
 
     for alert in open_alerts:
+        identifier = alert["cause"]["identifier"]
+        missing = [read.gone[a] for a in advisory_ids_of(alert) if a in read.gone]
+        for gone in missing:
+            _gone(run, identifier, gone)
         if alert["alert_id"] in run.claimed:
             continue
-        identifier = alert["cause"]["identifier"]
+        if missing:
+            continue  # a gone record is no answer about the cause: the alert stays open (F1)
         records = [read.records[advisory_id] for advisory_id in advisory_ids_of(alert)]
         live = [record for record in records if not withdrawn(record.advisory)]
         if not live:
@@ -466,6 +487,45 @@ def _apply_osv(store: Store, run_id: int, read: _OsvRead, target: _Target) -> No
             _cache(store, record, evidence_id)
             evidence_ids.append(evidence_id)
         _close(store, target, alert, "cleared", evidence_ids)
+
+
+def _gone(run: _OsvApply, identifier: str, gone: GoneRecord) -> None:
+    """OSV answered 404 for a record: an ``advisory_gone`` watch event, never a closure (F1)."""
+    store, target = run.store, run.target
+    existing = store.get_watch_event(target.model_id, target.version, identifier, GONE)
+    detail: dict[str, Any] = dict(existing["detail"]) if existing else {}
+    advisories = dict(detail.get("advisories") or {})
+    advisories[gone.advisory_id] = {"status": gone.response.status}
+    detail["advisories"] = advisories
+    response = gone.response
+    evidence_id = next(
+        (
+            int(evidence["evidence_id"])
+            for evidence in (existing["evidence"] if existing else [])
+            if same_evidence(evidence, SOURCE, response.url, response.body)
+        ),
+        None,
+    )
+    if evidence_id is None:
+        evidence_id = store.add_evidence(
+            source=SOURCE,
+            url=response.url,
+            retrieved_at=response.retrieved_at,
+            matched_identifier=identifier,
+            body=response.body,
+            detail={"status": response.status},
+            run_id=run.run_id,
+        )
+    watch_event_id = store.record_watch_event(
+        model_id=target.model_id,
+        version=target.version,
+        entry_identifier=identifier,
+        kind=GONE,
+        detail=detail,
+        evidence_ids=[evidence_id],
+    )
+    if watch_event_id not in target.summary["watch_events"]:
+        target.summary["watch_events"].append(watch_event_id)
 
 
 def _withdrawal(run: _OsvApply, alert: Mapping[str, Any], record: VulnRecord) -> int:

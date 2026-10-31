@@ -6,8 +6,10 @@ queried (FR-003); gaps are never matched. More than ``BATCH_LIMIT`` distinct pac
 several batch requests, and a result that carries ``next_page_token`` is followed by re-sending only
 those queries with ``page_token`` set, for at most ``MAX_PAGES`` further rounds.
 OSV leaves withdrawn records out of query answers, so a withdrawal is seen by fetching an open
-alert's advisory by its id. Any failure to read the source, an error status or an answer that
-cannot be read is a ``SourceFailedError`` for ``osv.dev`` (FR-016).
+alert's advisory by its id. A ``404`` for a record fetched by its id is an answer, not a failure:
+OSV no longer has that record, and ``vuln`` returns a ``GoneRecord`` (review F1, amended
+2026-10-31). Any other failure to read the source, any other error status or an answer that cannot
+be read is a ``SourceFailedError`` for ``osv.dev`` (FR-016).
 """
 
 from __future__ import annotations
@@ -54,6 +56,18 @@ class VulnRecord:
     """One OSV record and the response it was read from (the evidence)."""
 
     advisory: dict[str, Any]
+    response: Response
+
+
+@dataclass(frozen=True)
+class GoneRecord:
+    """OSV answered ``404`` for a record fetched by its id: the record is gone (review F1).
+
+    A gone record is neither withdrawn nor unaffected, so it never closes an alert; the 404
+    response is kept as evidence of the answer.
+    """
+
+    advisory_id: str
     response: Response
 
 
@@ -147,8 +161,10 @@ class OsvClient:
             raise SourceFailedError(SOURCE, "the batch answer holds a result that is not an object")
         return response, results
 
-    def vuln(self, advisory_id: str) -> VulnRecord:
+    def vuln(self, advisory_id: str) -> VulnRecord | GoneRecord:
         response = self.fetcher.get(f"{self.api}/vulns/{advisory_id}")
+        if response.status == 404:
+            return GoneRecord(advisory_id, response)
         advisory = _read(response)
         if not isinstance(advisory, dict) or advisory.get("id") != advisory_id:
             raise SourceFailedError(SOURCE, f"the record for {advisory_id} is not that advisory")

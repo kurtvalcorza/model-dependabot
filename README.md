@@ -106,6 +106,8 @@ cannot be read, the result is a watch event that says which. Alerts count vulner
 records: when OSV returns several records for the same package version that alias each other (for
 example a `PYSEC` and a `GHSA` id for one flaw), they raise one alert that lists every id, known by
 the GHSA id where there is one, with the highest of their severities and each record as evidence.
+A record OSV no longer has (a 404 for its id) is an `advisory_gone` watch event: its alert stays open,
+and the rest of the OSV check goes ahead.
 The hub's scan verdict describes the
 repository's head commit; for a file pinned at another revision the head file's hash is compared with
 the pinned one before a clean result is accepted.

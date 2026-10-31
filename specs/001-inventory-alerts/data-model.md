@@ -170,7 +170,7 @@ Dismissal reasons (fixed list): `not_used_at_runtime`, `risk_accepted`, `false_p
 | Field | Rule |
 | :-- | :-- |
 | `model_id`, `version`, `entry identifier` | |
-| `kind` | `pickle_format`, `scan_suspicious`, `scan_incomplete`, `hub_scan_unknown`, `advisory_unmatched`, `hash_mismatch` or `weight_file_absent` (a `picklescan` check of a file registered from a record whose bytes are not on this machine; its `detail` holds the location, the reason and the record's SHA-256) |
+| `kind` | `pickle_format`, `scan_suspicious`, `scan_incomplete`, `hub_scan_unknown`, `advisory_unmatched`, `hash_mismatch`, `weight_file_absent` (a `picklescan` check of a file registered from a record whose bytes are not on this machine; its `detail` holds the location, the reason and the record's SHA-256) or `advisory_gone` (OSV answered 404 for a record fetched by its id; its `detail` maps each such id to the status, and the 404 is its evidence; research R2, amended 2026-10-31) |
 | `evidence` | As for alerts; for `scan_incomplete`, `detail` holds the scanner and the byte position it reached (FR-022) |
 | `first_seen`, `last_seen` | One record per cause, updated on each run |
 

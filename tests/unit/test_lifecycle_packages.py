@@ -326,3 +326,76 @@ def test_an_open_alert_is_not_cleared_when_the_local_check_cannot_evaluate(
     assert CP9V in _open(store, "m")
     [event] = store.watch_events("m")
     assert event["detail"]["advisories"][CP9V]["local_unevaluated"]
+
+
+# --- A record OSV no longer has (review F1, amended 2026-10-31) ----------------------------------
+
+NOT_FOUND = '{"code":5,"message":"Bug not found."}'
+
+
+def _gone(root: Path, advisory_id: str, status: int = 404) -> Path:
+    """Make ``GET /v1/vulns/{advisory_id}`` answer ``status`` in the derived recordings."""
+    meta_path = root / f"vuln-{advisory_id}.meta.json"
+    meta = json.loads(meta_path.read_text("utf-8"))
+    meta["status"] = status
+    meta_path.write_text(json.dumps(meta), "utf-8")
+    (root / f"vuln-{advisory_id}.json").write_text(NOT_FOUND, "utf-8")
+    return root
+
+
+def _unlist(advisory_id: str) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    def change(answer: dict[str, Any]) -> dict[str, Any]:
+        for result in answer["results"]:
+            result["vulns"] = [v for v in result.get("vulns") or [] if v["id"] != advisory_id]
+        return answer
+
+    return change
+
+
+def test_a_record_gone_from_osv_keeps_its_alert_open_and_the_source_ok(
+    store: Store, derive_osv: Callable[..., Path]
+) -> None:
+    _register(store, "m", VULNERABLE)
+    _check(store, OSV, "m")
+    before = _open(store, "m")
+    assert set(before) == {CP9V, R24}
+
+    root = _gone(derive_osv({"querybatch-vulnerable": _unlist(R24)}), R24)
+    for _ in range(2):
+        outcome = _check(store, root, "m")
+        assert outcome.sources == {"osv": "ok"}
+        assert not outcome.failed
+        after = _open(store, "m")
+        assert set(after) == {CP9V, R24}  # a 404 never closes an alert, as fixed or otherwise
+        assert after[R24]["alert_id"] == before[R24]["alert_id"]
+        assert after[CP9V]["alert_id"] in outcome.models[0]["carried_forward"]
+    [event] = [e for e in store.watch_events("m") if e["kind"] == "advisory_gone"]
+    assert event["entry_identifier"] == PILLOW
+    assert event["detail"]["advisories"] == {R24: {"status": 404}}
+    [evidence] = event["evidence"]  # the same 404 twice is one piece of evidence
+    assert evidence["url"] == f"https://api.osv.dev/v1/vulns/{R24}"
+    assert evidence["detail"] == {"status": 404}
+
+
+def test_a_listed_record_that_is_gone_raises_no_alert(
+    store: Store, derive_osv: Callable[..., Path]
+) -> None:
+    _register(store, "m", VULNERABLE)
+    outcome = _check(store, _gone(derive_osv(), R24), "m")
+    assert outcome.sources == {"osv": "ok"}
+    assert set(_open(store, "m")) == {CP9V}
+    [event] = [e for e in store.watch_events("m") if e["kind"] == "advisory_gone"]
+    assert event["detail"]["advisories"] == {R24: {"status": 404}}
+
+
+@pytest.mark.parametrize("status", [403, 410, 500])
+def test_any_other_error_status_for_a_record_still_fails_the_source(
+    store: Store, derive_osv: Callable[..., Path], status: int
+) -> None:
+    _register(store, "m", VULNERABLE)
+    _check(store, OSV, "m")
+    snapshot = store.alerts_for("m")
+    outcome = _check(store, _gone(derive_osv(), R24, status), "m")
+    assert outcome.failed
+    assert outcome.sources["osv"] == f"failed: HTTP {status} for https://api.osv.dev/v1/vulns/{R24}"
+    assert store.alerts_for("m") == snapshot

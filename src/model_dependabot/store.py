@@ -82,6 +82,8 @@ WATCH_KINDS = (
     "upstream_notice",
     # feature 005 (contracts/registration-record.md)
     "weight_file_absent",
+    # review F1, amended 2026-10-31: OSV answered 404 for a record fetched by its id
+    "advisory_gone",
 )
 TRIGGERS = ("scheduled", "on_demand")
 OUTCOMES = ("reachable", "refused", "not_found", "removed", "redirected")
