@@ -256,3 +256,59 @@ def test_validation_never_needs_the_unvendored_cryptography_schema(bom: dict[str
     with pytest.raises(Unresolvable):
         validate(crypto)
     validate(bom)
+
+
+# --- a weight file's class must fit its name (review F8, amended 2026-10-31) ---------------------
+
+
+def _weight_bom(name: str, file_format: str, can_run_code: str) -> dict[str, Any]:
+    return {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.7",
+        "components": [
+            {
+                "type": "file",
+                "name": name,
+                "hashes": [{"alg": "SHA-256", "content": "a" * 64}],
+                "properties": [
+                    {"name": f"{PREFIX}format", "value": file_format},
+                    {"name": f"{PREFIX}can-run-code", "value": can_run_code},
+                ],
+            }
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    ("name", "file_format", "can_run_code"),
+    [
+        ("weights/best.pt", "safetensors", "false"),
+        ("weights/best.pt", "pickle", "false"),
+        ("model.safetensors", "pickle", "true"),
+        ("model.safetensors", "pytorch-zip", "true"),
+        ("model.onnx", "safetensors", "false"),
+        ("model.weights", "safetensors", "false"),
+    ],
+)
+def test_a_weight_class_that_does_not_fit_the_name_is_refused(
+    name: str, file_format: str, can_run_code: str
+) -> None:
+    with pytest.raises(InventoryError, match="does not fit the file name"):
+        import_bom(_weight_bom(name, file_format, can_run_code))
+
+
+@pytest.mark.parametrize(
+    ("name", "file_format", "can_run_code"),
+    [
+        ("weights/best.pt", "pickle", "true"),
+        ("weights/best.pt", "pytorch-zip", "true"),  # only the bytes show a zip
+        ("model.bin", "pytorch-zip", "true"),
+        ("model.safetensors", "safetensors", "false"),
+        ("model.weights", "pytorch-zip", "true"),
+    ],
+)
+def test_a_weight_class_that_fits_the_name_is_imported(
+    name: str, file_format: str, can_run_code: str
+) -> None:
+    [entry] = import_bom(_weight_bom(name, file_format, can_run_code))
+    assert (entry["format"], entry["can_run_code"]) == (file_format, can_run_code == "true")

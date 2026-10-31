@@ -25,7 +25,7 @@ from typing import Any
 
 from model_dependabot import __version__
 from model_dependabot.inventory.build import (
-    CODE_FREE_FORMATS,
+    class_fits_name,
     classify,
     hash_stream,
     new_entry,
@@ -204,11 +204,7 @@ def load_record(path: Path | str) -> dict[str, Any]:
 
 
 def _check_class(location: str, file_format: Any, can_run_code: Any) -> None:
-    by_name = classify(location, None)
-    allowed = {by_name}
-    if by_name[0] not in CODE_FREE_FORMATS.values():
-        allowed.add(("pytorch-zip", True))  # only the bytes show a zip; the name cannot rule it out
-    if (file_format, can_run_code) not in allowed:
+    if not class_fits_name(location, file_format, can_run_code):
         raise RecordError(
             f"{location}: format {file_format!r} with can_run_code {can_run_code!r} does not fit"
             " the file name"

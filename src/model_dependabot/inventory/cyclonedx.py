@@ -39,6 +39,7 @@ from model_dependabot.inventory.build import (
     NO_DOI,
     NO_REVISION,
     NOT_A_COMMIT,
+    class_fits_name,
     classify,
     gap,
     hub_dataset_identifier,
@@ -375,6 +376,13 @@ def _import_weight(item: dict[str, Any]) -> dict[str, Any]:
     distribution = _references(item, "distribution")
     if P_FORMAT in props:
         file_format, can_run_code = props[P_FORMAT], _bool(props.get(P_CAN_RUN_CODE))
+        if not class_fits_name(name, file_format, can_run_code):
+            # The document's own class is not trusted blindly (review F8): a code-capable file
+            # described as code-free would never be scanned.
+            raise InventoryError(
+                f"{name}: format {file_format!r} with can-run-code"
+                f" {props.get(P_CAN_RUN_CODE)!r} does not fit the file name"
+            )
     else:
         file_format, can_run_code = classify(name, None)
     identifier = sha256[0] if sha256 else None
