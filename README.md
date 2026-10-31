@@ -148,10 +148,13 @@ schema is in [contracts/registration-record.md](specs/001-inventory-alerts/contr
 | `base_model_disabled` | The hub reports the base model disabled | `MODERATE` |
 | `base_model_unavailable` | The hub has refused the base model in scheduled checks spanning at least 24 hours | `LOW` |
 
-These severities are set by policy, and the alerts say so (`severity_origin: "policy"`). A retraction,
-licence, disabled or unavailable alert closes as `cleared` when the source that reported it no longer shows
-the cause in a successful, well-formed answer; a licence alert needs every source that reported the change
-to answer so, and a source that failed or was not asked keeps it open. `withdrawn` is used only for an
+These severities are set by policy, and the alerts say so (`severity_origin: "policy"`). A
+`dataset_retracted`, `paper_retracted`, `licence_changed`, `base_model_disabled` or
+`base_model_unavailable` alert closes as `cleared` when the source that reported it no longer shows the
+cause in a successful, well-formed answer; a licence alert needs every source that reported the change
+to answer so, and a source that failed or was not asked keeps it open. `dataset_removed` (a Zenodo
+tombstone or a disabled hub dataset) and `dataset_not_findable` never clear: a hub dataset enabled again
+or a DOI found again leaves the alert open until it is dismissed or a new version no longer pins the item. `withdrawn` is used only for an
 OSV advisory marked withdrawn. Any of them closes as `fixed` when a new version no longer depends on the
 item. A disabled or unavailable base model and a disabled hub dataset are states of the repository, and
 a base model's or hub dataset's licence and a paper tied to a hub dataset are read for the repository, so
