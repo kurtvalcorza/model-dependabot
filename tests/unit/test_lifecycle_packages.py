@@ -438,3 +438,41 @@ def test_a_source_finished_before_the_interruption_keeps_its_status(
     run = store.latest_check_run()
     assert run["sources"]["osv"] == "ok"
     assert run["sources"]["picklescan"] == "failed: run interrupted (RuntimeError: disk full)"
+
+
+# --- One package pinned twice in one lock (review F9, amended 2026-10-31) ------------------------
+
+
+def _pinned_twice(root: Path) -> Path:
+    """The batch for pillow 12.2.0 and 12.3.0 (markers are not evaluated, research R10)."""
+    meta_path = root / "querybatch-vulnerable.meta.json"
+    meta = json.loads(meta_path.read_text("utf-8"))
+    query = meta["request_body"]["queries"][0]
+    meta["request_body"]["queries"].insert(0, query | {"version": "12.2.0"})
+    meta_path.write_text(json.dumps(meta), "utf-8")
+    body_path = root / "querybatch-vulnerable.json"
+    answer = json.loads(body_path.read_text("utf-8"))
+    cp9v = [v for v in answer["results"][0]["vulns"] if v["id"] == CP9V]
+    answer["results"].insert(0, {"vulns": cp9v})
+    body_path.write_text(json.dumps(answer), "utf-8")
+    return root
+
+
+def test_a_package_pinned_twice_keeps_the_first_pin_and_lists_the_other(
+    store: Store, derive_osv: Callable[..., Path]
+) -> None:
+    root = _pinned_twice(derive_osv())
+    entries = [_package("pillow", "12.3.0"), _package("pillow", "12.2.0"), VULNERABLE[1]]
+    _register(store, "m", entries)
+    for _ in range(3):
+        outcome = _check(store, root, "m")
+        assert outcome.sources == {"osv": "ok"}
+        alerts = _open(store, "m")
+        assert set(alerts) == {CP9V, R24}
+        cause = alerts[CP9V]["cause"]
+        assert (cause["version"], cause["identifier"]) == ("12.3.0", PILLOW)
+        assert cause["also_affected"] == ["12.2.0"]
+        assert "also_affected" not in alerts[R24]["cause"]  # 12.2.0 is not listed for it
+        assert len(set(outcome.models[0]["carried_forward"])) == len(
+            outcome.models[0]["carried_forward"]
+        )

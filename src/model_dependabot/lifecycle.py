@@ -56,6 +56,7 @@ from typing import Any
 from urllib.parse import unquote
 
 from packaging.utils import canonicalize_name
+from packaging.version import InvalidVersion, Version
 
 from model_dependabot.inventory.build import HUB_DATASET_PREFIX, hash_stream, huggingface_purl
 from model_dependabot.matching.severity import severity_of, severity_rank
@@ -643,6 +644,13 @@ def _raise_or_carry(
         keeper = min(related, key=lambda alert: alert["alert_id"])
     if keeper is None:
         keeper = store.find_open_alert(target.model_id, cause_key)
+    if keeper is not None and keeper["alert_id"] in run.claimed:
+        # The same package pinned again in this version (markers are not evaluated, R10): the
+        # first pin stays the cause and this one is listed in ``also_affected`` (review F9).
+        cause = _also_affected(keeper["cause"], entry["version"])
+        if severity_rank(keeper["severity"]) <= severity_rank(severity):
+            severity, origin = keeper["severity"], keeper["severity_origin"]
+            cause["severity_from"] = keeper["cause"].get("severity_from")
     linked = store.alert_evidence(keeper["alert_id"]) if keeper else []
     evidence_ids = []
     for record in group:
@@ -687,11 +695,26 @@ def _raise_or_carry(
             cause=cause,
             cause_key=cause_key,
         )
-        target.summary["carried_forward"].append(alert_id)
+        if alert_id not in target.summary["carried_forward"]:
+            target.summary["carried_forward"].append(alert_id)
     run.claimed.update(alert["alert_id"] for alert in related)
     run.claimed.add(alert_id)
     for record, evidence_id in zip(group, evidence_ids, strict=True):
         _cache(store, record, evidence_id)
+
+
+def _version_order(text: str) -> tuple[int, Any]:
+    try:
+        return 0, Version(text)
+    except InvalidVersion:
+        return 1, text
+
+
+def _also_affected(cause: Mapping[str, Any], version: str) -> dict[str, Any]:
+    """``cause`` with another affected pinned ``version`` of its package listed (review F9)."""
+    others = set(cause.get("also_affected") or []) | {version}
+    others.discard(cause["version"])
+    return dict(cause) | {"also_affected": sorted(others, key=_version_order)}
 
 
 def _unmatched(

@@ -126,6 +126,11 @@ Rules:
   the highest across them (research R3 per record), with `severity_origin` from that record and
   `cause.severity_from` naming it; the evidence is one record per OSV record. When a group's primary id
   changes (a new GHSA record joins, or the primary is withdrawn) the open alert is kept and rekeyed.
+- One package pinned at several versions in one version's inventory (markers are not evaluated, research
+  R10) still has one open alert per vulnerability and package: the first affected pin in inventory order is
+  `cause.version` and `cause.identifier`, and `cause.also_affected` lists the other pinned versions that are
+  each evaluated as affected, sorted by version (absent when there are none). It is recomputed at every
+  check; `cause_key` is unchanged. Amended 2026-10-31 after review (F9).
 - Open alerts stored for ids that are now one group (before feature 006 each record had its own):
   at the next check the one keyed by the primary id is kept (else the oldest is kept and rekeyed) and
   each other closes as `cleared`, with a note naming the merged alert and the group's records as
