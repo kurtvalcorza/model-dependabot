@@ -33,7 +33,7 @@ from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urljoin, urlsplit
 
 from model_dependabot import __version__
-from model_dependabot.redact import redact, source_for_url
+from model_dependabot.redact import RedactionError, redact, source_for_url
 
 DEFAULT_USER_AGENT = f"model-dependabot/{__version__}"
 MAX_REDIRECTS = 5
@@ -144,12 +144,24 @@ def _canonical_body(body: object) -> str | None:
     return json.dumps(body, sort_keys=True, separators=(",", ":"))
 
 
-def _redacted(response: Response, recorded: Mapping[str, Any] | None = None) -> Response:
+TAKEDOWNS = "hf-takedowns"
+
+
+def _redacted(
+    response: Response, recorded: Mapping[str, Any] | None = None, asked: str | None = None
+) -> Response:
     """``response`` with its body passed through the source's redaction rule (research U10).
 
     A recording made redacted carries the original hash and fields in its meta file; they are kept.
+    ``asked`` is the source of the URL the caller asked for: when that is the takedown log, every
+    hop is redacted as the log, whatever host a redirect led to, and a body that cannot be
+    redacted fails the source instead of being kept (review F4, amended 2026-10-31).
     """
-    result = redact(source_for_url(response.url), response.body)
+    source = TAKEDOWNS if asked == TAKEDOWNS else source_for_url(response.url)
+    try:
+        result = redact(source, response.body)
+    except RedactionError as error:
+        raise SourceFailedError(source_of(response.url), str(error)) from None
     original = result.original_sha256
     fields = set(result.redacted_fields)
     if recorded:
@@ -178,14 +190,18 @@ def open_without_redirects(request: urllib.request.Request, timeout: float) -> A
 
 
 def _follow(
-    send: Callable[[str, str, bytes | None], Response],
+    send: Callable[[str, str, bytes | None, str | None], Response],
     method: str,
     url: str,
     body: bytes | None,
     follow_redirects: bool,
 ) -> Response:
-    """``send`` one request and, unless the caller opts out, follow its redirects (GET and HEAD)."""
-    response = send(method, url, body)
+    """``send`` one request and, unless the caller opts out, follow its redirects (GET and HEAD).
+
+    Every hop is redacted under the rule of the URL asked for as well as its own (``_redacted``).
+    """
+    asked = source_for_url(url)
+    response = send(method, url, body, asked)
     if not follow_redirects or method == "POST":
         return response
     hops = 0
@@ -193,7 +209,7 @@ def _follow(
         if hops >= MAX_REDIRECTS:
             raise SourceFailedError(source_of(url), f"more than {MAX_REDIRECTS} redirects")
         hops += 1
-        response = send(method, response.redirected_to, None)
+        response = send(method, response.redirected_to, None, asked)
     return replace(response, redirected_from=url) if hops else response
 
 
@@ -230,7 +246,9 @@ class RecordedFetcher:
     def post(self, url: str, body: bytes) -> Response:
         return self._serve("POST", url, body)
 
-    def _serve(self, method: str, url: str, body: bytes | None) -> Response:
+    def _serve(
+        self, method: str, url: str, body: bytes | None, asked: str | None = None
+    ) -> Response:
         self.requests.append((method, url, body))
         key = (method, url, _canonical_body(body))
         if key not in self._recordings:
@@ -247,7 +265,7 @@ class RecordedFetcher:
             redirected_from=url if meta.get("redirected_to") else None,
             redirected_to=meta.get("redirected_to"),
         )
-        return _redacted(response, meta)
+        return _redacted(response, meta, asked)
 
 
 Opener = Callable[..., Any]
@@ -307,12 +325,16 @@ class UrlFetcher:
     def post(self, url: str, body: bytes) -> Response:
         return self._send("POST", url, body)
 
-    def _send(self, method: str, url: str, body: bytes | None) -> Response:
+    def _send(
+        self, method: str, url: str, body: bytes | None, asked: str | None = None
+    ) -> Response:
         # One request at a time per source (research U13).
         with self._locks.setdefault(source_of(url), threading.Lock()):
-            return self._send_one(method, url, body)
+            return self._send_one(method, url, body, asked)
 
-    def _send_one(self, method: str, url: str, body: bytes | None) -> Response:
+    def _send_one(
+        self, method: str, url: str, body: bytes | None, asked: str | None = None
+    ) -> Response:
         source = source_of(url)
         if source in self.failed_sources:
             raise SourceFailedError(source, self.failed_sources[source])
@@ -330,7 +352,7 @@ class UrlFetcher:
             try:
                 request = self._build(method, url, body, etag=etag)
                 with self._opener(request, timeout=self._timeout) as raw:
-                    response = self._answer(url, raw.status, raw.read(), raw.headers, cached)
+                    response = self._answer(url, raw.status, raw.read(), raw.headers, cached, asked)
                 self._429s[source] = 0
                 self._cache[key] = response
                 return response
@@ -338,7 +360,7 @@ class UrlFetcher:
                 status = error.code
                 reason = f"HTTP {status}"
                 if status < 400:
-                    response = self._answer(url, status, error.read(), error.headers, cached)
+                    response = self._answer(url, status, error.read(), error.headers, cached, asked)
                     self._cache[key] = response
                     return response
                 if status == 429:
@@ -346,7 +368,7 @@ class UrlFetcher:
                     if self._429s[source] >= self._max_429s:
                         self._fail(source, f"HTTP 429 {self._429s[source]} times")
                 elif status < 500:
-                    response = self._answer(url, status, error.read(), error.headers, None)
+                    response = self._answer(url, status, error.read(), error.headers, None, asked)
                     self._cache[key] = response
                     return response
                 retry_after = self._retry_after(error.headers)
@@ -372,17 +394,25 @@ class UrlFetcher:
             headers["If-None-Match"] = etag
         return urllib.request.Request(url, data=body, headers=headers, method=method)
 
-    def _response(self, status: int, body: bytes, url: str, headers: Any) -> Response:
+    def _response(
+        self, status: int, body: bytes, url: str, headers: Any, asked: str | None = None
+    ) -> Response:
         items = headers.items() if headers is not None else ()
-        return _redacted(Response(status, body, url, self._utcnow(), Headers(items)))
+        return _redacted(Response(status, body, url, self._utcnow(), Headers(items)), None, asked)
 
     def _answer(
-        self, url: str, status: int, body: bytes, headers: Any, cached: Response | None
+        self,
+        url: str,
+        status: int,
+        body: bytes,
+        headers: Any,
+        cached: Response | None,
+        asked: str | None = None,
     ) -> Response:
         """A response as recorded: a 304 served from the ETag cache, a 3xx with its target."""
         if status == 304 and cached is not None:
             return replace(cached, retrieved_at=self._utcnow(), not_modified=True)
-        response = self._response(status, body, url, headers)
+        response = self._response(status, body, url, headers, asked)
         if 300 <= status < 400:
             target = _location(url, headers)
             return replace(response, redirected_from=url, redirected_to=target)

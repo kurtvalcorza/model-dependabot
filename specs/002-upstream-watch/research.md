@@ -250,6 +250,12 @@ SHA-256 of the original body, the SHA-256 of the stored body and the list of fie
 privacy constraint. Recording the original hash keeps the evidence checkable against the source (constitution
 I) without keeping the personal fields.
 
+The rule set is chosen by the URL the request was for, not only by the host that finally answered: every hop
+of a request for the takedown log is redacted as the log, so a redirect to another host (a CDN such as
+`cdn-lfs.hf.co` or `cas-bridge.xethub.hf.co`) cannot bring the unredacted CSV into the evidence store or the
+ETag cache. The log's rule fails closed: a body that cannot be read as UTF-8 CSV fails the source and is not
+stored. Amended 2026-10-31 after review (F4): the rule had been keyed on the final URL's host and path only.
+
 ## U11. Inventory additions: licences, paper ties and hub datasets in standard CycloneDX fields
 
 **Decision**: Extend feature 001's inventory profile ([contract](contracts/inventory-profile.md)):

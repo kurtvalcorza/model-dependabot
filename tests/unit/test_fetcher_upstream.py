@@ -18,7 +18,12 @@ from pathlib import Path
 
 import pytest
 
-from model_dependabot.sources.fetcher import DEFAULT_LIMITS, RecordedFetcher, UrlFetcher
+from model_dependabot.sources.fetcher import (
+    DEFAULT_LIMITS,
+    RecordedFetcher,
+    SourceFailedError,
+    UrlFetcher,
+)
 from model_dependabot.store import Store
 
 NOW = datetime(2026, 10, 24, 8, 0, 0, tzinfo=UTC)
@@ -423,3 +428,71 @@ def test_head_is_allowed_and_writes_are_not() -> None:
     for method in ("PUT", "DELETE", "PATCH"):
         with pytest.raises(ValueError, match="only reads"):
             fetcher._build(method, "https://zenodo.org/api/records/1", None)
+
+
+# --- the takedown log redacted on every hop (review F4, amended 2026-10-31) -----------------------
+
+CDN = [
+    "https://cas-bridge.xethub.hf.co/xet-bridge-us/0123abcd/index.csv?X-Amz-Signature=s",
+    "https://cdn-lfs.hf.co/repos/aa/bb/index.csv?Expires=1",
+    "https://cdn.example.net/index.csv",
+]
+
+
+def _to(target: str, body: bytes, **headers: str):
+    def answer(request: urllib.request.Request):
+        if request.full_url == INDEX:
+            return 302, b"", {"Location": target}
+        return 200, body, {"Content-Type": "text/csv", **headers}
+
+    return answer
+
+
+@pytest.mark.parametrize("target", CDN)
+def test_the_takedown_log_is_redacted_when_a_redirect_leaves_huggingface_co(target: str) -> None:
+    cache: dict = {}
+    response = fetcher_for(Opener(_to(target, CSV, ETag='"v1"')), etag_cache=cache).get(INDEX)
+    assert response.url == target
+    assert b"A Person" not in response.body and b"f.md" not in response.body
+    assert response.redacted_fields == ("file", "requesting_entity")
+    assert response.original_sha256 == hashlib.sha256(CSV).hexdigest()
+    assert all(b"A Person" not in cached.body for cached in cache.values())
+
+
+@pytest.mark.parametrize("target", CDN)
+def test_a_recorded_takedown_redirect_off_huggingface_co_is_redacted(
+    tmp_path: Path, target: str
+) -> None:
+    (tmp_path / "hop.csv").write_bytes(b"")
+    (tmp_path / "index.csv").write_bytes(CSV)
+    hop = {"method": "GET", "url": INDEX, "status": 302, "headers": {"location": target}}
+    hop |= {"redirected_to": target, "retrieved_at": "2026-10-24T08:00:00Z", "body_file": "hop.csv"}
+    final = {"method": "GET", "url": target, "status": 200, "headers": {}}
+    final |= {"retrieved_at": "2026-10-24T08:00:00Z", "body_file": "index.csv"}
+    (tmp_path / "hop.meta.json").write_text(json.dumps(hop), "utf-8")
+    (tmp_path / "index.meta.json").write_text(json.dumps(final), "utf-8")
+    response = RecordedFetcher(tmp_path).get(INDEX)
+    assert b"A Person" not in response.body
+    assert response.redacted_fields == ("file", "requesting_entity")
+
+
+@pytest.mark.parametrize("body", [b"\xff\xfe\x00garbled", b"\x1f\x8b\x08\x00\x00\x00\x00\x00"])
+def test_a_takedown_log_that_cannot_be_redacted_is_not_stored(body: bytes) -> None:
+    cache: dict = {}
+    fetcher = fetcher_for(Opener(_to(CDN[0], body, ETag='"v1"')), etag_cache=cache)
+    with pytest.raises(SourceFailedError):
+        fetcher.get(INDEX)
+    assert cache == {}
+    with pytest.raises(SourceFailedError):
+        fetcher_for(Opener(lambda request: (200, body, {}))).get(INDEX)
+
+
+def test_a_redirect_off_huggingface_co_for_another_request_is_not_redacted_as_the_log() -> None:
+    model = "https://huggingface.co/gpt2/resolve/main/config.json"
+    response = fetcher_for(
+        Opener(
+            lambda r: (302, b"", {"Location": CDN[0]}) if r.full_url == model else (200, CSV, {})
+        )
+    ).get(model)
+    assert response.body == CSV
+    assert response.redacted_fields == ()
