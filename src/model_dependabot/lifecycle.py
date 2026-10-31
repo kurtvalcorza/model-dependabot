@@ -47,6 +47,7 @@ dismisses an alert with a listed reason.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -188,6 +189,38 @@ def run_check(
     that failed opens, changes or closes nothing (FR-018).
     """
     run_id = store.start_check_run(scope=scope or ",".join(model_ids), trigger=trigger)
+    statuses: dict[str, str] = {}
+    completed: set[str] = set()
+    try:
+        targets = _check(store, fetcher, model_ids, sources, run_id, statuses, completed)
+    except Exception as error:
+        # Review F7 (amended 2026-10-31): the run is never left unfinished. Each store call
+        # commits on its own, so what was applied before the error is kept; a source that had
+        # not finished is recorded as interrupted, and the error still reaches the caller.
+        reason = f"failed: run interrupted ({type(error).__name__}: {error})"
+        final = {
+            source: statuses[source]
+            if source in statuses and (source in completed or statuses[source] != "ok")
+            else reason
+            for source in sources
+        }
+        with contextlib.suppress(Exception):  # the original error is the one to report
+            store.finish_check_run(run_id, final)
+        raise
+    store.finish_check_run(run_id, statuses)
+    return CheckOutcome(run_id, statuses, [target.summary for target in targets])
+
+
+def _check(
+    store: Store,
+    fetcher: Fetcher,
+    model_ids: Sequence[str],
+    sources: Sequence[str],
+    run_id: int,
+    statuses: dict[str, str],
+    completed: set[str],
+) -> list[_Target]:
+    """The body of ``run_check``: fills ``statuses`` and ``completed`` as each source is done."""
     targets = []
     for model_id in model_ids:
         version = store.latest_version(model_id)
@@ -214,7 +247,6 @@ def run_check(
             )
         )
 
-    statuses: dict[str, str] = {}
     wanted = [source for source in sources if source in UPSTREAM_SOURCES]
     upstream = _read_upstream(store, fetcher, targets, wanted) if wanted else None
     for source in sources:
@@ -248,15 +280,17 @@ def run_check(
         for target in targets:
             _apply_osv(store, run_id, read, target)
         statuses[source] = "ok"
+        completed.add(source)
     if any(source in WEIGHT_SOURCES for source in sources):
         for target in targets:
             _apply_format_rules(store, run_id, target)
+    completed.update(WEIGHT_SOURCES)
     if upstream is not None:
         observed = _Observed(store, run_id)
         for target in targets:
             _apply_upstream(store, target, observed, upstream)
-    store.finish_check_run(run_id, statuses)
-    return CheckOutcome(run_id, statuses, [target.summary for target in targets])
+    completed.update(UPSTREAM_SOURCES)
+    return targets
 
 
 def _read_osv(store: Store, client: OsvClient, targets: list[_Target]) -> _OsvRead:

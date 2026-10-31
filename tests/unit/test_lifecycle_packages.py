@@ -7,6 +7,7 @@ are made from the recordings by the ``derive_osv`` fixture, each one written out
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from model_dependabot import lifecycle
 from model_dependabot.lifecycle import run_check
 from model_dependabot.sources.fetcher import RecordedFetcher
 from model_dependabot.store import Store
@@ -399,3 +401,40 @@ def test_any_other_error_status_for_a_record_still_fails_the_source(
     assert outcome.failed
     assert outcome.sources["osv"] == f"failed: HTTP {status} for https://api.osv.dev/v1/vulns/{R24}"
     assert store.alerts_for("m") == snapshot
+
+
+# --- A run interrupted by an error is still finished (review F7, amended 2026-10-31) -------------
+
+
+def test_a_run_interrupted_mid_apply_is_finished_with_the_reason(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _register(store, "m", VULNERABLE)
+
+    def clash(**_: Any) -> int:
+        raise sqlite3.IntegrityError("UNIQUE constraint failed: alerts.model_id, alerts.cause_key")
+
+    monkeypatch.setattr(store, "insert_alert", clash)
+    with pytest.raises(sqlite3.IntegrityError):
+        run_check(store, RecordedFetcher(OSV), ["m"], ["osv", "picklescan"])
+    run = store.latest_check_run()
+    assert run["finished_at"] is not None
+    assert run["sources"]["osv"].startswith("failed: run interrupted (IntegrityError: UNIQUE")
+    # A source that had not been reached is recorded the same way, never left out.
+    assert run["sources"]["picklescan"].startswith("failed: run interrupted")
+
+
+def test_a_source_finished_before_the_interruption_keeps_its_status(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _register(store, "m", VULNERABLE)
+
+    def boom(*_: Any, **__: Any) -> None:
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(lifecycle, "_apply_format_rules", boom)
+    with pytest.raises(RuntimeError):
+        run_check(store, RecordedFetcher(OSV), ["m"], ["osv", "picklescan"])
+    run = store.latest_check_run()
+    assert run["sources"]["osv"] == "ok"
+    assert run["sources"]["picklescan"] == "failed: run interrupted (RuntimeError: disk full)"

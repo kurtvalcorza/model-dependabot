@@ -63,6 +63,13 @@ A cached copy of a published record.
 
 A source that failed in a run cannot close or change any alert in that run (FR-016).
 
+A run stopped by an unexpected error (exit 3), such as a database constraint hit by a concurrent run, is
+still finished: `finished_at` is set, a source that had completed keeps its status and every other
+requested source is recorded as `failed: run interrupted (<error>)`. Changes are committed as they are
+made, not in one transaction, so what the run applied before the error is kept and the next check
+derives the rest again. Amended 2026-10-31 after review (F7): such a run had been left with no
+`finished_at` and no `sources`.
+
 ## Evidence
 
 | Field | Rule |
