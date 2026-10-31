@@ -2311,9 +2311,13 @@ def _apply_refusal(
     ``target_evidence`` is this run's answer of a renamed base model's target, which the hub
     refused; the observation is then the redirect, recorded as ``refused``.
     """
+    # The run is the repository's, any revision (identity table): re-pinning another revision
+    # of the same repository neither restarts nor breaks it (review F2, amended 2026-10-31).
     item = entry["identifier"]
-    run = refusal_run(store.observations(item, HF_HUB))
-    key = dataset_cause_key(BASE_MODEL_UNAVAILABLE, base_model_repo(entry))
+    repository = base_model_repo(entry)
+    seen = store.observations_in_repository(repository)
+    run = refusal_run([observation for observation in seen if observation["source"] == HF_HUB])
+    key = dataset_cause_key(BASE_MODEL_UNAVAILABLE, repository)
     if run.counted and run.qualifies:
         refusals = [
             {

@@ -158,7 +158,9 @@ at every check.
   the run; a reachable observation from any run ends the run; failed requests are ignored. Because the span
   is measured from the first refusal of the run, daily runs that land a few seconds under 24 hours apart
   still open the alert on the next scheduled run. A refusal that does not meet this records a
-  `base_model_refused` watch event.
+  `base_model_refused` watch event. The run is the repository's: observations of every revision of the
+  pinned repository count, so a re-pin to another revision does not restart it (amended 2026-10-31 after
+  review, F2).
 - `sha` differing from the pinned commit records `base_model_new_revision` (pinned and newest revision);
   `cardData.new_version` records `base_model_new_version_pointer`; a change in `gated` records
   `gating_changed`; a change in the hash of `cardData` with the licence fields (`license`, `license_name`,

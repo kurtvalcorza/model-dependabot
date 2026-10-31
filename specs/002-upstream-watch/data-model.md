@@ -165,7 +165,9 @@ answer that a redirect elsewhere or a misrouted response delivers for the wrong 
 
 **Refusal-span rule** (U7): `base_model_unavailable` opens when an unbroken run of refusal observations from
 scheduled check runs, with no reachable observation from any run in between, spans at least 24 hours from
-its first to its latest refusal. On-demand refusals neither count towards the span nor break the run; a
+its first to its latest refusal. The run is read from the hub observations of every revision of the pinned
+repository, as the alert's identity is (identity table), so re-pinning another revision of the same
+repository neither restarts nor breaks it (amended 2026-10-31 after review, F2). On-demand refusals neither count towards the span nor break the run; a
 reachable observation from any run ends it; failed requests write no observation and are ignored. Any hub
 answer other than a refusal ends a refusal run and clears `base_model_unavailable`, including a 200 with
 `disabled: true`. A redirect (a renamed base model) is judged by its target's answer, read once: a refused
