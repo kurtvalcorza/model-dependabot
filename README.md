@@ -88,7 +88,7 @@ output; both may go before or after the command name.
 | `import BOM.json --model-id ID` | Registers a version from an existing CycloneDX inventory |
 | `inventory show ID [--version N]` | Lists the entries with their identifiers and the gaps with their reasons |
 | `inventory export ID [--version N] -o FILE` | Writes the stored CycloneDX 1.7 inventory, validated against the official schema |
-| `check (ID \| --all) [--scheduled] [--source ...]` | Runs the checks now and records a check run. Sources: `osv`, `picklescan`, `hf-scan`, `hf-hub`, `hf-takedowns`, `crossref`, `datacite`, `zenodo` and `figshare`; without `--source` every source runs. `--scheduled` (with `--all`) marks the run as scheduled; see [Scheduling](#scheduling) |
+| `check (ID \| --all) [--scheduled] [--source ...]` | Runs the checks now and records a check run. Sources: `osv`, `picklescan`, `hf-scan`, `hf-hub`, `hf-takedowns`, `crossref`, `datacite`, `zenodo` and `figshare`; without `--source` every source runs. `--scheduled` marks the run as scheduled and needs `--all` (`check ID --scheduled` exits 1); see [Scheduling](#scheduling) |
 | `policy ID --format (default\|strict) --by NAME` | Sets the model's weight-format policy, recording who set it and when. Under `default` a format that can run code when loaded is a watch event; under `strict` a code-capable weight file with no code-free file beside it in the same version raises an alert. Takes effect at the next check |
 | `alerts ID [--state open\|closed\|all]` | Lists alerts by severity (`CRITICAL`, `HIGH`, `MODERATE`, `LOW`, `UNKNOWN`), then the watch events, each with its evidence |
 | `alert show ALERT_ID` | One alert with all its evidence; for a redacted response, both hashes and the fields removed |

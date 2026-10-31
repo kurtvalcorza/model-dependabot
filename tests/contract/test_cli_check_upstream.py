@@ -51,14 +51,26 @@ def test_check_all_scheduled_records_scheduled(cli: Invoke, db: Path) -> None:
     assert _trigger(db, payload["run_id"]) == "scheduled"
 
 
-@pytest.mark.parametrize(
-    "argv", [("check", "--all"), ("check", "m"), ("check", "m", "--scheduled")]
-)
+@pytest.mark.parametrize("argv", [("check", "--all"), ("check", "m")])
 def test_any_other_check_records_on_demand(cli: Invoke, db: Path, argv: tuple[str, ...]) -> None:
     code, payload = cli(*argv)
     assert code == EXIT_OK
     assert payload["trigger"] == "on_demand"
     assert _trigger(db, payload["run_id"]) == "on_demand"
+
+
+def test_scheduled_with_a_model_id_is_invalid_input(
+    cli: Invoke, db: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Review F3 (amended 2026-10-31): only ``check --all --scheduled`` is a scheduled run, so
+    # ``--scheduled`` with a model ID is refused rather than silently recorded as on_demand.
+    with Store(db) as store:
+        before = store.latest_check_run()
+    code = main(["check", "m", "--scheduled", "--db", str(db)])
+    assert code == EXIT_INVALID_INPUT
+    assert "--scheduled needs --all" in capsys.readouterr().err
+    with Store(db) as store:
+        assert store.latest_check_run() == before  # no run recorded
 
 
 def test_the_new_source_names_are_accepted(cli: Invoke) -> None:

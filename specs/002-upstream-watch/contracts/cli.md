@@ -11,7 +11,7 @@ with one exception: 001's line "Scheduled use: `check --all` daily" is **superse
 | Command | Addition | Requirements |
 | :-- | :-- | :-- |
 | `register MANIFEST.toml` | Also looks up each DOI's registration agency and records the declared licence of the base model and each dataset in the inventory (research U1, U8). A failed lookup is recorded and retried at the next check; registration does not fail because of it. | FR-008 |
-| `check (ID \| --all) [--scheduled] [--source …]` | `--scheduled` marks the run as scheduled (FR-012 counts only scheduled refusals); the host scheduler runs `check --all --scheduled`. New source names: `hf-hub`, `hf-takedowns`, `crossref`, `datacite`, `zenodo`, `figshare`. Omitting `--source` runs every source. | FR-001, FR-012, FR-018 |
+| `check (ID \| --all) [--scheduled] [--source …]` | `--scheduled` marks the run as scheduled (FR-012 counts only scheduled refusals); the host scheduler runs `check --all --scheduled`. `--scheduled` needs `--all`: `check ID --scheduled` is invalid input (exit 1) and records no run (amended 2026-10-31 after review (F3): it had been accepted and recorded as `on_demand`). New source names: `hf-hub`, `hf-takedowns`, `crossref`, `datacite`, `zenodo`, `figshare`. Omitting `--source` runs every source. | FR-001, FR-012, FR-018 |
 | `alerts ID` | Lists the new alert kinds by severity with 001's kinds, then the new watch-event kinds. | FR-014 |
 | `alert show ALERT_ID` | For redacted evidence, shows both hashes and the fields removed (research U10). | FR-014 |
 

@@ -179,7 +179,7 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument(
         "--scheduled",
         action="store_true",
-        help="mark the run as scheduled (with --all; what the host scheduler runs)",
+        help="mark the run as scheduled (needs --all; what the host scheduler runs)",
     )
     check.add_argument(
         "--source",
@@ -217,6 +217,12 @@ def build_parser() -> argparse.ArgumentParser:
 def _validate(args: argparse.Namespace) -> None:
     if args.command_key == "check" and (args.model_id is None) == (not args.all):
         raise InvalidInputError("check needs a model ID or --all, but not both")
+    if args.command_key == "check" and args.scheduled and not args.all:
+        # contracts/cli.md, research U7: only ``check --all --scheduled`` is a scheduled run
+        # (review F3, amended 2026-10-31).
+        raise InvalidInputError(
+            "--scheduled needs --all: only check --all --scheduled is scheduled"
+        )
 
 
 def _report_error(code: int, message: str, as_json: bool) -> int:
@@ -525,8 +531,9 @@ def make_handlers(
             else:
                 _version_of(store, args.model_id, None)
                 model_ids, scope = [args.model_id], args.model_id
-            # contracts/cli.md: only ``check --all --scheduled`` is a scheduled run (FR-012).
-            trigger = "scheduled" if args.all and args.scheduled else "on_demand"
+            # contracts/cli.md: only ``check --all --scheduled`` is a scheduled run (FR-012);
+            # ``--scheduled`` without ``--all`` is refused in ``_validate`` (review F3).
+            trigger = "scheduled" if args.scheduled else "on_demand"
             outcome = run_check(
                 store, _fetcher(store), model_ids, args.sources, scope=scope, trigger=trigger
             )

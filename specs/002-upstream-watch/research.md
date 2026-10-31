@@ -174,7 +174,8 @@ pair and never open the alert.
 
 **Scheduled versus on-demand**: FR-012 counts scheduled checks only, so a check run records its `trigger`.
 `check --all --scheduled` is what the host scheduler runs; any other `check` is `on_demand`
-([CLI contract](contracts/cli.md)).
+([CLI contract](contracts/cli.md)). `--scheduled` with a model ID instead of `--all` is refused as
+invalid input (exit 1) rather than recorded as `on_demand`. Amended 2026-10-31 after review (F3).
 
 **Confirmed when recording fixtures** (2026-10-24, `tests/fixtures/hf_upstream/model-disabled`): a
 disabled **model** answers like a disabled dataset. `sd-concepts-library/dyoudim-style`, found as the
