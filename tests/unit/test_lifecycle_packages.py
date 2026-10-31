@@ -7,6 +7,7 @@ are made from the recordings by the ``derive_osv`` fixture, each one written out
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from model_dependabot import lifecycle
 from model_dependabot.lifecycle import run_check
 from model_dependabot.sources.fetcher import RecordedFetcher
 from model_dependabot.store import Store
@@ -326,3 +328,151 @@ def test_an_open_alert_is_not_cleared_when_the_local_check_cannot_evaluate(
     assert CP9V in _open(store, "m")
     [event] = store.watch_events("m")
     assert event["detail"]["advisories"][CP9V]["local_unevaluated"]
+
+
+# --- A record OSV no longer has (review F1, amended 2026-10-31) ----------------------------------
+
+NOT_FOUND = '{"code":5,"message":"Bug not found."}'
+
+
+def _gone(root: Path, advisory_id: str, status: int = 404) -> Path:
+    """Make ``GET /v1/vulns/{advisory_id}`` answer ``status`` in the derived recordings."""
+    meta_path = root / f"vuln-{advisory_id}.meta.json"
+    meta = json.loads(meta_path.read_text("utf-8"))
+    meta["status"] = status
+    meta_path.write_text(json.dumps(meta), "utf-8")
+    (root / f"vuln-{advisory_id}.json").write_text(NOT_FOUND, "utf-8")
+    return root
+
+
+def _unlist(advisory_id: str) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    def change(answer: dict[str, Any]) -> dict[str, Any]:
+        for result in answer["results"]:
+            result["vulns"] = [v for v in result.get("vulns") or [] if v["id"] != advisory_id]
+        return answer
+
+    return change
+
+
+def test_a_record_gone_from_osv_keeps_its_alert_open_and_the_source_ok(
+    store: Store, derive_osv: Callable[..., Path]
+) -> None:
+    _register(store, "m", VULNERABLE)
+    _check(store, OSV, "m")
+    before = _open(store, "m")
+    assert set(before) == {CP9V, R24}
+
+    root = _gone(derive_osv({"querybatch-vulnerable": _unlist(R24)}), R24)
+    for _ in range(2):
+        outcome = _check(store, root, "m")
+        assert outcome.sources == {"osv": "ok"}
+        assert not outcome.failed
+        after = _open(store, "m")
+        assert set(after) == {CP9V, R24}  # a 404 never closes an alert, as fixed or otherwise
+        assert after[R24]["alert_id"] == before[R24]["alert_id"]
+        assert after[CP9V]["alert_id"] in outcome.models[0]["carried_forward"]
+    [event] = [e for e in store.watch_events("m") if e["kind"] == "advisory_gone"]
+    assert event["entry_identifier"] == PILLOW
+    assert event["detail"]["advisories"] == {R24: {"status": 404}}
+    [evidence] = event["evidence"]  # the same 404 twice is one piece of evidence
+    assert evidence["url"] == f"https://api.osv.dev/v1/vulns/{R24}"
+    assert evidence["detail"] == {"status": 404}
+
+
+def test_a_listed_record_that_is_gone_raises_no_alert(
+    store: Store, derive_osv: Callable[..., Path]
+) -> None:
+    _register(store, "m", VULNERABLE)
+    outcome = _check(store, _gone(derive_osv(), R24), "m")
+    assert outcome.sources == {"osv": "ok"}
+    assert set(_open(store, "m")) == {CP9V}
+    [event] = [e for e in store.watch_events("m") if e["kind"] == "advisory_gone"]
+    assert event["detail"]["advisories"] == {R24: {"status": 404}}
+
+
+@pytest.mark.parametrize("status", [403, 410, 500])
+def test_any_other_error_status_for_a_record_still_fails_the_source(
+    store: Store, derive_osv: Callable[..., Path], status: int
+) -> None:
+    _register(store, "m", VULNERABLE)
+    _check(store, OSV, "m")
+    snapshot = store.alerts_for("m")
+    outcome = _check(store, _gone(derive_osv(), R24, status), "m")
+    assert outcome.failed
+    assert outcome.sources["osv"] == f"failed: HTTP {status} for https://api.osv.dev/v1/vulns/{R24}"
+    assert store.alerts_for("m") == snapshot
+
+
+# --- A run interrupted by an error is still finished (review F7, amended 2026-10-31) -------------
+
+
+def test_a_run_interrupted_mid_apply_is_finished_with_the_reason(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _register(store, "m", VULNERABLE)
+
+    def clash(**_: Any) -> int:
+        raise sqlite3.IntegrityError("UNIQUE constraint failed: alerts.model_id, alerts.cause_key")
+
+    monkeypatch.setattr(store, "insert_alert", clash)
+    with pytest.raises(sqlite3.IntegrityError):
+        run_check(store, RecordedFetcher(OSV), ["m"], ["osv", "picklescan"])
+    run = store.latest_check_run()
+    assert run["finished_at"] is not None
+    assert run["sources"]["osv"].startswith("failed: run interrupted (IntegrityError: UNIQUE")
+    # A source that had not been reached is recorded the same way, never left out.
+    assert run["sources"]["picklescan"].startswith("failed: run interrupted")
+
+
+def test_a_source_finished_before_the_interruption_keeps_its_status(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _register(store, "m", VULNERABLE)
+
+    def boom(*_: Any, **__: Any) -> None:
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(lifecycle, "_apply_format_rules", boom)
+    with pytest.raises(RuntimeError):
+        run_check(store, RecordedFetcher(OSV), ["m"], ["osv", "picklescan"])
+    run = store.latest_check_run()
+    assert run["sources"]["osv"] == "ok"
+    assert run["sources"]["picklescan"] == "failed: run interrupted (RuntimeError: disk full)"
+
+
+# --- One package pinned twice in one lock (review F9, amended 2026-10-31) ------------------------
+
+
+def _pinned_twice(root: Path) -> Path:
+    """The batch for pillow 12.2.0 and 12.3.0 (markers are not evaluated, research R10)."""
+    meta_path = root / "querybatch-vulnerable.meta.json"
+    meta = json.loads(meta_path.read_text("utf-8"))
+    query = meta["request_body"]["queries"][0]
+    meta["request_body"]["queries"].insert(0, query | {"version": "12.2.0"})
+    meta_path.write_text(json.dumps(meta), "utf-8")
+    body_path = root / "querybatch-vulnerable.json"
+    answer = json.loads(body_path.read_text("utf-8"))
+    cp9v = [v for v in answer["results"][0]["vulns"] if v["id"] == CP9V]
+    answer["results"].insert(0, {"vulns": cp9v})
+    body_path.write_text(json.dumps(answer), "utf-8")
+    return root
+
+
+def test_a_package_pinned_twice_keeps_the_first_pin_and_lists_the_other(
+    store: Store, derive_osv: Callable[..., Path]
+) -> None:
+    root = _pinned_twice(derive_osv())
+    entries = [_package("pillow", "12.3.0"), _package("pillow", "12.2.0"), VULNERABLE[1]]
+    _register(store, "m", entries)
+    for _ in range(3):
+        outcome = _check(store, root, "m")
+        assert outcome.sources == {"osv": "ok"}
+        alerts = _open(store, "m")
+        assert set(alerts) == {CP9V, R24}
+        cause = alerts[CP9V]["cause"]
+        assert (cause["version"], cause["identifier"]) == ("12.3.0", PILLOW)
+        assert cause["also_affected"] == ["12.2.0"]
+        assert "also_affected" not in alerts[R24]["cause"]  # 12.2.0 is not listed for it
+        assert len(set(outcome.models[0]["carried_forward"])) == len(
+            outcome.models[0]["carried_forward"]
+        )

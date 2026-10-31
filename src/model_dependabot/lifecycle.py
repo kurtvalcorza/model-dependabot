@@ -12,7 +12,10 @@ rather than raised again (FR-010): its current version, severity and fixed versi
 source, and a changed record is added as new evidence beside the earlier one. A withdrawn advisory
 closes its alerts as ``withdrawn`` with the withdrawn record as evidence (FR-009). OSV leaves
 withdrawn records out of query answers, so the advisory of every open alert is fetched by id on each
-run.
+run. A record OSV answers ``404`` for is gone, not withdrawn and not unaffected: it records an
+``advisory_gone`` watch event with the 404 as evidence, raises nothing, and an alert that stands for
+it stays open until a person dismisses it or a newer version drops the package (review F1, amended
+2026-10-31). The rest of the OSV read is applied as usual.
 
 One alert per vulnerability (feature 006): records OSV returns for the same package version that
 alias each other, directly or through other records, form one group and raise one alert, keyed by
@@ -44,6 +47,7 @@ dismisses an alert with a listed reason.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -52,6 +56,7 @@ from typing import Any
 from urllib.parse import unquote
 
 from packaging.utils import canonicalize_name
+from packaging.version import InvalidVersion, Version
 
 from model_dependabot.inventory.build import HUB_DATASET_PREFIX, hash_stream, huggingface_purl
 from model_dependabot.matching.severity import severity_of, severity_rank
@@ -76,6 +81,7 @@ from model_dependabot.sources.fetcher import Fetcher, Response, SourceFailedErro
 from model_dependabot.sources.osv import (
     SOURCE,
     BatchAnswer,
+    GoneRecord,
     OsvClient,
     VulnRecord,
     aliases,
@@ -97,6 +103,7 @@ from model_dependabot.upstream.observe import observe
 
 PACKAGE_ALERT = "package_advisory"
 UNMATCHED = "advisory_unmatched"
+GONE = "advisory_gone"
 
 WEIGHT_SCAN_ALERT = "weight_file_scan"
 HUB_SCAN_ALERT = "hub_scan"
@@ -163,6 +170,7 @@ class _Target:
 class _OsvRead:
     batch: BatchAnswer
     records: dict[str, VulnRecord]
+    gone: dict[str, GoneRecord] = field(default_factory=dict)
 
 
 def run_check(
@@ -182,6 +190,38 @@ def run_check(
     that failed opens, changes or closes nothing (FR-018).
     """
     run_id = store.start_check_run(scope=scope or ",".join(model_ids), trigger=trigger)
+    statuses: dict[str, str] = {}
+    completed: set[str] = set()
+    try:
+        targets = _check(store, fetcher, model_ids, sources, run_id, statuses, completed)
+    except Exception as error:
+        # Review F7 (amended 2026-10-31): the run is never left unfinished. Each store call
+        # commits on its own, so what was applied before the error is kept; a source that had
+        # not finished is recorded as interrupted, and the error still reaches the caller.
+        reason = f"failed: run interrupted ({type(error).__name__}: {error})"
+        final = {
+            source: statuses[source]
+            if source in statuses and (source in completed or statuses[source] != "ok")
+            else reason
+            for source in sources
+        }
+        with contextlib.suppress(Exception):  # the original error is the one to report
+            store.finish_check_run(run_id, final)
+        raise
+    store.finish_check_run(run_id, statuses)
+    return CheckOutcome(run_id, statuses, [target.summary for target in targets])
+
+
+def _check(
+    store: Store,
+    fetcher: Fetcher,
+    model_ids: Sequence[str],
+    sources: Sequence[str],
+    run_id: int,
+    statuses: dict[str, str],
+    completed: set[str],
+) -> list[_Target]:
+    """The body of ``run_check``: fills ``statuses`` and ``completed`` as each source is done."""
     targets = []
     for model_id in model_ids:
         version = store.latest_version(model_id)
@@ -208,7 +248,6 @@ def run_check(
             )
         )
 
-    statuses: dict[str, str] = {}
     wanted = [source for source in sources if source in UPSTREAM_SOURCES]
     upstream = _read_upstream(store, fetcher, targets, wanted) if wanted else None
     for source in sources:
@@ -242,15 +281,17 @@ def run_check(
         for target in targets:
             _apply_osv(store, run_id, read, target)
         statuses[source] = "ok"
+        completed.add(source)
     if any(source in WEIGHT_SOURCES for source in sources):
         for target in targets:
             _apply_format_rules(store, run_id, target)
+    completed.update(WEIGHT_SOURCES)
     if upstream is not None:
         observed = _Observed(store, run_id)
         for target in targets:
             _apply_upstream(store, target, observed, upstream)
-    store.finish_check_run(run_id, statuses)
-    return CheckOutcome(run_id, statuses, [target.summary for target in targets])
+    completed.update(UPSTREAM_SOURCES)
+    return targets
 
 
 def _read_osv(store: Store, client: OsvClient, targets: list[_Target]) -> _OsvRead:
@@ -261,8 +302,15 @@ def _read_osv(store: Store, client: OsvClient, targets: list[_Target]) -> _OsvRe
         for alert in store.alerts_for(target.model_id, ["open"]):
             if alert["kind"] == PACKAGE_ALERT:
                 wanted.update(advisory_ids_of(alert))
-    records = {advisory_id: client.vuln(advisory_id) for advisory_id in sorted(wanted)}
-    return _OsvRead(batch, records)
+    records: dict[str, VulnRecord] = {}
+    gone: dict[str, GoneRecord] = {}
+    for advisory_id in sorted(wanted):
+        found = client.vuln(advisory_id)
+        if isinstance(found, GoneRecord):
+            gone[advisory_id] = found  # a 404 by id: the record is gone (review F1)
+        else:
+            records[advisory_id] = found
+    return _OsvRead(batch, records, gone)
 
 
 def advisory_ids_of(alert: Mapping[str, Any]) -> list[str]:
@@ -400,6 +448,9 @@ def _apply_osv(store: Store, run_id: int, read: _OsvRead, target: _Target) -> No
         affected: list[VulnRecord] = []
         details: dict[str, dict[str, Any]] = {}
         for advisory_id in read.batch.matches.get(identifier, []):
+            if advisory_id in read.gone:
+                _gone(run, identifier, read.gone[advisory_id])  # listed, but nothing to match
+                continue
             record = read.records[advisory_id]
             if withdrawn(record.advisory):
                 continue  # closed below if no other record keeps its alert open; never raised
@@ -420,9 +471,14 @@ def _apply_osv(store: Store, run_id: int, read: _OsvRead, target: _Target) -> No
             _raise_or_carry(run, entry, group, details)
 
     for alert in open_alerts:
+        identifier = alert["cause"]["identifier"]
+        missing = [read.gone[a] for a in advisory_ids_of(alert) if a in read.gone]
+        for gone in missing:
+            _gone(run, identifier, gone)
         if alert["alert_id"] in run.claimed:
             continue
-        identifier = alert["cause"]["identifier"]
+        if missing:
+            continue  # a gone record is no answer about the cause: the alert stays open (F1)
         records = [read.records[advisory_id] for advisory_id in advisory_ids_of(alert)]
         live = [record for record in records if not withdrawn(record.advisory)]
         if not live:
@@ -466,6 +522,45 @@ def _apply_osv(store: Store, run_id: int, read: _OsvRead, target: _Target) -> No
             _cache(store, record, evidence_id)
             evidence_ids.append(evidence_id)
         _close(store, target, alert, "cleared", evidence_ids)
+
+
+def _gone(run: _OsvApply, identifier: str, gone: GoneRecord) -> None:
+    """OSV answered 404 for a record: an ``advisory_gone`` watch event, never a closure (F1)."""
+    store, target = run.store, run.target
+    existing = store.get_watch_event(target.model_id, target.version, identifier, GONE)
+    detail: dict[str, Any] = dict(existing["detail"]) if existing else {}
+    advisories = dict(detail.get("advisories") or {})
+    advisories[gone.advisory_id] = {"status": gone.response.status}
+    detail["advisories"] = advisories
+    response = gone.response
+    evidence_id = next(
+        (
+            int(evidence["evidence_id"])
+            for evidence in (existing["evidence"] if existing else [])
+            if same_evidence(evidence, SOURCE, response.url, response.body)
+        ),
+        None,
+    )
+    if evidence_id is None:
+        evidence_id = store.add_evidence(
+            source=SOURCE,
+            url=response.url,
+            retrieved_at=response.retrieved_at,
+            matched_identifier=identifier,
+            body=response.body,
+            detail={"status": response.status},
+            run_id=run.run_id,
+        )
+    watch_event_id = store.record_watch_event(
+        model_id=target.model_id,
+        version=target.version,
+        entry_identifier=identifier,
+        kind=GONE,
+        detail=detail,
+        evidence_ids=[evidence_id],
+    )
+    if watch_event_id not in target.summary["watch_events"]:
+        target.summary["watch_events"].append(watch_event_id)
 
 
 def _withdrawal(run: _OsvApply, alert: Mapping[str, Any], record: VulnRecord) -> int:
@@ -549,6 +644,13 @@ def _raise_or_carry(
         keeper = min(related, key=lambda alert: alert["alert_id"])
     if keeper is None:
         keeper = store.find_open_alert(target.model_id, cause_key)
+    if keeper is not None and keeper["alert_id"] in run.claimed:
+        # The same package pinned again in this version (markers are not evaluated, R10): the
+        # first pin stays the cause and this one is listed in ``also_affected`` (review F9).
+        cause = _also_affected(keeper["cause"], entry["version"])
+        if severity_rank(keeper["severity"]) <= severity_rank(severity):
+            severity, origin = keeper["severity"], keeper["severity_origin"]
+            cause["severity_from"] = keeper["cause"].get("severity_from")
     linked = store.alert_evidence(keeper["alert_id"]) if keeper else []
     evidence_ids = []
     for record in group:
@@ -593,11 +695,26 @@ def _raise_or_carry(
             cause=cause,
             cause_key=cause_key,
         )
-        target.summary["carried_forward"].append(alert_id)
+        if alert_id not in target.summary["carried_forward"]:
+            target.summary["carried_forward"].append(alert_id)
     run.claimed.update(alert["alert_id"] for alert in related)
     run.claimed.add(alert_id)
     for record, evidence_id in zip(group, evidence_ids, strict=True):
         _cache(store, record, evidence_id)
+
+
+def _version_order(text: str) -> tuple[int, Any]:
+    try:
+        return 0, Version(text)
+    except InvalidVersion:
+        return 1, text
+
+
+def _also_affected(cause: Mapping[str, Any], version: str) -> dict[str, Any]:
+    """``cause`` with another affected pinned ``version`` of its package listed (review F9)."""
+    others = set(cause.get("also_affected") or []) | {version}
+    others.discard(cause["version"])
+    return dict(cause) | {"also_affected": sorted(others, key=_version_order)}
 
 
 def _unmatched(
@@ -2251,9 +2368,13 @@ def _apply_refusal(
     ``target_evidence`` is this run's answer of a renamed base model's target, which the hub
     refused; the observation is then the redirect, recorded as ``refused``.
     """
+    # The run is the repository's, any revision (identity table): re-pinning another revision
+    # of the same repository neither restarts nor breaks it (review F2, amended 2026-10-31).
     item = entry["identifier"]
-    run = refusal_run(store.observations(item, HF_HUB))
-    key = dataset_cause_key(BASE_MODEL_UNAVAILABLE, base_model_repo(entry))
+    repository = base_model_repo(entry)
+    seen = store.observations_in_repository(repository)
+    run = refusal_run([observation for observation in seen if observation["source"] == HF_HUB])
+    key = dataset_cause_key(BASE_MODEL_UNAVAILABLE, repository)
     if run.counted and run.qualifies:
         refusals = [
             {

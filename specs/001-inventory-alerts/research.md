@@ -49,6 +49,14 @@ severity across them (R3), naming the record it came from. A withdrawn record le
 alert is withdrawn only when every record is. Grouping never raises an alert by itself: each record in
 a group has passed the same match as a record alone.
 
+A record OSV answers `404` for when fetched by its id is gone: OSV no longer has it, which is neither a
+withdrawal (that needs a record marked `withdrawn`) nor a sign the version is unaffected. It records an
+`advisory_gone` watch event with the 404 as evidence and raises nothing; an alert that stands for it
+stays open until a person dismisses it or a newer version no longer has the package, and is never closed
+as `fixed`, `cleared` or `withdrawn` on the 404. The rest of the OSV read is applied as usual. Any other
+error status stays a source failure (FR-016). Amended 2026-10-31 after review (F1): a 404 by id had
+failed the whole source in every later run while an open alert still named the record.
+
 **Rationale**: OSV is the open format the constitution names, carries `withdrawn`, `fixed` and
 `last_affected` (schema v1.9.2), aggregates the GitHub and PyPI advisory databases and states no rate
 limits (landscape §1). The local evaluation is a consistency check on the same OSV record, not a second
@@ -73,8 +81,11 @@ directly (rejected: a third record joined through one of them would raise a seco
 ## R3. Severity
 
 **Decision**: Use the advisory's `database_specific.severity` when present (`LOW`, `MODERATE`, `HIGH`,
-`CRITICAL`); otherwise derive the band from a CVSS v3 or v4 score in `severity[]`; otherwise `UNKNOWN`.
-The value and its origin are both stored.
+`CRITICAL`); otherwise derive the band from the highest CVSS v3 or v4 score in `severity[]` (the first
+such entry on a tie); otherwise `UNKNOWN`. A score given as a number counts only if it is finite and
+from 0 to 10; any other value (`inf`, `nan`, `10.1`) is unscoreable, like a vector that cannot be read.
+The value and its origin are both stored. Amended 2026-10-31 after review (F6): the first scoreable
+entry had been used, so a record listing a v4 score of 5.0 before a v3 score of 9.8 was `MODERATE`.
 
 **Rationale**: GitHub-reviewed advisories carry a qualitative severity; others carry only a CVSS vector.
 Storing the origin keeps the evidence honest.

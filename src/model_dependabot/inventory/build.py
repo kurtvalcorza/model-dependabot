@@ -114,6 +114,20 @@ def classify(name: str, head: bytes | Path | None) -> tuple[str, bool | None]:
     return UNKNOWN_FORMAT, None
 
 
+def class_fits_name(name: str, file_format: Any, can_run_code: Any) -> bool:
+    """Whether a format and ``can_run_code`` read from a record or an inventory fit the file name.
+
+    The class must be the one the name gives (``classify`` without the bytes), except that a name
+    that is not a code-free format may also be ``pytorch-zip``: only the bytes show a zip, so the
+    name cannot rule it out. Used by ``register --from-record`` and ``import`` (review F8).
+    """
+    by_name = classify(name, None)
+    allowed = {by_name}
+    if by_name[0] not in CODE_FREE_FORMATS.values():
+        allowed.add(("pytorch-zip", True))
+    return (file_format, can_run_code) in allowed
+
+
 def hash_file(path: Path) -> tuple[str, int]:
     """A file's SHA-256 and size, read in chunks so a large file is never held in memory."""
     with path.open("rb") as handle:

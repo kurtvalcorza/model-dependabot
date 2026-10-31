@@ -63,6 +63,13 @@ A cached copy of a published record.
 
 A source that failed in a run cannot close or change any alert in that run (FR-016).
 
+A run stopped by an unexpected error (exit 3), such as a database constraint hit by a concurrent run, is
+still finished: `finished_at` is set, a source that had completed keeps its status and every other
+requested source is recorded as `failed: run interrupted (<error>)`. Changes are committed as they are
+made, not in one transaction, so what the run applied before the error is kept and the next check
+derives the rest again. Amended 2026-10-31 after review (F7): such a run had been left with no
+`finished_at` and no `sources`.
+
 ## Evidence
 
 | Field | Rule |
@@ -119,6 +126,11 @@ Rules:
   the highest across them (research R3 per record), with `severity_origin` from that record and
   `cause.severity_from` naming it; the evidence is one record per OSV record. When a group's primary id
   changes (a new GHSA record joins, or the primary is withdrawn) the open alert is kept and rekeyed.
+- One package pinned at several versions in one version's inventory (markers are not evaluated, research
+  R10) still has one open alert per vulnerability and package: the first affected pin in inventory order is
+  `cause.version` and `cause.identifier`, and `cause.also_affected` lists the other pinned versions that are
+  each evaluated as affected, sorted by version (absent when there are none). It is recomputed at every
+  check; `cause_key` is unchanged. Amended 2026-10-31 after review (F9).
 - Open alerts stored for ids that are now one group (before feature 006 each record had its own):
   at the next check the one keyed by the primary id is kept (else the oldest is kept and rekeyed) and
   each other closes as `cleared`, with a note naming the merged alert and the group's records as
@@ -170,7 +182,7 @@ Dismissal reasons (fixed list): `not_used_at_runtime`, `risk_accepted`, `false_p
 | Field | Rule |
 | :-- | :-- |
 | `model_id`, `version`, `entry identifier` | |
-| `kind` | `pickle_format`, `scan_suspicious`, `scan_incomplete`, `hub_scan_unknown`, `advisory_unmatched`, `hash_mismatch` or `weight_file_absent` (a `picklescan` check of a file registered from a record whose bytes are not on this machine; its `detail` holds the location, the reason and the record's SHA-256) |
+| `kind` | `pickle_format`, `scan_suspicious`, `scan_incomplete`, `hub_scan_unknown`, `advisory_unmatched`, `hash_mismatch`, `weight_file_absent` (a `picklescan` check of a file registered from a record whose bytes are not on this machine; its `detail` holds the location, the reason and the record's SHA-256) or `advisory_gone` (OSV answered 404 for a record fetched by its id; its `detail` maps each such id to the status, and the 404 is its evidence; research R2, amended 2026-10-31) |
 | `evidence` | As for alerts; for `scan_incomplete`, `detail` holds the scanner and the byte position it reached (FR-022) |
 | `first_seen`, `last_seen` | One record per cause, updated on each run |
 

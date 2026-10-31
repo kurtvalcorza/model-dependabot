@@ -1,17 +1,21 @@
 """Advisory severity and its origin (research R3).
 
 In order: the advisory's ``database_specific.severity`` (``LOW``, ``MODERATE``, ``HIGH``,
-``CRITICAL``); else the band of a CVSS score in ``severity[]``; else ``UNKNOWN``. The origin is
+``CRITICAL``); else the band of the highest CVSS score in ``severity[]`` (the first such entry on a
+tie); else ``UNKNOWN``. The origin is
 returned with the value so the alert can show where it came from: ``database_specific``,
 ``cvss_v3``, ``cvss_v4`` or ``unknown``.
 
 CVSS v3.x and v4.0 vectors are scored with the ``cvss`` package (pinned in ``pyproject.toml``),
 which implements the specifications' base-score formulas, including FIRST's v4 macro-vector table.
-A record that gives the number itself is used as given.
+A record that gives the number itself is used as given, if it is a finite number from 0 to 10; any
+other number (``inf``, ``nan``, ``10.1``) is unscoreable, like a vector that cannot be read (review
+F6, amended 2026-10-31).
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from typing import Any
 
@@ -73,13 +77,15 @@ def _score(entry: Mapping[str, Any]) -> tuple[float, str] | None:
     origin, score_vector = scorer
     text = str(entry.get("score", ""))
     try:
-        return float(text), origin
+        score = float(text)
     except ValueError:
-        pass
-    try:
-        return score_vector(text), origin
-    except ValueError:
-        return None
+        try:
+            score = score_vector(text)
+        except ValueError:
+            return None
+    if not math.isfinite(score) or not 0.0 <= score <= 10.0:
+        return None  # not a CVSS score (review F6)
+    return score, origin
 
 
 def severity_of(advisory: Mapping[str, Any]) -> tuple[str, str]:
@@ -87,8 +93,11 @@ def severity_of(advisory: Mapping[str, Any]) -> tuple[str, str]:
     qualitative = (advisory.get("database_specific") or {}).get("severity")
     if isinstance(qualitative, str) and qualitative.upper() in _QUALITATIVE:
         return _QUALITATIVE[qualitative.upper()], "database_specific"
+    best: tuple[float, str] | None = None
     for entry in advisory.get("severity") or []:
         scored = _score(entry)
-        if scored is not None:
-            return cvss_band(scored[0]), scored[1]
-    return "UNKNOWN", "unknown"
+        if scored is not None and (best is None or scored[0] > best[0]):
+            best = scored  # the highest score; the first entry on a tie (review F6)
+    if best is None:
+        return "UNKNOWN", "unknown"
+    return cvss_band(best[0]), best[1]

@@ -91,6 +91,12 @@ or `cleared`, with the fields that outcome needs and the others `null`):
 }
 ```
 
+A lock that pins one package at two versions (environment markers are not evaluated, research R10)
+gives one `package_advisory` alert per vulnerability and package, as `cause_key` has no version: its
+`cause.version` and `cause.identifier` are the first affected pin in inventory order, and
+`cause.also_affected` lists the other affected pinned versions, sorted; it is left out when there is none.
+Amended 2026-10-31 after review (F9): the cause had named whichever pin was processed last.
+
 A `package_advisory` alert stands for one vulnerability. When OSV returns several records for the
 same package version that alias each other, the alert's `cause.advisory_ids` lists every id, primary
 first: `cause.advisory_id` is that primary id (the GHSA id if there is one, the lexicographically

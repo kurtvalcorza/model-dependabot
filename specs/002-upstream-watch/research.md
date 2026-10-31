@@ -158,7 +158,9 @@ at every check.
   the run; a reachable observation from any run ends the run; failed requests are ignored. Because the span
   is measured from the first refusal of the run, daily runs that land a few seconds under 24 hours apart
   still open the alert on the next scheduled run. A refusal that does not meet this records a
-  `base_model_refused` watch event.
+  `base_model_refused` watch event. The run is the repository's: observations of every revision of the
+  pinned repository count, so a re-pin to another revision does not restart it (amended 2026-10-31 after
+  review, F2).
 - `sha` differing from the pinned commit records `base_model_new_revision` (pinned and newest revision);
   `cardData.new_version` records `base_model_new_version_pointer`; a change in `gated` records
   `gating_changed`; a change in the hash of `cardData` with the licence fields (`license`, `license_name`,
@@ -172,7 +174,8 @@ pair and never open the alert.
 
 **Scheduled versus on-demand**: FR-012 counts scheduled checks only, so a check run records its `trigger`.
 `check --all --scheduled` is what the host scheduler runs; any other `check` is `on_demand`
-([CLI contract](contracts/cli.md)).
+([CLI contract](contracts/cli.md)). `--scheduled` with a model ID instead of `--all` is refused as
+invalid input (exit 1) rather than recorded as `on_demand`. Amended 2026-10-31 after review (F3).
 
 **Confirmed when recording fixtures** (2026-10-24, `tests/fixtures/hf_upstream/model-disabled`): a
 disabled **model** answers like a disabled dataset. `sd-concepts-library/dyoudim-style`, found as the
@@ -249,6 +252,12 @@ SHA-256 of the original body, the SHA-256 of the stored body and the list of fie
 **Rationale**: FR-003 and FR-005 (the requesting party of a takedown is never stored) and the constitution's
 privacy constraint. Recording the original hash keeps the evidence checkable against the source (constitution
 I) without keeping the personal fields.
+
+The rule set is chosen by the URL the request was for, not only by the host that finally answered: every hop
+of a request for the takedown log is redacted as the log, so a redirect to another host (a CDN such as
+`cdn-lfs.hf.co` or `cas-bridge.xethub.hf.co`) cannot bring the unredacted CSV into the evidence store or the
+ETag cache. The log's rule fails closed: a body that cannot be read as UTF-8 CSV fails the source and is not
+stored. Amended 2026-10-31 after review (F4): the rule had been keyed on the final URL's host and path only.
 
 ## U11. Inventory additions: licences, paper ties and hub datasets in standard CycloneDX fields
 

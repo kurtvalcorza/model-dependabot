@@ -17,6 +17,11 @@ One rule set per source name:
   they appear in the record (so a Crossref ``reference[].author`` goes too); Crossref also loses the
   free-text ``reference[].unstructured`` of each reference, keeping the rest of it;
 - ``hf-hub`` (model and dataset info): nothing, as ``author`` is the repository namespace.
+
+The takedown log's rule is applied to every hop of a request for the log, whatever host a redirect
+leads to (the fetcher passes the source of the URL asked for), and it fails closed: a log body that
+cannot be read as UTF-8 CSV raises ``RedactionError`` and is never stored (review F4, amended
+2026-10-31).
 """
 
 from __future__ import annotations
@@ -52,6 +57,10 @@ RULES: dict[str, tuple[str, ...]] = {
 # The log's ``/resolve/main/index.csv`` answers 307 to ``/api/resolve-cache/datasets/<same repo>/…``
 # (recorded 2026-10-24), so the rule matches the repository anywhere in a hub path.
 TAKEDOWN_LOG_REPO = "/datasets/huggingface-legal/takedown-notices/"
+
+
+class RedactionError(ValueError):
+    """A body that a redaction rule applies to but that cannot be redacted; it must not be kept."""
 
 
 @dataclass(frozen=True)
@@ -156,9 +165,9 @@ def _redact_json(source: str, body: bytes) -> tuple[bytes, set[str]]:
 def _redact_csv(body: bytes) -> tuple[bytes, set[str]]:
     try:
         text = body.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        return body, set()
-    rows = list(csv.reader(io.StringIO(text, newline="")))
+        rows = list(csv.reader(io.StringIO(text, newline="")))
+    except (UnicodeDecodeError, csv.Error) as error:
+        raise RedactionError(f"the takedown log cannot be redacted: {error}") from None
     if not rows:
         return body, set()
     removed = {column for column in TAKEDOWN_COLUMNS if column in rows[0]}
@@ -173,7 +182,10 @@ def _redact_csv(body: bytes) -> tuple[bytes, set[str]]:
 
 
 def redact(source: str | None, body: bytes) -> Redacted:
-    """The storable form of ``body`` under the rule set for ``source``."""
+    """The storable form of ``body`` under the rule set for ``source``.
+
+    Raises ``RedactionError`` when ``source`` is ``hf-takedowns`` and the body is not readable CSV.
+    """
     original = _sha256(body)
     rule = RULES.get(source or "", ())
     removed: set[str] = set()

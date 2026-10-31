@@ -114,3 +114,52 @@ def test_an_invalid_cvss3_vector_is_rejected() -> None:
 )
 def test_cvss_bands(score: float, band: str) -> None:
     assert cvss_band(score) == band
+
+
+# --- The highest scoreable entry (review F6, amended 2026-10-31) ---------------------------------
+
+V3_CRITICAL = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"  # 9.8
+V4_MODERATE = "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N"
+
+
+def test_the_highest_scoreable_entry_wins_not_the_first() -> None:
+    assert cvss_band(cvss4_base_score(V4_MODERATE)) == "MODERATE"
+    advisory = {
+        "severity": [
+            {"type": "CVSS_V4", "score": V4_MODERATE},
+            {"type": "CVSS_V3", "score": V3_CRITICAL},
+        ]
+    }
+    assert severity_of(advisory) == ("CRITICAL", "cvss_v3")
+
+
+def test_a_tie_keeps_the_first_entry_origin() -> None:
+    advisory = {
+        "severity": [{"type": "CVSS_V4", "score": "9.8"}, {"type": "CVSS_V3", "score": V3_CRITICAL}]
+    }
+    assert severity_of(advisory) == ("CRITICAL", "cvss_v4")
+
+
+@pytest.mark.parametrize("score", ["inf", "-inf", "nan", "NaN", "10.1", "-0.1", "1e3"])
+def test_a_score_that_is_not_finite_or_outside_0_to_10_is_unscoreable(score: str) -> None:
+    assert severity_of({"severity": [{"type": "CVSS_V3", "score": score}]}) == (
+        "UNKNOWN",
+        "unknown",
+    )
+    advisory = {
+        "severity": [{"type": "CVSS_V3", "score": score}, {"type": "CVSS_V4", "score": "5.0"}]
+    }
+    assert severity_of(advisory) == ("MODERATE", "cvss_v4")
+
+
+@pytest.mark.parametrize("score", ["0", "0.0", "10", "10.0"])
+def test_the_ends_of_the_range_are_scoreable(score: str) -> None:
+    assert severity_of({"severity": [{"type": "CVSS_V3", "score": score}]})[1] == "cvss_v3"
+
+
+def test_database_specific_still_comes_before_a_higher_cvss_score() -> None:
+    advisory = {
+        "database_specific": {"severity": "LOW"},
+        "severity": [{"type": "CVSS_V3", "score": V3_CRITICAL}],
+    }
+    assert severity_of(advisory) == ("LOW", "database_specific")

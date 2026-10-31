@@ -36,3 +36,9 @@ Rules:
 - Round trip: `export` then `import` yields the same entries and identifiers (SC-005).
 - Imported documents may be CycloneDX 1.5, 1.6 or 1.7; entries the mapping cannot read become gaps
   rather than errors.
+- A weight file whose `model-dependabot:format` and `model-dependabot:can-run-code` do not fit its file
+  name is refused, not imported, as `register --from-record` refuses one ([registration
+  record](registration-record.md)): the class must be the one the name gives, or `pytorch-zip` for a
+  name that is not a code-free format (only the bytes show a zip). A document that claims a `.pt` file is
+  `safetensors` would otherwise keep a code-capable file from ever being scanned. Amended 2026-10-31
+  after review (F8).

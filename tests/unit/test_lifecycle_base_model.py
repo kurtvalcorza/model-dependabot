@@ -234,3 +234,37 @@ def test_a_refusal_or_failure_after_disabled_does_not_clear_it(
     check(store, clock, answers, "refused", 1 * H)
     check(store, clock, answers, "failed", 2 * H)
     assert len(alerts(store, "base_model_disabled")) == 1
+
+
+# --- The span is the repository's, not one revision's (review F2, amended 2026-10-31) ------------
+
+OTHER_SHA = "0" * 40
+
+
+def _repin(store: Store, sha: str) -> None:
+    entry = {"kind": "base_model", "identifier": f"{REPO_PURL}@{sha}", "pinned": True}
+    store.add_version("m", {}, "0" * 64, [entry | {"name": GPT2, "version": sha}])
+
+
+def test_re_pinning_another_revision_keeps_the_refusal_run(
+    store: Store, clock: Clock, answers: dict[str, Path]
+) -> None:
+    check(store, clock, answers, "refused", 0 * H)
+    _repin(store, OTHER_SHA)
+    check(store, clock, answers, "refused", 24 * H)
+    [alert] = alerts(store, "base_model_unavailable")
+    assert alert["cause_key"] == f"base_model_unavailable:{REPO_PURL}"
+    assert [r["observed_at"] for r in alert["cause"]["refusals"]] == [
+        "2026-10-24T06:00:00Z",
+        "2026-10-25T06:00:00Z",
+    ]
+
+
+def test_a_reachable_answer_for_the_earlier_revision_still_ends_the_run(
+    store: Store, clock: Clock, answers: dict[str, Path]
+) -> None:
+    check(store, clock, answers, "refused", 0 * H)
+    check(store, clock, answers, "reachable", 12 * H)
+    _repin(store, OTHER_SHA)
+    check(store, clock, answers, "refused", 24 * H)
+    assert alerts(store, "base_model_unavailable") == []

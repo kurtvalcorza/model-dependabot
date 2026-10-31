@@ -88,7 +88,7 @@ output; both may go before or after the command name.
 | `import BOM.json --model-id ID` | Registers a version from an existing CycloneDX inventory |
 | `inventory show ID [--version N]` | Lists the entries with their identifiers and the gaps with their reasons |
 | `inventory export ID [--version N] -o FILE` | Writes the stored CycloneDX 1.7 inventory, validated against the official schema |
-| `check (ID \| --all) [--scheduled] [--source ...]` | Runs the checks now and records a check run. Sources: `osv`, `picklescan`, `hf-scan`, `hf-hub`, `hf-takedowns`, `crossref`, `datacite`, `zenodo` and `figshare`; without `--source` every source runs. `--scheduled` (with `--all`) marks the run as scheduled; see [Scheduling](#scheduling) |
+| `check (ID \| --all) [--scheduled] [--source ...]` | Runs the checks now and records a check run. Sources: `osv`, `picklescan`, `hf-scan`, `hf-hub`, `hf-takedowns`, `crossref`, `datacite`, `zenodo` and `figshare`; without `--source` every source runs. `--scheduled` marks the run as scheduled and needs `--all` (`check ID --scheduled` exits 1); see [Scheduling](#scheduling) |
 | `policy ID --format (default\|strict) --by NAME` | Sets the model's weight-format policy, recording who set it and when. Under `default` a format that can run code when loaded is a watch event; under `strict` a code-capable weight file with no code-free file beside it in the same version raises an alert. Takes effect at the next check |
 | `alerts ID [--state open\|closed\|all]` | Lists alerts by severity (`CRITICAL`, `HIGH`, `MODERATE`, `LOW`, `UNKNOWN`), then the watch events, each with its evidence |
 | `alert show ALERT_ID` | One alert with all its evidence; for a redacted response, both hashes and the fields removed |
@@ -106,6 +106,8 @@ cannot be read, the result is a watch event that says which. Alerts count vulner
 records: when OSV returns several records for the same package version that alias each other (for
 example a `PYSEC` and a `GHSA` id for one flaw), they raise one alert that lists every id, known by
 the GHSA id where there is one, with the highest of their severities and each record as evidence.
+A record OSV no longer has (a 404 for its id) is an `advisory_gone` watch event: its alert stays open,
+and the rest of the OSV check goes ahead.
 The hub's scan verdict describes the
 repository's head commit; for a file pinned at another revision the head file's hash is compared with
 the pinned one before a clean result is accepted.
@@ -146,10 +148,13 @@ schema is in [contracts/registration-record.md](specs/001-inventory-alerts/contr
 | `base_model_disabled` | The hub reports the base model disabled | `MODERATE` |
 | `base_model_unavailable` | The hub has refused the base model in scheduled checks spanning at least 24 hours | `LOW` |
 
-These severities are set by policy, and the alerts say so (`severity_origin: "policy"`). A retraction,
-licence, disabled or unavailable alert closes as `cleared` when the source that reported it no longer shows
-the cause in a successful, well-formed answer; a licence alert needs every source that reported the change
-to answer so, and a source that failed or was not asked keeps it open. `withdrawn` is used only for an
+These severities are set by policy, and the alerts say so (`severity_origin: "policy"`). A
+`dataset_retracted`, `paper_retracted`, `licence_changed`, `base_model_disabled` or
+`base_model_unavailable` alert closes as `cleared` when the source that reported it no longer shows the
+cause in a successful, well-formed answer; a licence alert needs every source that reported the change
+to answer so, and a source that failed or was not asked keeps it open. `dataset_removed` (a Zenodo
+tombstone or a disabled hub dataset) and `dataset_not_findable` never clear: a hub dataset enabled again
+or a DOI found again leaves the alert open until it is dismissed or a new version no longer pins the item. `withdrawn` is used only for an
 OSV advisory marked withdrawn. Any of them closes as `fixed` when a new version no longer depends on the
 item. A disabled or unavailable base model and a disabled hub dataset are states of the repository, and
 a base model's or hub dataset's licence and a paper tied to a hub dataset are read for the repository, so
@@ -271,7 +276,7 @@ with its body, already stripped of personal data, in `evidence/`), so a later ru
 | [Figshare](https://docs.figshare.com/) | An article's licence, or that it is gone | `GET /v2/articles/{id}` |
 | [picklescan](https://github.com/mmaitre314/picklescan) | Scanning local pickle-based weight files for dangerous imports | None: runs locally and never loads the file |
 
-Severity comes from the advisory's own rating, else from its CVSS v3 or v4 vector (scored with the
+Severity comes from the advisory's own rating, else from its highest CVSS v3 or v4 score (scored with the
 `cvss` package), else `UNKNOWN`; the alert says which. A source that fails in a run is recorded as failed
 and cannot open, change or close any alert in that run.
 
