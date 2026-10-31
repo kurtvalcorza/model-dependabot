@@ -273,7 +273,7 @@ with its body, already stripped of personal data, in `evidence/`), so a later ru
 | [Figshare](https://docs.figshare.com/) | An article's licence, or that it is gone | `GET /v2/articles/{id}` |
 | [picklescan](https://github.com/mmaitre314/picklescan) | Scanning local pickle-based weight files for dangerous imports | None: runs locally and never loads the file |
 
-Severity comes from the advisory's own rating, else from its CVSS v3 or v4 vector (scored with the
+Severity comes from the advisory's own rating, else from its highest CVSS v3 or v4 score (scored with the
 `cvss` package), else `UNKNOWN`; the alert says which. A source that fails in a run is recorded as failed
 and cannot open, change or close any alert in that run.
 

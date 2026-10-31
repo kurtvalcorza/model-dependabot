@@ -81,8 +81,11 @@ directly (rejected: a third record joined through one of them would raise a seco
 ## R3. Severity
 
 **Decision**: Use the advisory's `database_specific.severity` when present (`LOW`, `MODERATE`, `HIGH`,
-`CRITICAL`); otherwise derive the band from a CVSS v3 or v4 score in `severity[]`; otherwise `UNKNOWN`.
-The value and its origin are both stored.
+`CRITICAL`); otherwise derive the band from the highest CVSS v3 or v4 score in `severity[]` (the first
+such entry on a tie); otherwise `UNKNOWN`. A score given as a number counts only if it is finite and
+from 0 to 10; any other value (`inf`, `nan`, `10.1`) is unscoreable, like a vector that cannot be read.
+The value and its origin are both stored. Amended 2026-10-31 after review (F6): the first scoreable
+entry had been used, so a record listing a v4 score of 5.0 before a v3 score of 9.8 was `MODERATE`.
 
 **Rationale**: GitHub-reviewed advisories carry a qualitative severity; others carry only a CVSS vector.
 Storing the origin keeps the evidence honest.
