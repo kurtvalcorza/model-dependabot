@@ -18,6 +18,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from jsonschema import ValidationError
+
 from model_dependabot.inventory.build import build_entries, record_licences
 from model_dependabot.inventory.cyclonedx import InventoryError, export_bom, import_bom, validate
 from model_dependabot.inventory.record import (
@@ -328,7 +330,11 @@ def _record(
         store.add_model(model_id, name=name, owner=owner)
     version = (store.latest_version(model_id) or 0) + 1
     document = export_bom(model_id, version, entries)
-    validate(document)
+    try:
+        validate(document)
+    except ValidationError as error:  # the input made an invalid inventory: exit 1, not 3
+        message = f"the inventory is not valid CycloneDX 1.7: {error.message}"
+        raise InvalidInputError(message) from None
     recorded = store.add_version(
         model_id,
         document,
@@ -494,6 +500,12 @@ def make_handlers(
             raise InvalidInputError(str(error)) from None
         model_id = args.model_id
         with _open(args.db) as store:
+            # As register does, so a targeted Zenodo or Figshare check finds the imported DOIs
+            # (review F-05). A licence the document records is kept; only a missing one is read.
+            fetcher_ = _fetcher(store)
+            _route_dois(store, fetcher_, entries)
+            unlicensed = [entry for entry in entries if entry.get("recorded_licence") is None]
+            record_licences(unlicensed, fetcher_, store.get_routing)
             version = _record(
                 store,
                 model_id,

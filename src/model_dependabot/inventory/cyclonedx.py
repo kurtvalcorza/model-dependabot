@@ -44,6 +44,7 @@ from model_dependabot.inventory.build import (
     gap,
     hub_dataset_identifier,
     huggingface_purl,
+    merge_datasets,
     new_entry,
     normalise_doi,
 )
@@ -578,5 +579,6 @@ def import_bom(document: Any) -> list[dict[str, Any]]:
     pedigree = model.get("pedigree") if isinstance(model.get("pedigree"), dict) else {}
     entries += [_import_base_model(item) for item in _list(pedigree.get("ancestors"))]
 
+    # A dataset listed twice (or two components sharing one bom-ref) is one entry (review F-03).
     order = {kind: rank for rank, kind in enumerate(ENTRY_KIND_ORDER)}
-    return sorted(entries, key=lambda entry: order[entry["kind"]])
+    return sorted(merge_datasets(entries), key=lambda entry: order[entry["kind"]])

@@ -19,5 +19,8 @@ revision = "0123abcd…"                       # exact commit; required for a pi
   gap "no DOI", as in feature 001: registration never fails because of a gap.
 - `paper_doi` is a list of DOIs. The service checks them for retractions (FR-004) and never infers them.
 - A `hub` dataset without `revision` is a gap ("no revision") and is not checked, as for 001's hub weight files.
+- The same dataset listed twice (the same DOI, or the same hub repository at the same commit) is one
+  inventory entry: its `sha256` values and `paper_doi` lists are joined, in the order written. Added
+  2026-11-03 after review (F-03).
 - Licences are not written in the manifest: the service records what each source declares (FR-008).
 - 001's rules stand: unknown keys are an error; registration never fails because of a gap.

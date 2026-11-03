@@ -768,6 +768,19 @@ def _code_capable(entries: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any
     ]
 
 
+def _code_free(entries: Sequence[Mapping[str, Any]]) -> list[str]:
+    """Identifiers of pinned code-free weight files (FR-021).
+
+    A gap is not one: an unpinned ``model.safetensors`` is a name with no file proven behind it,
+    so it never suppresses or clears a ``format_policy`` alert.
+    """
+    return [
+        entry["identifier"]
+        for entry in entries
+        if entry["kind"] == "weight_file" and entry["pinned"] and entry["can_run_code"] is False
+    ]
+
+
 def _json_body(record: Mapping[str, Any]) -> bytes:
     return json.dumps(record, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
@@ -913,11 +926,7 @@ def _apply_format_rules(store: Store, run_id: int, target: _Target) -> None:
     if model.get("format_policy") != "strict":
         _clear_format_policy(store, run_id, target, model, now)
         return
-    code_free_beside = any(
-        entry["kind"] == "weight_file" and entry["can_run_code"] is False
-        for entry in target.entries
-    )
-    if code_free_beside:
+    if _code_free(target.entries):
         return  # FR-021: a code-free file beside it suppresses the policy alert
     policy = {
         "model_id": target.model_id,
@@ -1429,11 +1438,7 @@ def reevaluate_version(store: Store, model_id: str, version: int) -> dict[str, l
         return result
     entries = store.entries(model_id, version)
     weights = {entry["identifier"]: entry for entry in entries if entry["kind"] == "weight_file"}
-    code_free = [
-        entry["identifier"]
-        for entry in entries
-        if entry["kind"] == "weight_file" and entry["can_run_code"] is False
-    ]
+    code_free = _code_free(entries)
     for alert in store.alerts_for(model_id, ["open"]):
         if alert["current_version"] >= version:
             continue

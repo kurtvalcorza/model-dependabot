@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import zipfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO
 from urllib.parse import quote
@@ -46,6 +47,8 @@ UNKNOWN_FORMAT = "unknown"
 
 _ZIP_MAGIC = b"PK\x03\x04"
 _HEAD_BYTES = 4
+_PICKLE_PROTOCOLS = frozenset({2, 3, 4, 5})  # PROTO opcode 0x80, then the protocol number
+_SAFETENSORS_HEADER_LIMIT = 100_000_000  # the safetensors library refuses a larger header
 _CHUNK = 1 << 20
 HUB_DATASET_PREFIX = "hf-dataset:"
 
@@ -78,11 +81,62 @@ def check_entry(entry: dict[str, Any]) -> None:
         raise ValueError("an entry that is not pinned needs a gap_reason")
 
 
-def _starts_like_zip(content: bytes | Path) -> bool:
+def _lead(content: bytes | Path, size: int) -> bytes:
     if isinstance(content, Path):
         with content.open("rb") as handle:
-            return handle.read(_HEAD_BYTES) == _ZIP_MAGIC
-    return content.startswith(_ZIP_MAGIC)
+            return handle.read(size)
+    return content[:size]
+
+
+def _starts_like_zip(content: bytes | Path) -> bool:
+    return _lead(content, _HEAD_BYTES) == _ZIP_MAGIC
+
+
+def _size(content: bytes | Path) -> int:
+    return content.stat().st_size if isinstance(content, Path) else len(content)
+
+
+def _is_safetensors(content: bytes | Path) -> bool:
+    """Whether the bytes are a well-formed safetensors file: an 8-byte little-endian header length
+    that fits the file, a JSON object header, and every tensor's ``data_offsets`` inside the data
+    after it. One byte is not enough: a pickle can carry a brace at offset 8 (review F-02)."""
+    size = _size(content)
+    length = int.from_bytes(_lead(content, 8), "little")
+    if size < 8 or length < 2 or length > min(size - 8, _SAFETENSORS_HEADER_LIMIT):
+        return False
+    try:
+        header = json.loads(_lead(content, 8 + length)[8:].decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return False
+    if not isinstance(header, dict):
+        return False
+    data = size - 8 - length
+    for name, tensor in header.items():
+        if name == "__metadata__":
+            continue
+        offsets = tensor.get("data_offsets") if isinstance(tensor, dict) else None
+        if not (
+            isinstance(offsets, list)
+            and len(offsets) == 2
+            and all(type(offset) is int for offset in offsets)
+            and 0 <= offsets[0] <= offsets[1] <= data
+        ):
+            return False
+    return True
+
+
+def _pickle_under_code_free_name(suffix: str, content: bytes | Path) -> bool:
+    """Whether a file named as a code-free format starts like a zip or a pickle (protocol 2-5).
+
+    A safetensors file starts with its header length, which can begin with the same two bytes
+    as a pickle, so a ``.safetensors`` file that is well formed is not one.
+    """
+    lead = _lead(content, 2)
+    if _starts_like_zip(content):
+        return True
+    if len(lead) < 2 or lead[0] != 0x80 or lead[1] not in _PICKLE_PROTOCOLS:
+        return False
+    return not (suffix == ".safetensors" and _is_safetensors(content))
 
 
 def _is_pytorch_zip(content: bytes | Path) -> bool:
@@ -102,11 +156,16 @@ def classify(name: str, head: bytes | Path | None) -> tuple[str, bool | None]:
 
     ``head`` is the local file's path, or its content when it is at hand (for a zip the content
     must be the whole file), and ``None`` for a hub file, which is then classified by its
-    extension alone.
+    extension alone. A local file named as a code-free format whose bytes start like a zip or a
+    pickle is classified by its bytes, so a renamed pickle is still scanned (review F-02).
     """
     suffix = PurePosixPath(name).suffix.lower()
     if suffix in CODE_FREE_FORMATS:
-        return CODE_FREE_FORMATS[suffix], False
+        if head is None or not _pickle_under_code_free_name(suffix, head):
+            return CODE_FREE_FORMATS[suffix], False
+        if not _starts_like_zip(head):
+            return "pickle", True
+        return ("pytorch-zip", True) if _is_pytorch_zip(head) else (UNKNOWN_FORMAT, None)
     if head is not None and _starts_like_zip(head) and _is_pytorch_zip(head):
         return "pytorch-zip", True
     if suffix in PICKLE_FORMATS:
@@ -117,14 +176,16 @@ def classify(name: str, head: bytes | Path | None) -> tuple[str, bool | None]:
 def class_fits_name(name: str, file_format: Any, can_run_code: Any) -> bool:
     """Whether a format and ``can_run_code`` read from a record or an inventory fit the file name.
 
-    The class must be the one the name gives (``classify`` without the bytes), except that a name
-    that is not a code-free format may also be ``pytorch-zip``: only the bytes show a zip, so the
-    name cannot rule it out. Used by ``register --from-record`` and ``import`` (review F8).
+    The class must be one ``classify`` can give a file of that name: the one the name gives, or
+    ``pytorch-zip``, which only the bytes show. A code-free name may also be ``pickle`` or
+    ``unknown``, which the bytes give a renamed pickle or zip (review F-02); each of those is more
+    cautious than the name, never less. Used by ``register --from-record`` and ``import`` (review
+    F8).
     """
     by_name = classify(name, None)
-    allowed = {by_name}
-    if by_name[0] not in CODE_FREE_FORMATS.values():
-        allowed.add(("pytorch-zip", True))
+    allowed = {by_name, ("pytorch-zip", True)}
+    if by_name[0] in CODE_FREE_FORMATS.values():
+        allowed |= {("pickle", True), (UNKNOWN_FORMAT, None)}
     return (file_format, can_run_code) in allowed
 
 
@@ -259,6 +320,41 @@ def _dataset(spec: DatasetSpec) -> dict[str, Any]:
     return new_entry("dataset", identifier=doi, pinned=True, hashes=hashes, paper_dois=papers)
 
 
+def _union(first: list[str] | None, second: list[str] | None) -> list[str] | None:
+    merged = list(dict.fromkeys([*(first or []), *(second or [])]))
+    return merged or None
+
+
+def merge_datasets(entries: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The entries with each pinned dataset listed once (review F-03).
+
+    A dataset is its identifier (the DOI, or the hub repository at a commit), so a second listing
+    of the same one adds only its ``hashes`` and ``paper_dois``: they are joined onto the first
+    listing, which keeps its place, and its recorded licence if the first has none. Two listings
+    would otherwise share one CycloneDX ``bom-ref``. Gaps have no identifier and are kept as they
+    are.
+    """
+    merged: list[dict[str, Any]] = []
+    first: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        identifier = entry["identifier"]
+        if entry["kind"] != "dataset" or not entry["pinned"] or not identifier:
+            merged.append(entry)
+            continue
+        kept = first.get(identifier)
+        if kept is None:
+            first[identifier] = dict(entry)
+            merged.append(first[identifier])
+            continue
+        kept["hashes"] = _union(kept["hashes"], entry["hashes"])
+        kept["paper_dois"] = _union(kept["paper_dois"], entry["paper_dois"])
+        if kept["recorded_licence"] is None and entry["recorded_licence"] is not None:
+            # The first recorded licence is the baseline a check compares against (FR-008).
+            kept["recorded_licence"] = entry["recorded_licence"]
+            kept["licence_form"] = entry["licence_form"]
+    return merged
+
+
 def build_entries(
     manifest: Manifest,
     fetcher: Fetcher | None = None,
@@ -280,6 +376,7 @@ def build_entries(
     if manifest.base_model is not None:
         entries.append(_base_model(manifest.base_model))
     entries += [_dataset(spec) for spec in manifest.datasets]
+    entries = merge_datasets(entries)
     for entry in entries:
         check_entry(entry)
     return entries

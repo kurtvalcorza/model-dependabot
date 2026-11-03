@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from jsonschema import ValidationError
 
+from model_dependabot import cli
 from model_dependabot.cli import EXIT_INVALID_INPUT, EXIT_OK, main, make_handlers
 from model_dependabot.inventory.cyclonedx import validate
 from model_dependabot.sources.fetcher import RecordedFetcher
@@ -63,6 +65,23 @@ def test_register_show_export_import(run, tmp_path: Path) -> None:
     code, copy_shown = run("inventory", "show", "example-copy")
     assert copy_shown["entries"] == shown["entries"]
     assert copy_shown["gaps"] == shown["gaps"]
+
+
+def test_an_inventory_that_fails_validation_is_invalid_input(
+    run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An inventory the input makes invalid exits 1 with a message, never 3 (review F-03)."""
+    assert run("register", str(EXAMPLE))[0] == EXIT_OK
+    out = tmp_path / "bom.json"
+    assert run("inventory", "export", "example-detector", "-o", str(out))[0] == EXIT_OK
+
+    def refuse(document: Any) -> None:
+        raise ValidationError("components[3]: not unique")
+
+    monkeypatch.setattr(cli, "validate", refuse)
+    code, payload = run("import", str(out), "--model-id", "example-copy")
+    assert code == EXIT_INVALID_INPUT
+    assert "not valid CycloneDX 1.7: components[3]: not unique" in payload["error"]["message"]
 
 
 def test_a_second_register_with_model_id_creates_version_2(run) -> None:

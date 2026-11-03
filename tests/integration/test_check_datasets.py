@@ -184,3 +184,28 @@ def test_a_datacite_404_for_a_doi_datacite_registered_opens_dataset_not_findable
     assert code == EXIT_OK
     _, listed = cli("alerts", "m", fetcher=fetcher)
     assert [a["kind"] for a in listed["alerts"]] == ["dataset_not_findable"]
+
+
+def test_import_routes_dois_as_register_does(
+    tmp_path: Path, derive_upstream: Callable[..., Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An imported inventory's DOIs are routed at import, so a targeted Zenodo or Figshare check
+    does not skip them (review F-05)."""
+    handlers = make_handlers(fetcher=RecordedFetcher(derive_upstream()))
+    first, second = tmp_path / "first.db", tmp_path / "second.db"
+    datasets = [f'doi = "{ZENODO_FINDABLE}"\npaper_doi = ["{RETRACTED}"]']
+    manifest = _manifest(tmp_path / "m", "registered", datasets)
+    bom = tmp_path / "bom.json"
+    assert main(["register", str(manifest), "--db", str(first)], handlers=handlers) == EXIT_OK
+    export = ["inventory", "export", "registered", "-o", str(bom), "--db", str(first)]
+    assert main(export, handlers=handlers) == EXIT_OK
+    imported = ["import", str(bom), "--model-id", "imported", "--db", str(second)]
+    assert main(imported, handlers=handlers) == EXIT_OK
+    capsys.readouterr()
+
+    with Store(first) as registered, Store(second) as copied:
+        for doi in (ZENODO_FINDABLE, RETRACTED):
+            routing = copied.get_routing(doi)
+            assert routing is not None and routing["agency"]
+            assert routing["repository"] == registered.get_routing(doi)["repository"]
+        assert copied.get_routing(ZENODO_FINDABLE)["repository"] == "zenodo"
