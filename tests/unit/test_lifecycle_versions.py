@@ -185,14 +185,18 @@ def test_a_weight_file_alert_is_fixed_by_a_version_without_the_file(
     assert evidence["matched_identifier"] == dangerous["identifier"]
 
 
+@pytest.mark.parametrize(
+    ("name", "protocol"), [("model.safetensors", 2), ("model.safetensors", 0), ("model.gguf", 0)]
+)
 def test_a_pickle_renamed_to_a_code_free_name_is_still_scanned(
-    store: Store, tmp_path: Path, craft: ModuleType
+    store: Store, tmp_path: Path, craft: ModuleType, name: str, protocol: int
 ) -> None:
-    data = craft.PROTO_2 + craft.dangerous()  # what pickle.dump and torch.save write: protocol 2+
-    (tmp_path / "model.safetensors").write_bytes(data)
-    file_format, code = classify("model.safetensors", tmp_path / "model.safetensors")
+    # Protocol 2 is what pickle.dump and torch.save write; protocol 0 has no header at all.
+    data = (craft.PROTO_2 if protocol == 2 else b"") + craft.dangerous()
+    (tmp_path / name).write_bytes(data)
+    file_format, code = classify(name, tmp_path / name)
     assert (file_format, code) == ("pickle", True)
-    renamed = weight(tmp_path, "model.safetensors", data, file_format, code)
+    renamed = weight(tmp_path, name, data, file_format, code)
     register(store, [renamed], tmp_path)
     run_check(store, RecordedFetcher(tmp_path / "none"), ["m"], ["picklescan"])
     assert [alert["kind"] for alert in store.alerts_for("m")] == ["weight_file_scan"]
