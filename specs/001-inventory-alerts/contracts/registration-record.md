@@ -83,7 +83,8 @@ It refuses (exit code 1, a message naming the problem, nothing written) when:
 - `model_id` or `manifest_sha256` does not match the manifest, or the list of `location`s is not the
   manifest's local weight files in manifest order;
 - a file's `format` and `can_run_code` do not fit its name (for example a `.pt` file claimed as
-  `safetensors`): the name allows its own format and, for a name that is not code-free, `pytorch-zip`;
+  `safetensors`): the name allows its own format and `pytorch-zip`, and a code-free name also allows
+  `pickle` and `unknown` (a renamed pickle or zip, classified by its bytes; amended 2026-11-03);
 - a file that can run code has no `scan`, a file that cannot run code has one or a scan's `verdict`
   does not follow from its `globals` and `complete`.
 

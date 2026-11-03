@@ -46,6 +46,7 @@ UNKNOWN_FORMAT = "unknown"
 
 _ZIP_MAGIC = b"PK\x03\x04"
 _HEAD_BYTES = 4
+_PICKLE_PROTOCOLS = frozenset({2, 3, 4, 5})  # PROTO opcode 0x80, then the protocol number
 _CHUNK = 1 << 20
 HUB_DATASET_PREFIX = "hf-dataset:"
 
@@ -78,11 +79,29 @@ def check_entry(entry: dict[str, Any]) -> None:
         raise ValueError("an entry that is not pinned needs a gap_reason")
 
 
-def _starts_like_zip(content: bytes | Path) -> bool:
+def _lead(content: bytes | Path, size: int) -> bytes:
     if isinstance(content, Path):
         with content.open("rb") as handle:
-            return handle.read(_HEAD_BYTES) == _ZIP_MAGIC
-    return content.startswith(_ZIP_MAGIC)
+            return handle.read(size)
+    return content[:size]
+
+
+def _starts_like_zip(content: bytes | Path) -> bool:
+    return _lead(content, _HEAD_BYTES) == _ZIP_MAGIC
+
+
+def _pickle_under_code_free_name(suffix: str, content: bytes | Path) -> bool:
+    """Whether a file named as a code-free format starts like a zip or a pickle (protocol 2-5).
+
+    A safetensors file starts with its header length, which can begin with the same two bytes
+    as a pickle; its ninth byte, the header's opening brace, tells the two apart.
+    """
+    lead = _lead(content, 9)
+    if lead.startswith(_ZIP_MAGIC):
+        return True
+    if len(lead) < 2 or lead[0] != 0x80 or lead[1] not in _PICKLE_PROTOCOLS:
+        return False
+    return not (suffix == ".safetensors" and lead[8:9] == b"{")
 
 
 def _is_pytorch_zip(content: bytes | Path) -> bool:
@@ -102,11 +121,16 @@ def classify(name: str, head: bytes | Path | None) -> tuple[str, bool | None]:
 
     ``head`` is the local file's path, or its content when it is at hand (for a zip the content
     must be the whole file), and ``None`` for a hub file, which is then classified by its
-    extension alone.
+    extension alone. A local file named as a code-free format whose bytes start like a zip or a
+    pickle is classified by its bytes, so a renamed pickle is still scanned (review F-02).
     """
     suffix = PurePosixPath(name).suffix.lower()
     if suffix in CODE_FREE_FORMATS:
-        return CODE_FREE_FORMATS[suffix], False
+        if head is None or not _pickle_under_code_free_name(suffix, head):
+            return CODE_FREE_FORMATS[suffix], False
+        if not _starts_like_zip(head):
+            return "pickle", True
+        return ("pytorch-zip", True) if _is_pytorch_zip(head) else (UNKNOWN_FORMAT, None)
     if head is not None and _starts_like_zip(head) and _is_pytorch_zip(head):
         return "pytorch-zip", True
     if suffix in PICKLE_FORMATS:
@@ -117,14 +141,16 @@ def classify(name: str, head: bytes | Path | None) -> tuple[str, bool | None]:
 def class_fits_name(name: str, file_format: Any, can_run_code: Any) -> bool:
     """Whether a format and ``can_run_code`` read from a record or an inventory fit the file name.
 
-    The class must be the one the name gives (``classify`` without the bytes), except that a name
-    that is not a code-free format may also be ``pytorch-zip``: only the bytes show a zip, so the
-    name cannot rule it out. Used by ``register --from-record`` and ``import`` (review F8).
+    The class must be one ``classify`` can give a file of that name: the one the name gives, or
+    ``pytorch-zip``, which only the bytes show. A code-free name may also be ``pickle`` or
+    ``unknown``, which the bytes give a renamed pickle or zip (review F-02); each of those is more
+    cautious than the name, never less. Used by ``register --from-record`` and ``import`` (review
+    F8).
     """
     by_name = classify(name, None)
-    allowed = {by_name}
-    if by_name[0] not in CODE_FREE_FORMATS.values():
-        allowed.add(("pytorch-zip", True))
+    allowed = {by_name, ("pytorch-zip", True)}
+    if by_name[0] in CODE_FREE_FORMATS.values():
+        allowed |= {("pickle", True), (UNKNOWN_FORMAT, None)}
     return (file_format, can_run_code) in allowed
 
 

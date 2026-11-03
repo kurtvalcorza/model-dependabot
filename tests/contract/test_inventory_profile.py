@@ -284,8 +284,8 @@ def _weight_bom(name: str, file_format: str, can_run_code: str) -> dict[str, Any
     [
         ("weights/best.pt", "safetensors", "false"),
         ("weights/best.pt", "pickle", "false"),
-        ("model.safetensors", "pickle", "true"),
-        ("model.safetensors", "pytorch-zip", "true"),
+        ("model.safetensors", "pickle", "false"),
+        ("model.safetensors", "onnx", "false"),
         ("model.onnx", "safetensors", "false"),
         ("model.weights", "safetensors", "false"),
     ],
@@ -304,6 +304,8 @@ def test_a_weight_class_that_does_not_fit_the_name_is_refused(
         ("weights/best.pt", "pytorch-zip", "true"),  # only the bytes show a zip
         ("model.bin", "pytorch-zip", "true"),
         ("model.safetensors", "safetensors", "false"),
+        ("model.safetensors", "pickle", "true"),  # a renamed pickle, classified by its bytes
+        ("model.onnx", "pytorch-zip", "true"),
         ("model.weights", "pytorch-zip", "true"),
     ],
 )

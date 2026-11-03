@@ -38,7 +38,8 @@ Rules:
   rather than errors.
 - A weight file whose `model-dependabot:format` and `model-dependabot:can-run-code` do not fit its file
   name is refused, not imported, as `register --from-record` refuses one ([registration
-  record](registration-record.md)): the class must be the one the name gives, or `pytorch-zip` for a
-  name that is not a code-free format (only the bytes show a zip). A document that claims a `.pt` file is
-  `safetensors` would otherwise keep a code-capable file from ever being scanned. Amended 2026-10-31
-  after review (F8).
+  record](registration-record.md)): the class must be the one the name gives, or `pytorch-zip` (only the
+  bytes show a zip); a code-free name may also be `pickle` or `unknown`, which its bytes give a renamed
+  pickle or zip. A document that claims a `.pt` file is `safetensors` would otherwise keep a
+  code-capable file from ever being scanned. Amended 2026-10-31 after review (F8); the code-free
+  allowance amended 2026-11-03 after review (F-02).

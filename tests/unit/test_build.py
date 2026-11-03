@@ -85,6 +85,14 @@ def test_local_weight_formats_and_can_run_code(entries: list[dict]) -> None:
         ("MODEL.SafeTensors", b"", ("safetensors", False)),
         ("model.h5", b"\x89HDF", ("unknown", None)),
         ("model.bin", None, ("pickle", True)),
+        # A code-free name over pickle-based bytes is classified by the bytes (review F-02).
+        ("model.safetensors", b"\x80\x04\x95\x00", ("pickle", True)),
+        ("model.onnx", b"\x80\x02}q\x00.", ("pickle", True)),
+        ("model.gguf", _zip(["archive/data.pkl"]), ("pytorch-zip", True)),
+        ("model.safetensors", _zip(["notes.txt"]), ("unknown", None)),
+        # A safetensors header length can start with the PROTO bytes; the brace shows the header.
+        ("model.safetensors", b"\x80\x02" + bytes(6) + b'{"', ("safetensors", False)),
+        ("model.safetensors", None, ("safetensors", False)),
     ],
 )
 def test_formats_are_classified_as_pickle_based_or_code_free(

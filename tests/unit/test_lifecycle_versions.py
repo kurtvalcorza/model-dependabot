@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from model_dependabot.inventory.build import new_entry
+from model_dependabot.inventory.build import classify, new_entry
 from model_dependabot.lifecycle import reevaluate_version, run_check, weight_cause_key
 from model_dependabot.sources.fetcher import RecordedFetcher
 from model_dependabot.store import Store
@@ -183,6 +183,19 @@ def test_a_weight_file_alert_is_fixed_by_a_version_without_the_file(
     evidence = store.alert_evidence(alert["alert_id"])[-1]
     assert evidence["source"] == "inventory"
     assert evidence["matched_identifier"] == dangerous["identifier"]
+
+
+def test_a_pickle_renamed_to_a_code_free_name_is_still_scanned(
+    store: Store, tmp_path: Path, craft: ModuleType
+) -> None:
+    data = craft.PROTO_2 + craft.dangerous()  # what pickle.dump and torch.save write: protocol 2+
+    (tmp_path / "model.safetensors").write_bytes(data)
+    file_format, code = classify("model.safetensors", tmp_path / "model.safetensors")
+    assert (file_format, code) == ("pickle", True)
+    renamed = weight(tmp_path, "model.safetensors", data, file_format, code)
+    register(store, [renamed], tmp_path)
+    run_check(store, RecordedFetcher(tmp_path / "none"), ["m"], ["picklescan"])
+    assert [alert["kind"] for alert in store.alerts_for("m")] == ["weight_file_scan"]
 
 
 def test_a_code_free_sibling_in_a_new_version_fixes_the_format_policy_alert(
