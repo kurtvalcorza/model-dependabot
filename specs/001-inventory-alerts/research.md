@@ -102,7 +102,9 @@ the canonical v4 vector `AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N`
 `.pkl`, `.joblib` and PyTorch zip archives) or code-free (`.safetensors`, `.onnx`, `.gguf`). A local file
 with a code-free name counts as code-free only if its bytes show that format: a `.safetensors`
 file must be well formed (the header fits the file, is a JSON object, and every tensor's `data_offsets`
-lies inside the data) and a `.gguf` file must start with the GGUF magic. Otherwise it is classified
+lies inside the data; a header too deeply nested to parse is not one) and a `.gguf` file must start
+with a GGUF header: the magic, version 2 or 3, and tensor and metadata counts that fit the file (a
+pickle can begin with the magic, but its opcodes then fill the counts). Otherwise it is classified
 code-capable (`pickle`, or `pytorch-zip` / `unknown` for a zip) and scanned, so a renamed pickle of any
 protocol is still scanned (review F-02, 2026-11-03). ONNX has no magic: an `.onnx` file is recognised
 as code-capable only when it starts like a zip or a protocol 2-5 pickle, so a protocol 0 or 1 pickle

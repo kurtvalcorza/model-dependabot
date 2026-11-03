@@ -49,6 +49,11 @@ _ZIP_MAGIC = b"PK\x03\x04"
 _HEAD_BYTES = 4
 _PICKLE_PROTOCOLS = frozenset({2, 3, 4, 5})  # PROTO opcode 0x80, then the protocol number
 _GGUF_MAGIC = b"GGUF"
+_GGUF_VERSIONS = frozenset({2, 3})  # version 1 (2023, 32-bit counts) is obsolete
+# Fewest bytes a GGUF tensor description (name, dimensions, type, offset) and a metadata pair
+# (key, value type, value) can take.
+_GGUF_MIN_TENSOR = 24  # name length (8), dimension count (4), type (4), offset (8)
+_GGUF_MIN_PAIR = 12  # key length (8), value type (4); an empty key and value at the least
 _SAFETENSORS_HEADER_LIMIT = 100_000_000  # the safetensors library refuses a larger header
 _CHUNK = 1 << 20
 HUB_DATASET_PREFIX = "hf-dataset:"
@@ -97,6 +102,21 @@ def _size(content: bytes | Path) -> int:
     return content.stat().st_size if isinstance(content, Path) else len(content)
 
 
+def _is_gguf(content: bytes | Path) -> bool:
+    """Whether the bytes start with a GGUF header: the magic, version 2 or 3, and tensor and
+    metadata counts that fit the file. The magic alone is not enough: a pickle can start with it
+    (``G`` is the BINFLOAT opcode, which swallows the next eight bytes), but its later opcodes then
+    sit in the count fields and make them far larger than the file (review of #4)."""
+    lead = _lead(content, 24)
+    if len(lead) < 24 or lead[:4] != _GGUF_MAGIC:
+        return False
+    version = int.from_bytes(lead[4:8], "little")
+    tensors = int.from_bytes(lead[8:16], "little")
+    pairs = int.from_bytes(lead[16:24], "little")
+    needed = 24 + _GGUF_MIN_TENSOR * tensors + _GGUF_MIN_PAIR * pairs
+    return version in _GGUF_VERSIONS and needed <= _size(content)
+
+
 def _is_safetensors(content: bytes | Path) -> bool:
     """Whether the bytes are a well-formed safetensors file: an 8-byte little-endian header length
     that fits the file, a JSON object header, and every tensor's ``data_offsets`` inside the data
@@ -107,7 +127,7 @@ def _is_safetensors(content: bytes | Path) -> bool:
         return False
     try:
         header = json.loads(_lead(content, 8 + length)[8:].decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
+    except (UnicodeDecodeError, ValueError, RecursionError):  # a deeply nested header too
         return False
     if not isinstance(header, dict):
         return False
@@ -129,15 +149,15 @@ def _is_safetensors(content: bytes | Path) -> bool:
 def _is_code_free(suffix: str, content: bytes | Path) -> bool:
     """Whether a local file named as a code-free format shows that format in its bytes.
 
-    A ``.safetensors`` file must be well formed and a ``.gguf`` file must start with the GGUF
-    magic, so a pickle of any protocol under either name is not taken for one (2026-11-03). ONNX
-    has no magic, so an ``.onnx`` file passes unless it starts like a zip or a pickle of protocol
-    2-5; a protocol 0 or 1 pickle under that name is the one case still trusted by name.
+    A ``.safetensors`` file must be well formed and a ``.gguf`` file must start with a GGUF header
+    whose counts fit the file, so a pickle of any protocol under either name is not taken for one.
+    ONNX has no magic, so an ``.onnx`` file passes unless it starts like a zip or a pickle of
+    protocol 2-5; a protocol 0 or 1 pickle under that name is the one case still trusted by name.
     """
     if suffix == ".safetensors":
         return _is_safetensors(content)
     if suffix == ".gguf":
-        return _lead(content, len(_GGUF_MAGIC)) == _GGUF_MAGIC
+        return _is_gguf(content)
     lead = _lead(content, 2)
     starts_like_pickle = len(lead) == 2 and lead[0] == 0x80 and lead[1] in _PICKLE_PROTOCOLS
     return not (starts_like_pickle or _starts_like_zip(content))

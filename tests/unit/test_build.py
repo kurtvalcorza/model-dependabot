@@ -46,6 +46,13 @@ def _safetensors(length: int, header: bytes = b'{"__metadata__":{}}') -> bytes:
     return length.to_bytes(8, "little") + header.ljust(length, b" ")
 
 
+def _gguf(version: int, *, tensors: int = 0, pairs: int = 0, size: int = 24) -> bytes:
+    """A GGUF header (magic, version, tensor and metadata counts) zero-padded to ``size`` bytes."""
+    header = b"GGUF" + version.to_bytes(4, "little")
+    header += tensors.to_bytes(8, "little") + pairs.to_bytes(8, "little")
+    return header.ljust(size, b"\x00")
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -87,7 +94,8 @@ def test_local_weight_formats_and_can_run_code(entries: list[dict]) -> None:
         ("model.bin", _zip(["archive/data.pkl"]), ("pytorch-zip", True)),
         ("model.safetensors", _safetensors(64), ("safetensors", False)),
         ("model.onnx", b"\x08\x07", ("onnx", False)),
-        ("model.gguf", b"GGUF", ("gguf", False)),
+        ("model.gguf", _gguf(3), ("gguf", False)),
+        ("model.gguf", _gguf(2, tensors=1, pairs=1, size=24 + 24 + 12), ("gguf", False)),
         ("MODEL.SafeTensors", _safetensors(64), ("safetensors", False)),
         # A code-free name must show its format in the bytes: placeholder bytes, an empty file or
         # a protocol 0 pickle (no header to recognise) is classified code-capable.
@@ -96,6 +104,11 @@ def test_local_weight_formats_and_can_run_code(entries: list[dict]) -> None:
         ("model.safetensors", b"cos\nsystem\n.", ("pickle", True)),
         ("model.gguf", b"cos\nsystem\n.", ("pickle", True)),
         ("model.gguf", b"GGU", ("pickle", True)),
+        ("model.gguf", b"GGUF", ("pickle", True)),
+        ("model.gguf", _gguf(1), ("pickle", True)),
+        ("model.gguf", _gguf(3, tensors=1, pairs=1, size=24 + 24 + 11), ("pickle", True)),
+        # The magic alone is not a header: BINFLOAT (G) swallows it, then a GLOBAL (review of #4).
+        ("model.gguf", b"GGUF\x03\x00\x00\x00\x000ccollections\nOrderedDict\n.", ("pickle", True)),
         # ONNX has no magic: only a zip or a protocol 2-5 pickle is recognised (known limit).
         ("model.onnx", b"cos\nsystem\n.", ("onnx", False)),
         ("model.h5", b"\x89HDF", ("unknown", None)),
@@ -118,6 +131,13 @@ def test_formats_are_classified_as_pickle_based_or_code_free(
     name: str, head: bytes | None, expected: tuple[str, bool | None]
 ) -> None:
     assert classify(name, head) == expected
+
+
+def test_a_deeply_nested_safetensors_header_is_code_capable_not_a_crash() -> None:
+    """json.loads raises RecursionError on deep nesting (review of #4); the file is then not a
+    safetensors file, so it is scanned like any other code-capable file."""
+    nested = _safetensors(40000, b"[" * 20000 + b"]" * 20000)
+    assert classify("model.safetensors", nested) == ("pickle", True)
 
 
 def test_every_entry_has_a_known_kind_and_every_field(entries: list[dict]) -> None:
