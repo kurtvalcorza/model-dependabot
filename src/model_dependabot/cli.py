@@ -500,6 +500,12 @@ def make_handlers(
             raise InvalidInputError(str(error)) from None
         model_id = args.model_id
         with _open(args.db) as store:
+            # As register does, so a targeted Zenodo or Figshare check finds the imported DOIs
+            # (review F-05). A licence the document records is kept; only a missing one is read.
+            fetcher_ = _fetcher(store)
+            _route_dois(store, fetcher_, entries)
+            unlicensed = [entry for entry in entries if entry.get("recorded_licence") is None]
+            record_licences(unlicensed, fetcher_, store.get_routing)
             version = _record(
                 store,
                 model_id,
