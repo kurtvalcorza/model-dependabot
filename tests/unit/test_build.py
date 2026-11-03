@@ -14,6 +14,7 @@ from model_dependabot.inventory.build import (
     build_entries,
     check_entry,
     classify,
+    merge_datasets,
     new_entry,
 )
 from model_dependabot.manifest import load_manifest
@@ -38,6 +39,11 @@ def _zip(names: list[str]) -> bytes:
         for name in names:
             archive.writestr(name, b"\x80\x02}q\x00.")
     return buffer.getvalue()
+
+
+def _safetensors(length: int, header: bytes = b'{"__metadata__":{}}') -> bytes:
+    """A safetensors file with no tensor data and its header padded to ``length`` bytes."""
+    return length.to_bytes(8, "little") + header.ljust(length, b" ")
 
 
 def _sha256(path: Path) -> str:
@@ -90,8 +96,12 @@ def test_local_weight_formats_and_can_run_code(entries: list[dict]) -> None:
         ("model.onnx", b"\x80\x02}q\x00.", ("pickle", True)),
         ("model.gguf", _zip(["archive/data.pkl"]), ("pytorch-zip", True)),
         ("model.safetensors", _zip(["notes.txt"]), ("unknown", None)),
-        # A safetensors header length can start with the PROTO bytes; the brace shows the header.
-        ("model.safetensors", b"\x80\x02" + bytes(6) + b'{"', ("safetensors", False)),
+        # A safetensors header length can start with the PROTO bytes: a well-formed header shows it.
+        ("model.safetensors", _safetensors(640), ("safetensors", False)),
+        # A brace at byte 8 alone is not a header: here it ends a pickle string (review F-02).
+        ("model.safetensors", b"\x80\x04\x8c\x05aaaa{0cos\nsystem\n.", ("pickle", True)),
+        ("model.safetensors", (640).to_bytes(8, "little") + b"{}", ("pickle", True)),
+        ("model.safetensors", _safetensors(640, b'{"w":{"data_offsets":[0,9]}}'), ("pickle", True)),
         ("model.safetensors", None, ("safetensors", False)),
     ],
 )
@@ -214,3 +224,18 @@ def test_a_hub_weight_file_on_a_repository_the_hub_refuses_is_a_gap(tmp_path: Pa
     assert entry["pinned"] is False
     assert "401" in entry["gap_reason"]
     assert entry["hub_revision"] is None
+
+
+def test_a_dataset_listed_again_keeps_a_licence_only_the_later_listing_records() -> None:
+    doi = "10.5281/zenodo.1"
+    bare = new_entry("dataset", identifier=doi, pinned=True)
+    mit = new_entry(
+        "dataset", identifier=doi, pinned=True, recorded_licence="MIT", licence_form="spdx"
+    )
+    [merged] = merge_datasets([bare, mit])
+    assert (merged["recorded_licence"], merged["licence_form"]) == ("MIT", "spdx")
+    cc0 = new_entry(
+        "dataset", identifier=doi, pinned=True, recorded_licence="CC0-1.0", licence_form="spdx"
+    )
+    [kept] = merge_datasets([mit, cc0])
+    assert kept["recorded_licence"] == "MIT"  # the first recorded licence stays the baseline

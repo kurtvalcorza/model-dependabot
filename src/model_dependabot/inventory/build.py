@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path, PurePosixPath
@@ -47,6 +48,7 @@ UNKNOWN_FORMAT = "unknown"
 _ZIP_MAGIC = b"PK\x03\x04"
 _HEAD_BYTES = 4
 _PICKLE_PROTOCOLS = frozenset({2, 3, 4, 5})  # PROTO opcode 0x80, then the protocol number
+_SAFETENSORS_HEADER_LIMIT = 100_000_000  # the safetensors library refuses a larger header
 _CHUNK = 1 << 20
 HUB_DATASET_PREFIX = "hf-dataset:"
 
@@ -90,18 +92,51 @@ def _starts_like_zip(content: bytes | Path) -> bool:
     return _lead(content, _HEAD_BYTES) == _ZIP_MAGIC
 
 
+def _size(content: bytes | Path) -> int:
+    return content.stat().st_size if isinstance(content, Path) else len(content)
+
+
+def _is_safetensors(content: bytes | Path) -> bool:
+    """Whether the bytes are a well-formed safetensors file: an 8-byte little-endian header length
+    that fits the file, a JSON object header, and every tensor's ``data_offsets`` inside the data
+    after it. One byte is not enough: a pickle can carry a brace at offset 8 (review F-02)."""
+    size = _size(content)
+    length = int.from_bytes(_lead(content, 8), "little")
+    if size < 8 or length < 2 or length > min(size - 8, _SAFETENSORS_HEADER_LIMIT):
+        return False
+    try:
+        header = json.loads(_lead(content, 8 + length)[8:].decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return False
+    if not isinstance(header, dict):
+        return False
+    data = size - 8 - length
+    for name, tensor in header.items():
+        if name == "__metadata__":
+            continue
+        offsets = tensor.get("data_offsets") if isinstance(tensor, dict) else None
+        if not (
+            isinstance(offsets, list)
+            and len(offsets) == 2
+            and all(type(offset) is int for offset in offsets)
+            and 0 <= offsets[0] <= offsets[1] <= data
+        ):
+            return False
+    return True
+
+
 def _pickle_under_code_free_name(suffix: str, content: bytes | Path) -> bool:
     """Whether a file named as a code-free format starts like a zip or a pickle (protocol 2-5).
 
     A safetensors file starts with its header length, which can begin with the same two bytes
-    as a pickle; its ninth byte, the header's opening brace, tells the two apart.
+    as a pickle, so a ``.safetensors`` file that is well formed is not one.
     """
-    lead = _lead(content, 9)
-    if lead.startswith(_ZIP_MAGIC):
+    lead = _lead(content, 2)
+    if _starts_like_zip(content):
         return True
     if len(lead) < 2 or lead[0] != 0x80 or lead[1] not in _PICKLE_PROTOCOLS:
         return False
-    return not (suffix == ".safetensors" and lead[8:9] == b"{")
+    return not (suffix == ".safetensors" and _is_safetensors(content))
 
 
 def _is_pytorch_zip(content: bytes | Path) -> bool:
@@ -295,8 +330,9 @@ def merge_datasets(entries: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
 
     A dataset is its identifier (the DOI, or the hub repository at a commit), so a second listing
     of the same one adds only its ``hashes`` and ``paper_dois``: they are joined onto the first
-    listing, which keeps its place. Two listings would otherwise share one CycloneDX ``bom-ref``.
-    Gaps have no identifier and are kept as they are.
+    listing, which keeps its place, and its recorded licence if the first has none. Two listings
+    would otherwise share one CycloneDX ``bom-ref``. Gaps have no identifier and are kept as they
+    are.
     """
     merged: list[dict[str, Any]] = []
     first: dict[str, dict[str, Any]] = {}
@@ -312,6 +348,10 @@ def merge_datasets(entries: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         kept["hashes"] = _union(kept["hashes"], entry["hashes"])
         kept["paper_dois"] = _union(kept["paper_dois"], entry["paper_dois"])
+        if kept["recorded_licence"] is None and entry["recorded_licence"] is not None:
+            # The first recorded licence is the baseline a check compares against (FR-008).
+            kept["recorded_licence"] = entry["recorded_licence"]
+            kept["licence_form"] = entry["licence_form"]
     return merged
 
 
