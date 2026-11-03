@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import io
 import zipfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO
 from urllib.parse import quote
@@ -285,6 +285,36 @@ def _dataset(spec: DatasetSpec) -> dict[str, Any]:
     return new_entry("dataset", identifier=doi, pinned=True, hashes=hashes, paper_dois=papers)
 
 
+def _union(first: list[str] | None, second: list[str] | None) -> list[str] | None:
+    merged = list(dict.fromkeys([*(first or []), *(second or [])]))
+    return merged or None
+
+
+def merge_datasets(entries: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The entries with each pinned dataset listed once (review F-03).
+
+    A dataset is its identifier (the DOI, or the hub repository at a commit), so a second listing
+    of the same one adds only its ``hashes`` and ``paper_dois``: they are joined onto the first
+    listing, which keeps its place. Two listings would otherwise share one CycloneDX ``bom-ref``.
+    Gaps have no identifier and are kept as they are.
+    """
+    merged: list[dict[str, Any]] = []
+    first: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        identifier = entry["identifier"]
+        if entry["kind"] != "dataset" or not entry["pinned"] or not identifier:
+            merged.append(entry)
+            continue
+        kept = first.get(identifier)
+        if kept is None:
+            first[identifier] = dict(entry)
+            merged.append(first[identifier])
+            continue
+        kept["hashes"] = _union(kept["hashes"], entry["hashes"])
+        kept["paper_dois"] = _union(kept["paper_dois"], entry["paper_dois"])
+    return merged
+
+
 def build_entries(
     manifest: Manifest,
     fetcher: Fetcher | None = None,
@@ -306,6 +336,7 @@ def build_entries(
     if manifest.base_model is not None:
         entries.append(_base_model(manifest.base_model))
     entries += [_dataset(spec) for spec in manifest.datasets]
+    entries = merge_datasets(entries)
     for entry in entries:
         check_entry(entry)
     return entries

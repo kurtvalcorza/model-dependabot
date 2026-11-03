@@ -314,3 +314,46 @@ def test_a_weight_class_that_fits_the_name_is_imported(
 ) -> None:
     [entry] = import_bom(_weight_bom(name, file_format, can_run_code))
     assert (entry["format"], entry["can_run_code"]) == (file_format, can_run_code == "true")
+
+
+DATASET_TWICE = """
+[model]
+id = "m"
+
+[[datasets]]
+doi = "10.5281/zenodo.1"
+paper_doi = ["10.1000/a"]
+
+[[datasets]]
+doi = "10.5281/zenodo.1"
+sha256 = "0f343b0931126a20f133d67c2b018a3b1d06bf1a3c4d3d1f7b2b2f1b1a4e5c6d"
+paper_doi = ["10.1000/b", "10.1000/a"]
+"""
+
+
+def _datasets(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [entry for entry in entries if entry["kind"] == "dataset"]
+
+
+def test_a_dataset_listed_twice_is_one_entry_that_round_trips(tmp_path: Path) -> None:
+    manifest = tmp_path / "model.toml"
+    manifest.write_text(DATASET_TWICE, encoding="utf-8")
+    [dataset] = _datasets(build_entries(load_manifest(manifest)))
+    assert dataset["identifier"] == "10.5281/zenodo.1"
+    assert dataset["paper_dois"] == ["10.1000/a", "10.1000/b"]
+    assert dataset["hashes"] == [
+        "sha256:0f343b0931126a20f133d67c2b018a3b1d06bf1a3c4d3d1f7b2b2f1b1a4e5c6d"
+    ]
+    document = export_bom("m", 1, [dataset])
+    validate(document)
+    assert _datasets(import_bom(document)) == [dataset]
+
+
+def test_two_components_sharing_a_dataset_bom_ref_import_as_one_entry(tmp_path: Path) -> None:
+    manifest = tmp_path / "model.toml"
+    manifest.write_text(DATASET_TWICE, encoding="utf-8")
+    document = export_bom("m", 1, _datasets(build_entries(load_manifest(manifest))))
+    document["components"].append(copy.deepcopy(document["components"][0]))
+    datasets = document["metadata"]["component"]["modelCard"]["modelParameters"]["datasets"]
+    datasets.append(copy.deepcopy(datasets[0]))
+    assert len(_datasets(import_bom(document))) == 1

@@ -18,6 +18,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from jsonschema import ValidationError
+
 from model_dependabot.inventory.build import build_entries, record_licences
 from model_dependabot.inventory.cyclonedx import InventoryError, export_bom, import_bom, validate
 from model_dependabot.inventory.record import (
@@ -328,7 +330,11 @@ def _record(
         store.add_model(model_id, name=name, owner=owner)
     version = (store.latest_version(model_id) or 0) + 1
     document = export_bom(model_id, version, entries)
-    validate(document)
+    try:
+        validate(document)
+    except ValidationError as error:  # the input made an invalid inventory: exit 1, not 3
+        message = f"the inventory is not valid CycloneDX 1.7: {error.message}"
+        raise InvalidInputError(message) from None
     recorded = store.add_version(
         model_id,
         document,
