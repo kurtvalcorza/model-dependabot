@@ -100,12 +100,13 @@ the canonical v4 vector `AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N`
 
 **Decision**: Classify each weight file by format: pickle-based (`.pt`, `.pth`, `.bin`, `.ckpt`,
 `.pkl`, `.joblib` and PyTorch zip archives) or code-free (`.safetensors`, `.onnx`, `.gguf`). A local file
-with a code-free name whose bytes start like a zip or a pickle (protocol 2-5) is classified by its bytes
-instead, so a renamed pickle is still scanned (review F-02, 2026-11-03); a `.safetensors` file whose
-header length happens to start with those bytes keeps its class only if it is well formed (the header
-fits the file, is a JSON object, and every tensor's `data_offsets` lies inside the data). A hub file is
-classified by its name alone. A protocol 0 or 1 pickle starts with no header to recognise, so one given a code-free name
-is still classified by that name; `pickle.dump` and `torch.save` write protocol 2 or later. Pickle-based
+with a code-free name counts as code-free only if its bytes show that format: a `.safetensors`
+file must be well formed (the header fits the file, is a JSON object, and every tensor's `data_offsets`
+lies inside the data) and a `.gguf` file must start with the GGUF magic. Otherwise it is classified
+code-capable (`pickle`, or `pytorch-zip` / `unknown` for a zip) and scanned, so a renamed pickle of any
+protocol is still scanned (review F-02, 2026-11-03). ONNX has no magic: an `.onnx` file is recognised
+as code-capable only when it starts like a zip or a protocol 2-5 pickle, so a protocol 0 or 1 pickle
+under that name is still trusted by name. A hub file is classified by its name alone. Pickle-based
 files always get a watch event. They are then scanned with `picklescan` 1.0.5 (MIT, active, last push
 2026-10-20) through `picklescan.scanner.scan_bytes`, which disassembles the pickle stream without
 executing it and labels each imported callable `innocuous`, `suspicious` or `dangerous`. Any `dangerous`

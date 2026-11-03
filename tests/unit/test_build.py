@@ -85,10 +85,19 @@ def test_local_weight_formats_and_can_run_code(entries: list[dict]) -> None:
         ("model.joblib", b"\x80\x04", ("joblib", True)),
         ("model.pt", _zip(["archive/data.pkl", "archive/version"]), ("pytorch-zip", True)),
         ("model.bin", _zip(["archive/data.pkl"]), ("pytorch-zip", True)),
-        ("model.safetensors", b"\x10\x00", ("safetensors", False)),
+        ("model.safetensors", _safetensors(64), ("safetensors", False)),
         ("model.onnx", b"\x08\x07", ("onnx", False)),
         ("model.gguf", b"GGUF", ("gguf", False)),
-        ("MODEL.SafeTensors", b"", ("safetensors", False)),
+        ("MODEL.SafeTensors", _safetensors(64), ("safetensors", False)),
+        # A code-free name must show its format in the bytes: placeholder bytes, an empty file or
+        # a protocol 0 pickle (no header to recognise) is classified code-capable.
+        ("model.safetensors", b"\x10\x00", ("pickle", True)),
+        ("model.safetensors", b"", ("pickle", True)),
+        ("model.safetensors", b"cos\nsystem\n.", ("pickle", True)),
+        ("model.gguf", b"cos\nsystem\n.", ("pickle", True)),
+        ("model.gguf", b"GGU", ("pickle", True)),
+        # ONNX has no magic: only a zip or a protocol 2-5 pickle is recognised (known limit).
+        ("model.onnx", b"cos\nsystem\n.", ("onnx", False)),
         ("model.h5", b"\x89HDF", ("unknown", None)),
         ("model.bin", None, ("pickle", True)),
         # A code-free name over pickle-based bytes is classified by the bytes (review F-02).

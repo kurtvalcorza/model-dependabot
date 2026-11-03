@@ -48,6 +48,7 @@ UNKNOWN_FORMAT = "unknown"
 _ZIP_MAGIC = b"PK\x03\x04"
 _HEAD_BYTES = 4
 _PICKLE_PROTOCOLS = frozenset({2, 3, 4, 5})  # PROTO opcode 0x80, then the protocol number
+_GGUF_MAGIC = b"GGUF"
 _SAFETENSORS_HEADER_LIMIT = 100_000_000  # the safetensors library refuses a larger header
 _CHUNK = 1 << 20
 HUB_DATASET_PREFIX = "hf-dataset:"
@@ -125,18 +126,21 @@ def _is_safetensors(content: bytes | Path) -> bool:
     return True
 
 
-def _pickle_under_code_free_name(suffix: str, content: bytes | Path) -> bool:
-    """Whether a file named as a code-free format starts like a zip or a pickle (protocol 2-5).
+def _is_code_free(suffix: str, content: bytes | Path) -> bool:
+    """Whether a local file named as a code-free format shows that format in its bytes.
 
-    A safetensors file starts with its header length, which can begin with the same two bytes
-    as a pickle, so a ``.safetensors`` file that is well formed is not one.
+    A ``.safetensors`` file must be well formed and a ``.gguf`` file must start with the GGUF
+    magic, so a pickle of any protocol under either name is not taken for one (2026-11-03). ONNX
+    has no magic, so an ``.onnx`` file passes unless it starts like a zip or a pickle of protocol
+    2-5; a protocol 0 or 1 pickle under that name is the one case still trusted by name.
     """
+    if suffix == ".safetensors":
+        return _is_safetensors(content)
+    if suffix == ".gguf":
+        return _lead(content, len(_GGUF_MAGIC)) == _GGUF_MAGIC
     lead = _lead(content, 2)
-    if _starts_like_zip(content):
-        return True
-    if len(lead) < 2 or lead[0] != 0x80 or lead[1] not in _PICKLE_PROTOCOLS:
-        return False
-    return not (suffix == ".safetensors" and _is_safetensors(content))
+    starts_like_pickle = len(lead) == 2 and lead[0] == 0x80 and lead[1] in _PICKLE_PROTOCOLS
+    return not (starts_like_pickle or _starts_like_zip(content))
 
 
 def _is_pytorch_zip(content: bytes | Path) -> bool:
@@ -156,12 +160,13 @@ def classify(name: str, head: bytes | Path | None) -> tuple[str, bool | None]:
 
     ``head`` is the local file's path, or its content when it is at hand (for a zip the content
     must be the whole file), and ``None`` for a hub file, which is then classified by its
-    extension alone. A local file named as a code-free format whose bytes start like a zip or a
-    pickle is classified by its bytes, so a renamed pickle is still scanned (review F-02).
+    extension alone. A local file named as a code-free format whose bytes do not show that format
+    is classified as code-capable (``pickle``, or ``pytorch-zip`` / ``unknown`` for a zip), so a
+    renamed pickle is still scanned (review F-02).
     """
     suffix = PurePosixPath(name).suffix.lower()
     if suffix in CODE_FREE_FORMATS:
-        if head is None or not _pickle_under_code_free_name(suffix, head):
+        if head is None or _is_code_free(suffix, head):
             return CODE_FREE_FORMATS[suffix], False
         if not _starts_like_zip(head):
             return "pickle", True
