@@ -12,7 +12,8 @@ from typing import Any
 import pytest
 
 from model_dependabot.cli import EXIT_INVALID_INPUT, EXIT_OK, main, make_handlers
-from model_dependabot.lifecycle import run_check
+from model_dependabot.inventory.build import NO_REVISION, gap
+from model_dependabot.lifecycle import reevaluate_version, run_check
 from model_dependabot.sources.fetcher import RecordedFetcher
 from model_dependabot.store import Store
 
@@ -93,6 +94,39 @@ def test_a_code_free_sibling_suppresses_the_policy_alert(
     check(store, tmp_path, [pickled, sibling])
     assert store.alerts_for("m") == []
     assert [event["kind"] for event in store.watch_events("m")] == ["pickle_format"]
+
+
+def unpinned_safetensors() -> dict[str, Any]:
+    return gap(
+        "weight_file",
+        NO_REVISION,
+        format="safetensors",
+        can_run_code=False,
+        hub_repo="owner/repo",
+        hub_file="model.safetensors",
+    )
+
+
+def test_an_unpinned_code_free_name_does_not_suppress_the_policy_alert(
+    store: Store, tmp_path: Path, craft: ModuleType
+) -> None:
+    store.set_format_policy("m", "strict", set_by="Model owner")
+    pickled = weight(tmp_path, "model.pkl", craft.innocuous(), "pickle", True)
+    check(store, tmp_path, [pickled, unpinned_safetensors()])
+    assert [alert["kind"] for alert in store.alerts_for("m")] == ["format_policy"]
+
+
+def test_an_unpinned_code_free_name_does_not_fix_the_policy_alert(
+    store: Store, tmp_path: Path, craft: ModuleType
+) -> None:
+    store.set_format_policy("m", "strict", set_by="Model owner")
+    pickled = weight(tmp_path, "model.pkl", craft.innocuous(), "pickle", True)
+    check(store, tmp_path, [pickled])
+    [alert] = store.alerts_for("m")
+    store.add_version("m", {}, "1" * 64, [pickled, unpinned_safetensors()], base_dir=tmp_path)
+    result = reevaluate_version(store, "m", 2)
+    assert result == {"fixed": [], "carried_forward": [alert["alert_id"]]}
+    assert [a["state"] for a in store.alerts_for("m")] == ["open"]
 
 
 def test_policy_command_records_who_and_when(
