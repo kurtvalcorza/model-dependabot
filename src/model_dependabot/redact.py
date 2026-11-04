@@ -21,7 +21,8 @@ One rule set per source name:
 The takedown log's rule is applied to every hop of a request for the log, whatever host a redirect
 leads to (the fetcher passes the source of the URL asked for), and it fails closed: a log body that
 cannot be read as UTF-8 CSV raises ``RedactionError`` and is never stored (review F4, amended
-2026-10-31).
+2026-10-31). The JSON rules fail closed in the same way for a successful answer that is not JSON
+(SEC-04, #12, 2026-11-04); an error answer that is not JSON is kept unchanged.
 """
 
 from __future__ import annotations
@@ -149,10 +150,12 @@ def _redact_document(source: str, document: Any, removed: set[str]) -> Any:
     return document
 
 
-def _redact_json(source: str, body: bytes) -> tuple[bytes, set[str]]:
+def _redact_json(source: str, body: bytes, strict: bool) -> tuple[bytes, set[str]]:
     try:
         document = json.loads(body)
-    except ValueError:
+    except ValueError as error:
+        if strict:
+            raise RedactionError(f"a {source} answer cannot be redacted: {error}") from None
         return body, set()
     removed: set[str] = set()
     document = _redact_document(source, document, removed)
@@ -181,10 +184,13 @@ def _redact_csv(body: bytes) -> tuple[bytes, set[str]]:
     return out.getvalue().encode("utf-8"), removed
 
 
-def redact(source: str | None, body: bytes) -> Redacted:
+def redact(source: str | None, body: bytes, *, strict: bool = False) -> Redacted:
     """The storable form of ``body`` under the rule set for ``source``.
 
-    Raises ``RedactionError`` when ``source`` is ``hf-takedowns`` and the body is not readable CSV.
+    Raises ``RedactionError`` when ``source`` is ``hf-takedowns`` and the body is not readable CSV,
+    and, with ``strict``, when a source with a JSON rule answers with a body that is not JSON. The
+    fetcher passes ``strict`` for a successful answer, which may be cached before an adapter reads
+    it (SEC-04, #12); an error answer such as Crossref's plain-text 404 is kept unchanged.
     """
     original = _sha256(body)
     rule = RULES.get(source or "", ())
@@ -193,5 +199,5 @@ def redact(source: str | None, body: bytes) -> Redacted:
     if rule and source == "hf-takedowns":
         stored, removed = _redact_csv(body)
     elif rule and source:
-        stored, removed = _redact_json(source, body)
+        stored, removed = _redact_json(source, body, strict)
     return Redacted(stored, original, _sha256(stored), tuple(sorted(removed)))
