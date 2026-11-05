@@ -21,6 +21,18 @@
 - Q: When does a confirmed code-free file suppress the strict-policy alert? → A: As today: any confirmed
   code-free file in the same version. Naming the deployed artifact is left to a later feature (FR-006).
 
+### Session 2026-11-05
+
+- Q: How can an imported code-free claim for a hub-hosted weight file be confirmed, given the tool never
+  downloads weight files? → A: At check time, read only a bounded header of the hub file at its pinned
+  revision and classify its format from that header (FR-002a).
+- Q: When does a check read hub file headers? → A: As its own check source that runs with every check
+  like the others and can be left out with `--source`; it reads only imported claims that are still
+  unverified, and a file confirmed for a version is not read again (FR-002b).
+- Q: How do unconfirmed candidates appear in the proposed manifest? → A: As TOML comments carrying their
+  status and origin; only entries registration can measure or pin itself are written as active entries.
+  The manifest format is unchanged (FR-022).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - An imported code-free claim cannot hide a code-capable weight file (Priority: P1)
@@ -119,8 +131,9 @@ existing manifest are byte-for-byte unchanged; no network request is made.
    **When** discovery runs with that manifest, **Then** the base model candidate is marked conflicting and
    both sources are shown.
 6. **Given** an output path, **When** discovery runs, **Then** a proposed manifest is written to that path
-   only, the path's previous contents are not silently replaced, and unverified or conflicting candidates
-   are written so that a reader cannot mistake them for confirmed entries.
+   only, the path's previous contents are not silently replaced, local weight files and the hash-locked
+   requirements file are active entries and every other candidate is a comment showing its status and
+   origin; registering the file as written registers only the active entries.
 
 ---
 
@@ -165,9 +178,13 @@ proposed revision is labelled as observed at that time rather than as the traini
   the candidate is code-capable, with the contradiction recorded.
 - An imported inventory declares a hash for a file whose bytes are available and differ: the entry is
   contradicted and cannot count as verified.
-- An imported code-free claim for a hub file at a pinned revision, where the hub answers with metadata for
-  that exact revision that establishes the format: the claim counts as verified from that metadata, with
-  the retrieval time as evidence.
+- An imported code-free claim for a hub file at a pinned revision: the check reads the file's header at
+  that revision; if the header shows a code-free format the claim counts as verified with the retrieval
+  time as evidence, and if it shows a code-capable format the claim is contradicted.
+- An imported code-free claim for a hub file with no pinned revision: its header is not read (the bytes
+  could change) and the claim stays unverified.
+- The hub refuses the header read, times out or returns more than the byte limit allows: the claim stays
+  unverified and the reason is shown; the source is not counted as clean.
 - The audit is asked for a model or version that does not exist: invalid input, as for other commands.
 - Discovery is pointed at a folder that holds no recognisable dependencies: it reports zero candidates and
   says what it looked for; it does not report the project as dependency-free.
@@ -184,6 +201,18 @@ proposed revision is labelled as observed at that time rather than as the traini
 - **FR-002**: A claim imported from a third-party inventory that a weight file cannot run code MUST be
   recorded as unverified until it is confirmed by the file's bytes or by authoritative metadata for the
   exact pinned revision.
+- **FR-002a**: For a hub-hosted weight file pinned to an exact revision, a check MUST be able to confirm
+  or contradict an imported code-free claim by reading only a bounded header of the file at that revision
+  (a published byte limit, never the whole file) and classifying its format from that header with the
+  same rules used for local files. The read MUST be anonymous, read-only, rate-limited and recorded as
+  evidence with its retrieval time. A header that cannot be read or classified leaves the claim
+  unverified, never confirmed.
+- **FR-002b**: The header read MUST be a separate check source (name provisional) that runs with every
+  check by default, scheduled or on demand, and can be selected or left out with `--source` like the
+  existing sources. It MUST read only hub weight files whose imported code-free claim is still unverified;
+  once a file's claim is confirmed or contradicted for a version, that file MUST NOT be read again for it.
+  A failure of this source MUST be reported like any other source failure (exit code 2), and a
+  version with no such claims MUST cause no requests.
 - **FR-003**: When the file's bytes are available to a check, the format and ability to run code MUST be
   judged from the bytes; an imported claim they contradict MUST be recorded as contradicted, with both the
   claim and the measurement as evidence.
@@ -244,9 +273,12 @@ proposed revision is labelled as observed at that time rather than as the traini
   existing read-only, rate-limited and redacted access; a proposed revision from the hub MUST be labelled
   as observed at retrieval time, not as the training revision.
 - **FR-022**: Discovery MUST NOT change any existing file or the tool's database. It MUST write a proposed
-  manifest only to an output path the user names, MUST refuse to replace an existing file unless the user
-  asks explicitly, and MUST mark unverified and conflicting candidates in that file so that registering it
-  as written does not turn them into confirmed entries.
+  manifest only to an output path the user names and MUST refuse to replace an existing file unless the
+  user asks explicitly. The proposed manifest MUST use the existing manifest format unchanged. Only entries
+  that registration measures or pins itself (local weight files, a hash-locked requirements file) are
+  written as active entries; every other candidate (a base model, dataset or licence read from the model
+  card, a conflicting entry, a gap) MUST be written as a comment that shows its status, origin and gaps,
+  so that registering the file as written registers none of them.
 - **FR-023**: Discovery output MUST state that it proposes dependencies from the evidence available and
   cannot establish complete training provenance.
 
@@ -302,9 +334,9 @@ proposed revision is labelled as observed at that time rather than as the traini
   Other package ecosystems, registries, deployment integrations and multi-parent lineage (#9) are out of
   scope.
 - The model card is the project's `README.md` front matter in the Hugging Face model card format.
-- "Authoritative metadata at a pinned revision" means a model hub's own answer for that exact revision.
-  Which hub answers establish a file's format is settled during planning; until then only bytes confirm a
-  code-free claim.
+- "Authoritative metadata at a pinned revision" means the file's own header bytes read from the hub at that
+  exact revision (FR-002a). Other hub metadata (such as its scan result) does not confirm a format unless
+  planning shows it establishes one. The header byte limit is set during planning and published.
 - The audit reads stored check results and does not refresh them; the freshness threshold for coverage
   defaults to the daily schedule the project recommends (24 hours) and can be changed.
 - Command names (`discover`, `inventory audit`) stay provisional until the CLI contract is reviewed
