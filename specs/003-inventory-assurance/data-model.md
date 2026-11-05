@@ -31,6 +31,7 @@ One confirmation attempt of one entry's code-free claim in one check run (or at 
 | `claim_check_id` | integer | key |
 | `model_id`, `version` | text, integer | the version checked |
 | `entry_identifier` | text | the entry's pinned identifier (`sha256:…`) |
+| `claim` | `code_free` \| `identity` | which claim was checked: the code-free format, or the pinned hash at the pinned revision |
 | `run_id` | integer \| null | the check run; null when made at import |
 | `outcome` | `confirmed` \| `contradicted` \| `unreadable` | see transitions |
 | `measured_format` | text \| null | the class the bytes show (`safetensors`, `gguf`, `onnx`, `pickle`, `pytorch-zip`, `unknown`) |
@@ -44,10 +45,12 @@ One confirmation attempt of one entry's code-free claim in one check run (or at 
 ```text
 needs confirmation ──(read, code-free)──────────────▶ confirmed     (final for the version)
 needs confirmation ──(read, not code-free / hash ≠)─▶ contradicted  (final for the version)
-needs confirmation ──(refused, failed, too large)───▶ unreadable ──(next run)──▶ read again
+needs confirmation ──(401/403/404, too large)───────▶ unreadable ──(next run)──▶ read again
+needs confirmation ──(network or 5xx, cut off)──────▶ no row; the source fails (exit 2)
 ```
 
-A final outcome is never read again for that version (FR-002b). A new version starts with no rows.
+A final outcome is never read again for that version (FR-002b). A new version starts with no rows. A
+weight entry can have one row sequence per `claim`.
 
 **Rule (FR-004)**: an entry counts as a code-free file beside the others under the strict policy only if
 it is pinned, `can_run_code` is false, and its claim is owner-trusted or its latest claim check is
@@ -79,13 +82,16 @@ claims exist in the version, `unconfirmed_claims`: a list of `{identifier, locat
 | `model_id`, `version`, `produced_at`, `stale_after_hours` | |
 | `summary` | counts: `alerts_open`, `watch_events`, `entries`, `verified`, `declared_but_unverified`, `conflicting`, `unavailable`, `gaps`, `uncheckable`, `sources_failed`, `sources_stale`, `sources_not_checked`; and `checked` (boolean) |
 | `findings` | `{state: "not_yet_checked" \| "checked", alerts: [...], watch_events: [...]}` in the shapes `alerts` already prints |
-| `assurance.entries[]` | `{kind, identifier, location, status, gap_reason, claims: [{claim, value, origin, verification}]}` |
+| `assurance.entries[]` | `{kind, identifier, location, status, gap_reason, claims: [{claim, value, origin, verification}]}`; `claim` is `format`, `can_run_code`, `sha256` or `revision`; `verification` is `owner`, `measured`, `confirmed`, `unverified` or `contradicted` |
 | `assurance.undeclared_kinds[]` | kinds the inventory has none of: `environment`, `base_model`, `datasets`, `weights` |
-| `coverage.sources[]` | `{source, relevant_entries, last_run_id, last_finished_at, status, age_hours, stale}` |
+| `coverage.sources[]` | `{source, relevant_entries: [identifier or location, …], last_run_id, last_finished_at, status, age_hours, stale}` |
 | `coverage.uncheckable[]` | `{kind, identifier, location, reason}` |
 | `statement` | fixed text: "No alerts is not evidence that the inventory is complete or the model is safe." |
 
 **Entry status** (research A12): `verified`, `declared-but-unverified`, `conflicting` or `unavailable`.
+
+The audit reads the database read-only and never upgrades it; on an older database the fields above that
+this feature adds take their defaults (research A12, Read-only open).
 
 ## Candidate dependency (new, output only)
 

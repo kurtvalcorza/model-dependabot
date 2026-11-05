@@ -49,11 +49,13 @@ the plan's Complexity Tracking.
 ## A3. Recording confirmations: a claim-check table and a new source
 
 **Decision**: a new check source `format-check` (name provisional, FR-002b) and a table `claim_checks`. In
-each run the source collects every code-free weight entry of each target version that needs confirmation
-(origin `import` or legacy, `can_run_code` false, no final confirmation yet). For each it reads the bytes
-(local file, A5) or the header (hub file, A4), classifies them and records one row: `confirmed`,
-`contradicted` or `unreadable`, with the measured format, the reason and an evidence row. `confirmed` and
-`contradicted` are final for that version and entry; `unreadable` is retried next run. The source is in the
+each run the source collects every pinned weight entry of each target version whose claims need
+confirmation (origin `import` or legacy, no final confirmation yet). It confirms the entry's identity
+(claim `identity`: the local file's hash, or the hub tree's SHA-256 at the pinned revision) and, when
+`can_run_code` is false, its format (claim `code_free`: the local bytes, A5, or the hub header, A4). Each
+attempt records one row: `confirmed`, `contradicted` or `unreadable`, with the measured value, the reason
+and an evidence row. `confirmed` and `contradicted` are final for that version, entry and claim;
+`unreadable` is retried next run. The source is in the
 default source list, so `check` with no `--source` runs it; with no entries to confirm it makes no
 requests and reports `ok`. A failure to reach the hub fails the source (exit code 2) and leaves the claim
 unverified, which already counts as absent, so failure is fail-closed.
@@ -93,6 +95,11 @@ length, and the measured class; the weight bytes themselves are not stored.
 downloads this way). This session's network policy blocks `huggingface.co`, so a marked live test records
 the answer and the recorded fixtures are made from it before the adapter is written (constitution V).
 
+**Refusals and failures**: a `401`, `403` or `404` from the tree or the ranged read, and a safetensors
+header over the 16 MiB cap, give the outcome `unreadable` with a `format_claim_unreadable` watch event;
+the source still reports `ok`. A network error or a `5xx` after the fetcher's retries, and a connection cut
+off mid-read, fail the source (exit code 2), as for `hf-scan`. Either way the claim stays unverified.
+
 **Alternatives considered**: the hub's security scan (says whether a scanner flagged the file, not what its
 format is); downloading the whole file (unbounded, and against the "never downloads weights" stance);
 trusting the tree's LFS metadata (it gives a hash and size, not a format).
@@ -120,6 +127,8 @@ first 256 KiB of the file. Only the keys above are read; any other key is listed
 `license_link` is kept as text and never fetched. A list of base models gives one candidate per entry with
 the gap "several base models; multi-parent lineage is #9". A base model always has the gap "no revision"
 unless a manifest supplies one. The licence is normalised with the existing SPDX normaliser.
+
+A card nested deeply enough to exhaust the parser's recursion (`RecursionError`) is reported as unreadable.
 
 **Alternatives considered**: a hand-written YAML subset parser (fragile on real cards); `ruamel.yaml`
 (heavier, no gain here).
@@ -192,6 +201,19 @@ Entry classification for the audit: **verified** when pinned and every claim's o
 manifest or registration record, a local measurement or a confirmation; **declared-but-unverified** when a
 claim is imported (or legacy) and not yet confirmed; **conflicting** when a confirmation contradicted it;
 **unavailable** when it is a gap or its confirmation was unreadable in the latest run.
+
+**Claims shown** (FR-001): `format` and `can_run_code` (origin `format_origin`), and the identity claims
+`sha256` (weights and packages) and `revision` (hub weights, base model, hub datasets), whose origin is the
+version's `origin` (`import` or legacy means imported). `format-check` confirms the identity of imported
+weight files (local hash, or the hub tree's SHA-256 at the pinned revision) as claim `identity`; no source
+in this feature confirms imported package hashes or base-model and dataset revisions, so the audit shows
+them as unverified with the reason "no check confirms this claim".
+
+**Read-only open** (FR-013): the audit opens SQLite with `mode=ro` through a separate
+`Store.open_read_only`, which runs no schema creation, migration or back-fill and writes no timestamps.
+Where a column or table this feature adds is missing, it reads the defaults: `origin` null (legacy),
+`format_origin` null and no claim checks. A schema older than feature 002 is refused with exit 1 and the
+message "run any check once to upgrade this database".
 
 ## A13. Fixtures and evaluation
 

@@ -33,6 +33,16 @@
   status and origin; only entries registration can measure or pin itself are written as active entries.
   The manifest format is unchanged (FR-022).
 
+### Session 2026-11-05 (after analysis)
+
+- Q: What does the audit do on a database created before this feature? → A: Opens it read-only and never
+  upgrades it; missing fields are read as their defaults, so the file stays byte-identical (FR-013).
+- Q: Which claims need a recorded origin? → A: All four: format, ability to run code, hash and revision.
+  Imported hash and revision claims are unverified until a check confirms them (FR-001).
+- Q: Is a hub refusal (401, 403 or 404) of a header read a source failure? → A: No. Refusals and headers
+  over the limit leave the claim unverified with a watch event and exit 0; only network errors and server
+  errors after retries fail the source (FR-002b).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - An imported code-free claim cannot hide a code-capable weight file (Priority: P1)
@@ -120,7 +130,8 @@ existing manifest are byte-for-byte unchanged; no network request is made.
 **Acceptance Scenarios**:
 
 1. **Given** a hash-locked requirements file, **When** discovery runs, **Then** each package is a candidate
-   with its exact version and hashes, origin "lock file" and status declared-but-unverified.
+   with its exact version and hashes, an origin naming the lock file and line, and status
+   declared-but-unverified.
 2. **Given** a dependency declared without an exact version, **When** discovery runs, **Then** it is a
    candidate with a gap "no exact version", never a guessed version.
 3. **Given** a local weight file, **When** discovery runs, **Then** the candidate carries the file's
@@ -198,6 +209,9 @@ proposed revision is labelled as observed at that time rather than as the traini
 - **FR-001**: Every inventory entry MUST carry the origin of each security-relevant claim about it
   (format, ability to run code, hash, revision): declared by the owner's manifest, measured from local
   bytes, read from an authoritative source at a pinned revision, or imported from a third-party inventory.
+  Hash and revision claims made by an imported inventory MUST be shown as unverified until a check confirms
+  them (a weight file's hash from its local bytes or from the hub's file list at the pinned revision); kinds
+  no source can confirm stay unverified and say so.
 - **FR-002**: A claim imported from a third-party inventory that a weight file cannot run code MUST be
   recorded as unverified until it is confirmed by the file's bytes or by authoritative metadata for the
   exact pinned revision.
@@ -209,10 +223,12 @@ proposed revision is labelled as observed at that time rather than as the traini
   unverified, never confirmed.
 - **FR-002b**: The header read MUST be a separate check source (name provisional) that runs with every
   check by default, scheduled or on demand, and can be selected or left out with `--source` like the
-  existing sources. It MUST read only hub weight files whose imported code-free claim is still unverified;
-  once a file's claim is confirmed or contradicted for a version, that file MUST NOT be read again for it.
-  A failure of this source MUST be reported like any other source failure (exit code 2), and a
-  version with no such claims MUST cause no requests.
+  existing sources. It MUST touch only weight files whose imported claims are still unverified: their hash
+  is confirmed from the hub's file list (or local bytes) and, only for a code-free claim, their header is
+  read. Once a claim is confirmed or contradicted for a version, it MUST NOT be checked again for it. A
+  refusal (401, 403, 404) or a header over the limit leaves the claim unverified with a watch event and is
+  not a failure; a network error or server error after retries fails the source like any other (exit code
+  2). A version with no such claims MUST cause no requests.
 - **FR-003**: When the file's bytes are available to a check, the format and ability to run code MUST be
   judged from the bytes; an imported claim they contradict MUST be recorded as contradicted, with both the
   claim and the measurement as evidence.
@@ -225,8 +241,9 @@ proposed revision is labelled as observed at that time rather than as the traini
 - **FR-006**: Under the strict policy, a confirmed code-free entry MUST suppress the alert for any
   code-capable file in the same version, as today. Naming the deployed artifact so that only it is judged
   is out of scope for this feature.
-- **FR-007**: For models registered from their own manifest or registration record, alert and watch-event
-  outcomes MUST be unchanged by this feature.
+- **FR-007**: For models registered from their own manifest or registration record after this feature is
+  installed, alert and watch-event outcomes MUST be unchanged by it. Versions registered before it are
+  treated as described under Assumptions.
 
 #### Inventory audit (User Story 2)
 
@@ -239,12 +256,14 @@ proposed revision is labelled as observed at that time rather than as the traini
   with their origins, and dependency kinds the inventory does not declare at all (for example no
   environment, no base model, no datasets).
 - **FR-011**: Check coverage MUST list, for each source relevant to the version's entries, when it last
-  answered successfully, whether it last failed and why, and which entries no enabled source can check.
+  answered successfully, whether it last failed and why, the entries it covers, and which entries no
+  source can check.
 - **FR-012**: The audit MUST never present the absence of alerts as completeness or safety. Its summary
   MUST state the number of unverified, conflicting and unavailable entries, gaps and failed or stale
   sources alongside the number of findings.
 - **FR-013**: The audit MUST NOT contact any source, run a check, change any alert or write anything other
-  than its own output.
+  than its own output. It MUST open the database read-only and never upgrade it; on a database created by
+  an earlier version, fields this feature adds are read as their defaults.
 - **FR-014**: The audit MUST exit successfully whenever it completes, whatever it reports, consistent with
   `check` (findings and weak assurance are not failures); machine-readable output MUST carry every count
   and classification.

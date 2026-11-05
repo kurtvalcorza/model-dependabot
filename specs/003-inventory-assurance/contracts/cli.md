@@ -9,7 +9,7 @@ names are provisional until this contract is reviewed (decision D2).
 
 | Command | What it does |
 | :-- | :-- |
-| `inventory audit ID [--version N] [--stale-after HOURS]` | Reports findings, inventory assurance and check coverage for one version (the latest by default) from the stored data. Contacts no source and writes nothing. `--stale-after` defaults to 24 |
+| `inventory audit ID [--version N] [--stale-after HOURS]` | Reports findings, inventory assurance and check coverage for one version (the latest by default) from the stored data. Opens the database read-only and never upgrades it; contacts no source and writes nothing. `--stale-after` defaults to 24 |
 | `discover PATH [--manifest FILE] [--model-id ID] [--upstream] [-o FILE [--force]]` | Proposes candidate dependencies for the project folder `PATH`. Reads nothing outside `PATH`. No network request unless `--upstream`. Writes nothing unless `-o`; refuses an existing `-o` file unless `--force`. Opens no database |
 
 ## Changed command
@@ -22,9 +22,9 @@ it out as for any other source. A version with no claim needing confirmation mak
 
 | Command | 0 | 1 | 2 | 3 |
 | :-- | :-- | :-- | :-- | :-- |
-| `inventory audit` | the audit completed, whatever it reports (FR-014) | unknown model or version, bad arguments | never | unexpected error |
+| `inventory audit` | the audit completed, whatever it reports (FR-014) | unknown model or version, bad arguments, a database older than feature 002 | never | unexpected error |
 | `discover` | discovery completed, including when upstream lookups failed (each such candidate is `unavailable`) | `PATH` is not a directory, `--manifest` unreadable or invalid, `-o` exists without `--force` | never | unexpected error |
-| `check` | as before | as before | as before; now also when `format-check` failed | as before |
+| `check` | as before | as before | as before; now also when `format-check` failed (network error or server error after retries; a 401, 403 or 404 is an `unreadable` claim, not a failure) | as before |
 
 ## Discovery limits (research A8)
 
@@ -66,16 +66,17 @@ it out as for any other source. A version with no claim needing confirmation mak
       {
         "kind": "weight_file", "identifier": "sha256:…", "location": "hf:org/repo/model.safetensors",
         "status": "declared-but-unverified", "gap_reason": null,
-        "claims": [{"claim": "can_run_code", "value": false, "origin": "import", "verification": "unverified"}]
+        "claims": [{"claim": "can_run_code", "value": false, "origin": "import", "verification": "unverified"},
+                   {"claim": "sha256", "value": "sha256:…", "origin": "import", "verification": "confirmed"}]
       }
     ],
     "undeclared_kinds": ["datasets"]
   },
   "coverage": {
     "sources": [
-      {"source": "osv", "relevant_entries": 5, "last_run_id": 41, "last_finished_at": "2026-11-05T03:17:09Z",
+      {"source": "osv", "relevant_entries": ["pkg:pypi/torch@2.5.1", "…"], "last_run_id": 41, "last_finished_at": "2026-11-05T03:17:09Z",
        "status": "ok", "age_hours": 5.7, "stale": false},
-      {"source": "format-check", "relevant_entries": 1, "last_run_id": 41,
+      {"source": "format-check", "relevant_entries": ["sha256:…"], "last_run_id": 41,
        "last_finished_at": "2026-11-05T03:17:09Z", "status": "failed: HTTP 503 after 4 attempts",
        "age_hours": 5.7, "stale": false}
     ],

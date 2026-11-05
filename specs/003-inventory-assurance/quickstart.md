@@ -40,10 +40,10 @@ With the honest fixture `tests/fixtures/boms/confirmed-code-free.json` the same 
 
 ## 3. Old imports are re-marked (FR-005)
 
-`tests/integration/test_claim_trust.py::test_legacy_import` opens a database written before this feature
+`tests/integration/test_claim_trust_legacy.py::test_legacy_import` opens a database written before this feature
 (`tests/fixtures/db/legacy-import.db`, built by the test from a pre-003 schema), with a strict-policy model
-whose imported code-free claim silenced the alert. After one `check` with `format-check` answering
-`unreadable` (recorded 503), the `format_policy` alert is open and names the rule. A manifest-registered
+whose imported code-free claim silenced the alert. After one `check` in which `format-check` fails
+(recorded 503, exit code 2), the `format_policy` alert is open and names the rule. A manifest-registered
 model in the same database keeps exactly its earlier alerts (FR-007).
 
 ## 4. Audit after a clean check (User Story 2)
