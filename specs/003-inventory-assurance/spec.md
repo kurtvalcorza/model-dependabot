@@ -343,4 +343,7 @@ proposed revision is labelled as observed at that time rather than as the traini
   (decision D2).
 - Size and file-count limits for discovery are set during planning and published in the CLI contract.
 - Naming the deployed weight file, so that the strict policy judges only it, is a later feature (FR-006).
+- The database does not record how versions registered before this feature were made, so all of them are
+  treated like imports under FR-005; FR-007 applies to versions registered after it (plan, Complexity
+  Tracking).
 - No release gate is built here (decision D4); FR-004's rule is written so a later gate can rely on it.
