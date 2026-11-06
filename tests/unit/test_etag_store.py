@@ -42,8 +42,10 @@ class _Raw:
         for key, value in headers.items():
             self.headers[key] = value
 
-    def read(self) -> bytes:
-        return self._body
+    def read(self, amount: int = -1) -> bytes:
+        size = len(self._body) if amount < 0 else amount
+        chunk, self._body = self._body[:size], self._body[size:]
+        return chunk
 
     def geturl(self) -> str:
         return self._url

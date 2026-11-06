@@ -18,7 +18,9 @@ and an optional ETag cache revalidates with ``If-None-Match`` and serves a 304 f
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
+import socket
 import threading
 import time
 import urllib.error
@@ -37,6 +39,11 @@ from model_dependabot.redact import RedactionError, redact, source_for_url
 
 DEFAULT_USER_AGENT = f"model-dependabot/{__version__}"
 MAX_REDIRECTS = 5
+# The most a single response body may hold (SEC-03, #11). The largest real answers (the takedown
+# log, a big repository's file tree, an OSV batch) are a few megabytes; anything near this is broken
+# or hostile, so the source fails rather than exhausting memory. No ``Accept-Encoding`` is sent, so
+# the bytes counted are the bytes kept and nothing is decompressed.
+DEFAULT_MAX_BODY_BYTES = 128 * 2**20
 
 
 class Headers(dict[str, str]):
@@ -159,7 +166,7 @@ def _redacted(
     """
     source = TAKEDOWNS if asked == TAKEDOWNS else source_for_url(response.url)
     try:
-        result = redact(source, response.body)
+        result = redact(source, response.body, strict=200 <= response.status < 300)
     except RedactionError as error:
         raise SourceFailedError(source_of(response.url), str(error)) from None
     original = result.original_sha256
@@ -189,6 +196,51 @@ def open_without_redirects(request: urllib.request.Request, timeout: float) -> A
     return urllib.request.build_opener(NoRedirectHandler()).open(request, timeout=timeout)
 
 
+def _non_public(host: str) -> bool:
+    """Whether ``host`` names this machine or a non-public network by itself (no DNS lookup)."""
+    name = host.rstrip(".").lower()
+    if name == "localhost" or name.endswith(".localhost"):
+        return True
+    try:
+        address = ipaddress.ip_address(name)
+    except ValueError:
+        try:  # the legacy IPv4 forms the resolver still accepts, such as 2130706433 or 127.1
+            address = ipaddress.IPv4Address(socket.inet_aton(name))
+        except (OSError, ValueError):
+            return False
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+    return not address.is_global
+
+
+def _refused_redirect(asked: str, target: str) -> str | None:
+    """Why a redirect from the URL ``asked`` to ``target`` must not be followed, or ``None``.
+
+    A hop that stays on the origin asked for (scheme, host and port) is allowed, so a configured
+    local mirror keeps working. Any other hop must be ``https`` to a host that is not this machine
+    or a private, link-local or otherwise non-public address (SEC-02, #10). Host names are not
+    resolved, so a public name that resolves to a private address is not caught here.
+    """
+    start, end = urlsplit(asked), urlsplit(target)
+    try:
+        same_origin = bool(end.hostname) and (start.scheme, start.hostname, start.port) == (
+            end.scheme,
+            end.hostname,
+            end.port,
+        )
+    except ValueError:
+        return "its address cannot be read"
+    if same_origin:
+        return None
+    if end.scheme != "https":
+        return f"only https is followed, not {end.scheme or 'a missing scheme'}"
+    if not end.hostname:
+        return "it names no host"
+    if _non_public(end.hostname):
+        return f"{end.hostname} is not a public host"
+    return None
+
+
 def _follow(
     send: Callable[[str, str, bytes | None, str | None], Response],
     method: str,
@@ -208,6 +260,11 @@ def _follow(
     while 300 <= response.status < 400 and response.redirected_to:
         if hops >= MAX_REDIRECTS:
             raise SourceFailedError(source_of(url), f"more than {MAX_REDIRECTS} redirects")
+        refused = _refused_redirect(url, response.redirected_to)
+        if refused:
+            raise SourceFailedError(
+                source_of(url), f"redirect to {response.redirected_to} refused: {refused}"
+            )
         hops += 1
         response = send(method, response.redirected_to, None, asked)
     return replace(response, redirected_from=url) if hops else response
@@ -295,6 +352,7 @@ class UrlFetcher:
         sleep: Callable[[float], None] = time.sleep,
         utcnow: Callable[[], datetime] = lambda: datetime.now(UTC),
         etag_cache: MutableMapping[str, Response] | None = None,
+        max_body_bytes: int = DEFAULT_MAX_BODY_BYTES,
     ) -> None:
         if "@" in user_agent:
             raise ValueError("the User-Agent must be generic and must not carry an email address")
@@ -307,6 +365,7 @@ class UrlFetcher:
         self._limits = dict(DEFAULT_LIMITS if limits is None else limits)
         self._opener = opener or open_without_redirects
         self._etags = etag_cache
+        self._max_body = max_body_bytes
         self._locks: dict[str, threading.Lock] = {}
         self._monotonic = monotonic
         self._sleep = sleep
@@ -352,7 +411,8 @@ class UrlFetcher:
             try:
                 request = self._build(method, url, body, etag=etag)
                 with self._opener(request, timeout=self._timeout) as raw:
-                    response = self._answer(url, raw.status, raw.read(), raw.headers, cached, asked)
+                    body_read = self._read(raw, source)
+                    response = self._answer(url, raw.status, body_read, raw.headers, cached, asked)
                 self._429s[source] = 0
                 self._cache[key] = response
                 return response
@@ -360,7 +420,8 @@ class UrlFetcher:
                 status = error.code
                 reason = f"HTTP {status}"
                 if status < 400:
-                    response = self._answer(url, status, error.read(), error.headers, cached, asked)
+                    body_read = self._read(error, source)
+                    response = self._answer(url, status, body_read, error.headers, cached, asked)
                     self._cache[key] = response
                     return response
                 if status == 429:
@@ -368,7 +429,8 @@ class UrlFetcher:
                     if self._429s[source] >= self._max_429s:
                         self._fail(source, f"HTTP 429 {self._429s[source]} times")
                 elif status < 500:
-                    response = self._answer(url, status, error.read(), error.headers, None, asked)
+                    body_read = self._read(error, source)
+                    response = self._answer(url, status, body_read, error.headers, None, asked)
                     self._cache[key] = response
                     return response
                 retry_after = self._retry_after(error.headers)
@@ -419,6 +481,18 @@ class UrlFetcher:
         if self._etags is not None and 200 <= status < 300 and response.headers.get("ETag"):
             self._etags[url] = response
         return response
+
+    def _read(self, stream: Any, source: str) -> bytes:
+        """The whole body of ``stream``, never more than the cap plus one byte (SEC-03, #11)."""
+        chunks: list[bytes] = []
+        size = 0
+        while size <= self._max_body:
+            chunk = stream.read(min(1 << 20, self._max_body + 1 - size))
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+            size += len(chunk)
+        raise SourceFailedError(source, f"the answer is larger than {self._max_body} bytes")
 
     def _fail(self, source: str, reason: str) -> None:
         self.failed_sources[source] = reason
