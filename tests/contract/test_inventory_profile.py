@@ -154,10 +154,16 @@ def test_only_documented_custom_properties_are_written(bom: dict[str, Any]) -> N
     assert set(names) <= PROPERTIES
 
 
+def _without_origin(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The entries apart from where each format claim came from, which an import never keeps
+    (feature 003: an imported claim is a third party's, contracts/inventory-profile.md)."""
+    return [{k: v for k, v in entry.items() if k != "format_origin"} for entry in entries]
+
+
 def test_export_then_import_yields_the_same_entries(
     bom: dict[str, Any], entries: list[dict[str, Any]]
 ) -> None:
-    assert import_bom(bom) == entries
+    assert _without_origin(import_bom(bom)) == _without_origin(entries)
 
 
 def test_export_import_export_is_stable(bom: dict[str, Any]) -> None:
@@ -172,7 +178,7 @@ def test_older_cyclonedx_versions_import(
     older = copy.deepcopy(bom)
     older["specVersion"] = spec_version
     older["$schema"] = f"http://cyclonedx.org/schema/bom-{spec_version}.schema.json"
-    assert import_bom(older) == entries
+    assert _without_origin(import_bom(older)) == _without_origin(entries)
 
 
 def test_unreadable_entries_become_gaps() -> None:

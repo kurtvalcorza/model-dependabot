@@ -84,7 +84,16 @@ WATCH_KINDS = (
     "weight_file_absent",
     # review F1, amended 2026-10-31: OSV answered 404 for a record fetched by its id
     "advisory_gone",
+    # feature 003 (data-model.md, Watch event): an imported code-free claim checked
+    "format_claim_contradicted",
+    "format_claim_unreadable",
 )
+# Feature 003 (data-model.md): how a version was registered and where a weight file's format
+# claim came from; which claim a claim check confirmed and how it came out.
+VERSION_ORIGINS = ("manifest", "record", "import")
+FORMAT_ORIGINS = ("bytes", "name", "record", "import")
+CLAIMS = ("code_free", "identity")
+CLAIM_OUTCOMES = ("confirmed", "contradicted", "unreadable")
 TRIGGERS = ("scheduled", "on_demand")
 OUTCOMES = ("reachable", "refused", "not_found", "removed", "redirected")
 LICENCE_FORMS = ("spdx", "expression", "unrecognised", "none")
@@ -119,6 +128,7 @@ CREATE TABLE IF NOT EXISTS model_versions (
     inventory TEXT NOT NULL,
     base_dir TEXT,
     registration_record_sha256 TEXT,
+    origin TEXT CHECK (origin IS NULL OR origin IN {_in(VERSION_ORIGINS)}),
     PRIMARY KEY (model_id, version)
 );
 
@@ -143,6 +153,7 @@ CREATE TABLE IF NOT EXISTS inventory_entries (
     recorded_licence TEXT,
     licence_form TEXT CHECK (licence_form IS NULL OR licence_form IN {_in(LICENCE_FORMS)}),
     paper_dois TEXT,
+    format_origin TEXT CHECK (format_origin IS NULL OR format_origin IN {_in(FORMAT_ORIGINS)}),
     FOREIGN KEY (model_id, version) REFERENCES model_versions (model_id, version),
     CHECK (pinned = 1 OR gap_reason IS NOT NULL),
     CHECK (pinned = 0 OR identifier IS NOT NULL)
@@ -273,6 +284,27 @@ CREATE TABLE IF NOT EXISTS watch_event_evidence (
     PRIMARY KEY (watch_event_id, evidence_id)
 );
 
+-- Feature 003 (data-model.md, Claim check): one confirmation attempt of one entry's claim in one
+-- check run (``run_id``) or at import (``run_id`` null). The latest row per claim decides.
+CREATE TABLE IF NOT EXISTS claim_checks (
+    claim_check_id INTEGER PRIMARY KEY,
+    model_id TEXT NOT NULL,
+    version INTEGER NOT NULL CHECK (version >= 1),
+    entry_identifier TEXT NOT NULL,
+    claim TEXT NOT NULL CHECK (claim IN {_in(CLAIMS)}),
+    run_id INTEGER REFERENCES check_runs (run_id),
+    outcome TEXT NOT NULL CHECK (outcome IN {_in(CLAIM_OUTCOMES)}),
+    measured_format TEXT,
+    measured_can_run_code INTEGER CHECK (measured_can_run_code IN (0, 1)),
+    reason TEXT,
+    evidence_id INTEGER NOT NULL REFERENCES evidence (evidence_id),
+    checked_at TEXT NOT NULL,
+    FOREIGN KEY (model_id, version) REFERENCES model_versions (model_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS claim_checks_by_entry
+    ON claim_checks (model_id, version, entry_identifier, claim, claim_check_id);
+
 -- Review C2, research U13: the ETag cache, kept across runs so a later run revalidates with
 -- If-None-Match. One row per URL; the body is the redacted one, kept in the evidence store.
 CREATE TABLE IF NOT EXISTS etag_cache (
@@ -316,6 +348,7 @@ ENTRY_FIELDS = (
     "recorded_licence",
     "licence_form",
     "paper_dois",
+    "format_origin",
 )
 _OBSERVATION_FIELDS = (
     "http_status",
@@ -398,8 +431,42 @@ class Store:
                 )
         if "canonical_sha256" not in self.columns("evidence"):
             self._add_canonical_hashes()
+        self._add_origins()
         self._widen_watch_kinds()
         self._rekey_repository_alerts()
+
+    def _add_origins(self) -> None:
+        """Add feature 003's ``origin`` and ``format_origin`` to an older database (research A2).
+
+        A version registered from a registration record is back-filled as ``record``; every other
+        old version keeps a null origin (legacy) and every old entry a null ``format_origin``.
+        The versions stay immutable: the trigger that guards them is lifted for the back-fill
+        only, inside the same transaction, and put back.
+        """
+        if "format_origin" not in self.columns("inventory_entries"):
+            with self.conn:
+                self.conn.execute(
+                    "ALTER TABLE inventory_entries ADD COLUMN format_origin TEXT CHECK"
+                    f" (format_origin IS NULL OR format_origin IN {_in(FORMAT_ORIGINS)})"
+                )
+        if "origin" in self.columns("model_versions"):
+            return
+        trigger = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'trigger'"
+            " AND name = 'model_versions_no_update'"
+        ).fetchone()
+        with self.conn:
+            self.conn.execute(
+                "ALTER TABLE model_versions ADD COLUMN origin TEXT CHECK"
+                f" (origin IS NULL OR origin IN {_in(VERSION_ORIGINS)})"
+            )
+            self.conn.execute("DROP TRIGGER IF EXISTS model_versions_no_update")
+            self.conn.execute(
+                "UPDATE model_versions SET origin = 'record'"
+                " WHERE registration_record_sha256 IS NOT NULL"
+            )
+            if trigger is not None:
+                self.conn.execute(trigger["sql"])
 
     def _add_canonical_hashes(self) -> None:
         """Add ``evidence.canonical_sha256`` to an older database and fill it where it can (006).
@@ -575,19 +642,22 @@ class Store:
         *,
         base_dir: Path | str | None = None,
         registration_record_sha256: str | None = None,
+        origin: str | None = None,
     ) -> int:
         """Record the next version of a model with its inventory and entries, all or nothing.
 
         ``base_dir`` is the directory that local weight-file locations are relative to (the
         manifest's or the imported inventory's), so a check can find the files to scan.
         ``registration_record_sha256`` is set when the local weight files were registered from a
-        registration record, without their bytes (feature 005).
+        registration record, without their bytes (feature 005). ``origin`` is how the version was
+        registered: ``manifest``, ``record`` or ``import`` (feature 003).
         """
         with self.conn:
             version = (self.latest_version(model_id) or 0) + 1
             self.conn.execute(
                 "INSERT INTO model_versions (model_id, version, registered_at, manifest_sha256,"
-                " inventory, base_dir, registration_record_sha256) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                " inventory, base_dir, registration_record_sha256, origin)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     model_id,
                     version,
@@ -596,6 +666,7 @@ class Store:
                     json.dumps(inventory),
                     None if base_dir is None else str(Path(base_dir).resolve()),
                     registration_record_sha256,
+                    origin,
                 ),
             )
             for entry in entries:
@@ -613,7 +684,8 @@ class Store:
             "INSERT INTO inventory_entries (model_id, version, kind, identifier, pinned,"
             " gap_reason, location, size, format, can_run_code, hub_repo, hub_revision,"
             " hub_file, name, package_version, hashes, recorded_licence, licence_form,"
-            " paper_dois) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " paper_dois, format_origin)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 model_id,
                 version,
@@ -634,6 +706,7 @@ class Store:
                 entry.get("recorded_licence"),
                 entry.get("licence_form"),
                 None if paper_dois is None else json.dumps(list(paper_dois)),
+                entry.get("format_origin"),
             ),
         )
 
@@ -662,6 +735,69 @@ class Store:
             record["paper_dois"] = _loads(row["paper_dois"])
             result.append(record)
         return result
+
+    # --- claim checks (feature 003, data-model.md) ----------------------------------------------
+
+    def add_claim_check(
+        self,
+        *,
+        model_id: str,
+        version: int,
+        entry_identifier: str,
+        claim: str,
+        run_id: int | None,
+        outcome: str,
+        measured_format: str | None,
+        measured_can_run_code: bool | None,
+        reason: str | None,
+        evidence_id: int,
+    ) -> int:
+        """Record one confirmation attempt of one entry's claim (``code_free`` or ``identity``)."""
+        with self.conn:
+            cursor = self.conn.execute(
+                "INSERT INTO claim_checks (model_id, version, entry_identifier, claim, run_id,"
+                " outcome, measured_format, measured_can_run_code, reason, evidence_id,"
+                " checked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    model_id,
+                    version,
+                    entry_identifier,
+                    claim,
+                    run_id,
+                    outcome,
+                    measured_format,
+                    None if measured_can_run_code is None else int(bool(measured_can_run_code)),
+                    reason,
+                    evidence_id,
+                    self._stamp(),
+                ),
+            )
+        return int(cursor.lastrowid)
+
+    @staticmethod
+    def _claim_check(row: sqlite3.Row) -> dict[str, Any]:
+        record = dict(row)
+        record["measured_can_run_code"] = _bool(record["measured_can_run_code"])
+        return record
+
+    def latest_claim_check(
+        self, model_id: str, version: int, identifier: str, *, claim: str = "code_free"
+    ) -> dict[str, Any] | None:
+        """The latest check of one entry's ``claim`` in a version, which decides its state."""
+        row = self.conn.execute(
+            "SELECT * FROM claim_checks WHERE model_id = ? AND version = ?"
+            " AND entry_identifier = ? AND claim = ? ORDER BY claim_check_id DESC LIMIT 1",
+            (model_id, version, identifier, claim),
+        ).fetchone()
+        return None if row is None else self._claim_check(row)
+
+    def claim_checks(self, model_id: str, version: int) -> list[dict[str, Any]]:
+        """Every claim check of a version, oldest first."""
+        rows = self.conn.execute(
+            "SELECT * FROM claim_checks WHERE model_id = ? AND version = ? ORDER BY claim_check_id",
+            (model_id, version),
+        ).fetchall()
+        return [self._claim_check(row) for row in rows]
 
     # --- evidence ------------------------------------------------------------------------------
 

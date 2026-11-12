@@ -324,5 +324,6 @@ def check_record(manifest: Manifest, record: Mapping[str, Any]) -> CheckedRecord
             size=item["size"],
             format=item["format"],
             can_run_code=item["can_run_code"],
+            format_origin="record",
         )
     return CheckedRecord(str(record["record_sha256"]), entries, scans)

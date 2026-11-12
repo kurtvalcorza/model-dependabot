@@ -324,8 +324,12 @@ def _record(
     owner: str | None = None,
     base_dir: Path | None = None,
     registration_record_sha256: str | None = None,
+    origin: str,
 ) -> int:
-    """Record the next version with its validated CycloneDX 1.7 document (FR-004, FR-005)."""
+    """Record the next version with its validated CycloneDX 1.7 document (FR-004, FR-005).
+
+    ``origin`` is how it was registered: ``manifest``, ``record`` or ``import`` (feature 003).
+    """
     if store.get_model(model_id) is None:
         store.add_model(model_id, name=name, owner=owner)
     version = (store.latest_version(model_id) or 0) + 1
@@ -342,6 +346,7 @@ def _record(
         entries,
         base_dir=base_dir,
         registration_record_sha256=registration_record_sha256,
+        origin=origin,
     )
     if recorded != version:
         raise RuntimeError(f"expected to record version {version}, recorded {recorded}")
@@ -472,6 +477,7 @@ def make_handlers(
                 owner=manifest.owner,
                 base_dir=Path(args.manifest).parent,
                 registration_record_sha256=None if checked is None else checked.record_sha256,
+                origin="manifest" if checked is None else "record",
             )
             payload = _inventory_payload(model_id, version, store.entries(model_id, version))
             payload["alerts"] = reevaluate_version(store, model_id, version)
@@ -512,6 +518,7 @@ def make_handlers(
                 entries,
                 hashlib.sha256(raw).hexdigest(),
                 base_dir=Path(args.bom).parent,
+                origin="import",
             )
             payload = _inventory_payload(model_id, version, store.entries(model_id, version))
             payload["alerts"] = reevaluate_version(store, model_id, version)

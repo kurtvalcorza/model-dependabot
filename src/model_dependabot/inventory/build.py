@@ -13,6 +13,7 @@ import io
 import json
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO
 from urllib.parse import quote
@@ -87,46 +88,79 @@ def check_entry(entry: dict[str, Any]) -> None:
         raise ValueError("an entry that is not pinned needs a gap_reason")
 
 
-def _lead(content: bytes | Path, size: int) -> bytes:
+@dataclass(frozen=True)
+class NeedMoreBytes:
+    """``classify_lead``'s answer when the lead is too short: read ``length`` bytes and ask again.
+
+    Only a safetensors header longer than the lead asks for more (research A4).
+    """
+
+    length: int
+
+
+class _NeedMore(Exception):
+    def __init__(self, length: int) -> None:
+        self.length = length
+
+
+Read = Callable[[int], bytes]
+
+
+def _reader(content: bytes | Path) -> Read:
+    """The first ``n`` bytes of a file or of content at hand, read only when asked for."""
     if isinstance(content, Path):
-        with content.open("rb") as handle:
-            return handle.read(size)
-    return content[:size]
+
+        def read_path(n: int) -> bytes:
+            with content.open("rb") as handle:
+                return handle.read(n)
+
+        return read_path
+    return lambda n: content[:n]
 
 
-def _starts_like_zip(content: bytes | Path) -> bool:
-    return _lead(content, _HEAD_BYTES) == _ZIP_MAGIC
+def _lead_reader(lead: bytes, size: int) -> Read:
+    """The first ``n`` bytes from a lead of a ``size``-byte file; asks for more past its end."""
+
+    def read_lead(n: int) -> bytes:
+        if n > len(lead) and len(lead) < size:
+            raise _NeedMore(min(n, size))
+        return lead[:n]
+
+    return read_lead
+
+
+def _starts_like_zip(read: Read) -> bool:
+    return read(_HEAD_BYTES) == _ZIP_MAGIC
 
 
 def _size(content: bytes | Path) -> int:
     return content.stat().st_size if isinstance(content, Path) else len(content)
 
 
-def _is_gguf(content: bytes | Path) -> bool:
+def _is_gguf(read: Read, size: int) -> bool:
     """Whether the bytes start with a GGUF header: the magic, version 2 or 3, and tensor and
     metadata counts that fit the file. The magic alone is not enough: a pickle can start with it
     (``G`` is the BINFLOAT opcode, which swallows the next eight bytes), but its later opcodes then
     sit in the count fields and make them far larger than the file (review of #4)."""
-    lead = _lead(content, 24)
+    lead = read(24)
     if len(lead) < 24 or lead[:4] != _GGUF_MAGIC:
         return False
     version = int.from_bytes(lead[4:8], "little")
     tensors = int.from_bytes(lead[8:16], "little")
     pairs = int.from_bytes(lead[16:24], "little")
     needed = 24 + _GGUF_MIN_TENSOR * tensors + _GGUF_MIN_PAIR * pairs
-    return version in _GGUF_VERSIONS and needed <= _size(content)
+    return version in _GGUF_VERSIONS and needed <= size
 
 
-def _is_safetensors(content: bytes | Path) -> bool:
+def _is_safetensors(read: Read, size: int) -> bool:
     """Whether the bytes are a well-formed safetensors file: an 8-byte little-endian header length
     that fits the file, a JSON object header, and every tensor's ``data_offsets`` inside the data
     after it. One byte is not enough: a pickle can carry a brace at offset 8 (review F-02)."""
-    size = _size(content)
-    length = int.from_bytes(_lead(content, 8), "little")
+    length = int.from_bytes(read(8), "little")
     if size < 8 or length < 2 or length > min(size - 8, _SAFETENSORS_HEADER_LIMIT):
         return False
     try:
-        header = json.loads(_lead(content, 8 + length)[8:].decode("utf-8"))
+        header = json.loads(read(8 + length)[8:].decode("utf-8"))
     except (UnicodeDecodeError, ValueError, RecursionError):  # a deeply nested header too
         return False
     if not isinstance(header, dict):
@@ -146,7 +180,7 @@ def _is_safetensors(content: bytes | Path) -> bool:
     return True
 
 
-def _is_code_free(suffix: str, content: bytes | Path) -> bool:
+def _is_code_free(suffix: str, read: Read, size: int) -> bool:
     """Whether a local file named as a code-free format shows that format in its bytes.
 
     A ``.safetensors`` file must be well formed and a ``.gguf`` file must start with a GGUF header
@@ -155,12 +189,12 @@ def _is_code_free(suffix: str, content: bytes | Path) -> bool:
     protocol 2-5; a protocol 0 or 1 pickle under that name is the one case still trusted by name.
     """
     if suffix == ".safetensors":
-        return _is_safetensors(content)
+        return _is_safetensors(read, size)
     if suffix == ".gguf":
-        return _is_gguf(content)
-    lead = _lead(content, 2)
+        return _is_gguf(read, size)
+    lead = read(2)
     starts_like_pickle = len(lead) == 2 and lead[0] == 0x80 and lead[1] in _PICKLE_PROTOCOLS
-    return not (starts_like_pickle or _starts_like_zip(content))
+    return not (starts_like_pickle or _starts_like_zip(read))
 
 
 def _is_pytorch_zip(content: bytes | Path) -> bool:
@@ -185,17 +219,55 @@ def classify(name: str, head: bytes | Path | None) -> tuple[str, bool | None]:
     renamed pickle is still scanned (review F-02).
     """
     suffix = PurePosixPath(name).suffix.lower()
-    if suffix in CODE_FREE_FORMATS:
-        if head is None or _is_code_free(suffix, head):
+    if head is None:
+        if suffix in CODE_FREE_FORMATS:
             return CODE_FREE_FORMATS[suffix], False
-        if not _starts_like_zip(head):
+        return (
+            (PICKLE_FORMATS[suffix], True) if suffix in PICKLE_FORMATS else (UNKNOWN_FORMAT, None)
+        )
+    read = _reader(head)
+    return _classify(suffix, read, _size(head), lambda: _is_pytorch_zip(head))
+
+
+def _classify(
+    suffix: str, read: Read, size: int, pytorch_zip: Callable[[], bool] | None
+) -> tuple[str, bool | None]:
+    """The rules of ``classify`` on bytes; ``pytorch_zip`` is ``None`` when a zip's central
+    directory cannot be read (a lead of a larger file), so a zip is never code-free there."""
+    if suffix in CODE_FREE_FORMATS:
+        if _is_code_free(suffix, read, size):
+            return CODE_FREE_FORMATS[suffix], False
+        if not _starts_like_zip(read):
             return "pickle", True
-        return ("pytorch-zip", True) if _is_pytorch_zip(head) else (UNKNOWN_FORMAT, None)
-    if head is not None and _starts_like_zip(head) and _is_pytorch_zip(head):
+        if pytorch_zip is not None and pytorch_zip():
+            return "pytorch-zip", True
+        return UNKNOWN_FORMAT, None
+    if _starts_like_zip(read) and pytorch_zip is not None and pytorch_zip():
         return "pytorch-zip", True
     if suffix in PICKLE_FORMATS:
         return PICKLE_FORMATS[suffix], True
     return UNKNOWN_FORMAT, None
+
+
+def classify_lead(
+    name: str, lead: bytes, total_size: int
+) -> tuple[str, bool | None] | NeedMoreBytes:
+    """``classify``'s answer from the first bytes of a file and its true size (research A4).
+
+    The safetensors, GGUF, ONNX and pickle tests run on ``lead`` with ``total_size``, since offsets
+    and counts must fit the whole file. A zip's central directory is at its end, so when ``lead``
+    is not the whole file a zip is never taken for a code-free format: it is ``unknown`` under a
+    code-free name. A safetensors header longer than ``lead`` gives ``NeedMoreBytes`` with the
+    length to read.
+    """
+    suffix = PurePosixPath(name).suffix.lower()
+    whole = len(lead) >= total_size
+    content = lead[:total_size] if whole else lead
+    pytorch_zip = (lambda: _is_pytorch_zip(content)) if whole else None
+    try:
+        return _classify(suffix, _lead_reader(lead, total_size), total_size, pytorch_zip)
+    except _NeedMore as more:
+        return NeedMoreBytes(more.length)
 
 
 def class_fits_name(name: str, file_format: Any, can_run_code: Any) -> bool:
@@ -242,6 +314,7 @@ def _local_weight(spec: WeightSpec) -> dict[str, Any]:
         size=size,
         format=file_format,
         can_run_code=can_run_code,
+        format_origin="bytes",
     )
 
 
@@ -251,6 +324,7 @@ def _hub_weight(spec: WeightSpec, hub: HuggingFace | None) -> dict[str, Any]:
     fields: dict[str, Any] = {
         "format": file_format,
         "can_run_code": can_run_code,
+        "format_origin": "name",  # the owner's manifest names the file (FR-007)
         "hub_repo": spec.hub_repo,
         "hub_file": spec.file,
     }

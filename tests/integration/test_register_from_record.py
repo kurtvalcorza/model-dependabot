@@ -114,7 +114,12 @@ def outcomes(cli: Cli, db: str, model_id: str) -> tuple[list[Any], list[Any], li
         (e["kind"], e["identifier"], json.dumps(e["detail"], sort_keys=True))
         for e in listed["watch_events"]
     )
-    return shown["entries"] + shown["gaps"], alerts, events
+    # Where each format claim came from differs by design (feature 003: bytes or record).
+    entries = [
+        {k: v for k, v in entry.items() if k != "format_origin"}
+        for entry in shown["entries"] + shown["gaps"]
+    ]
+    return entries, alerts, events
 
 
 # --- the record ---------------------------------------------------------------------------------
@@ -396,3 +401,31 @@ def test_picklescan_on_absent_bytes_is_a_watch_event(
     incomplete = [event for event in after["watch_events"] if event["kind"] == "scan_incomplete"]
     assert [event["detail"]["location"] for event in incomplete] == ["weights/model.joblib"]
     assert all("cannot read" not in str(event["detail"]) for event in incomplete)
+
+
+# --- feature 003: where each claim came from (T008, FR-001, FR-007) -----------------------------
+
+
+def test_register_from_record_records_record_origins(
+    cli: Cli, tmp_path: Path, craft: ModuleType, derive_hf: Callable[..., Path]
+) -> None:
+    from model_dependabot.store import Store
+
+    hub_weight = f'hub = "hf:{EICAR_REPO}"\nrevision = "{EICAR_COMMIT}"\nfile = "pytorch_model.bin"'
+    path = owner_clone(tmp_path / "owner", craft, ['path = "weights/innocuous.pkl"', hub_weight])
+    out = tmp_path / "out" / "model.record.json"
+    make_record(cli, path, out)
+    ci_manifest, ci_record = ci_clone(tmp_path / "ci", path, out)
+    code, registered = cli(
+        "register", str(ci_manifest), "--from-record", str(ci_record), recordings=derive_hf()
+    )
+    assert code == EXIT_OK, registered
+    with Store(tmp_path / "db" / "md" / "md.db") as store:
+        assert store.get_version("record-model", 1)["origin"] == "record"
+        origins = {
+            entry["location"] if not entry["hub_repo"] else entry["hub_file"]: entry[
+                "format_origin"
+            ]
+            for entry in store.entries("record-model", 1)
+        }
+    assert origins == {"weights/innocuous.pkl": "record", "pytorch_model.bin": "name"}
