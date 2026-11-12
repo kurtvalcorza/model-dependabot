@@ -18,6 +18,7 @@ and an optional ETag cache revalidates with ``If-None-Match`` and serves a 304 f
 from __future__ import annotations
 
 import hashlib
+import http.client
 import ipaddress
 import json
 import socket
@@ -108,6 +109,43 @@ class Fetcher(Protocol):
     def get(self, url: str, *, follow_redirects: bool = True) -> Response: ...
 
     def post(self, url: str, body: bytes) -> Response: ...
+
+    def get_range(self, url: str, length: int) -> Response: ...
+
+
+def range_header(length: int) -> str:
+    """The ``Range`` value for the first ``length`` bytes (feature 003, research A4)."""
+    if length < 1:
+        raise ValueError("a ranged read needs at least one byte")
+    return f"bytes=0-{length - 1}"
+
+
+def _content_range(value: str | None) -> tuple[int, int, int] | None:
+    """``(first, last, total)`` of a ``Content-Range: bytes first-last/total`` header."""
+    if not value or not value.startswith("bytes "):
+        return None
+    span, _, total = value[6:].partition("/")
+    first, _, last = span.partition("-")
+    try:
+        return int(first), int(last), int(total)
+    except ValueError:
+        return None
+
+
+def check_ranged_length(source: str, response: Response, length: int) -> None:
+    """Fail the source when a ranged answer ended before the bytes it promised (cut off)."""
+    if response.status == 206:
+        span = _content_range(response.headers.get("Content-Range"))
+        promised = None if span is None else min(length, span[1] - span[0] + 1)
+    elif response.status == 200:
+        declared = response.headers.get("Content-Length")
+        promised = min(length, int(declared)) if declared and declared.isdigit() else None
+    else:
+        return
+    if promised is not None and len(response.body) < promised:
+        raise SourceFailedError(
+            source, f"the answer was cut off after {len(response.body)} of {promised} bytes"
+        )
 
 
 @dataclass(frozen=True)
@@ -281,15 +319,23 @@ class RecordedFetcher:
     Each recording is a ``NAME.meta.json`` file anywhere under ``root`` with ``method``, ``url``,
     an optional ``request_body`` (JSON or text), ``status``, ``headers``, ``retrieved_at`` and
     ``body_file`` (the raw response body, beside it). A recording with ``error`` instead replays a
-    failed request as ``SourceFailedError``.
+    failed request as ``SourceFailedError``. A ranged request (feature 003) is matched by its
+    ``range`` too (``bytes=0-1048575``), and every hop of it carries that key.
     """
 
     def __init__(self, root: Path | str) -> None:
         self.requests: list[tuple[str, str, bytes | None]] = []
-        self._recordings: dict[tuple[str, str, str | None], tuple[Path, dict[str, Any]]] = {}
+        self._recordings: dict[
+            tuple[str, str, str | None, str | None], tuple[Path, dict[str, Any]]
+        ] = {}
         for meta_path in sorted(Path(root).rglob("*.meta.json")):
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            key = (meta["method"].upper(), meta["url"], _canonical_body(meta.get("request_body")))
+            key = (
+                meta["method"].upper(),
+                meta["url"],
+                _canonical_body(meta.get("request_body")),
+                meta.get("range"),
+            )
             if key in self._recordings:
                 raise ValueError(f"two recordings for {key[0]} {key[1]}: {meta_path}")
             self._recordings[key] = (meta_path, meta)
@@ -303,13 +349,31 @@ class RecordedFetcher:
     def post(self, url: str, body: bytes) -> Response:
         return self._serve("POST", url, body)
 
+    def get_range(self, url: str, length: int) -> Response:
+        """The recorded answer to a ranged ``GET`` of the first ``length`` bytes."""
+        wanted = range_header(length)
+
+        def send(method: str, target: str, body: bytes | None, asked: str | None) -> Response:
+            response = self._serve(method, target, body, asked, wanted)
+            return replace(response, body=response.body[:length])
+
+        response = _follow(send, "GET", url, None, True)
+        check_ranged_length(source_of(url), response, length)
+        return response
+
     def _serve(
-        self, method: str, url: str, body: bytes | None, asked: str | None = None
+        self,
+        method: str,
+        url: str,
+        body: bytes | None,
+        asked: str | None = None,
+        wanted: str | None = None,
     ) -> Response:
         self.requests.append((method, url, body))
-        key = (method, url, _canonical_body(body))
+        key = (method, url, _canonical_body(body), wanted)
         if key not in self._recordings:
-            raise NoRecordingError(f"no recording for {method} {url} with this body")
+            ranged = f" for {wanted}" if wanted else ""
+            raise NoRecordingError(f"no recording for {method} {url}{ranged} with this body")
         meta_path, meta = self._recordings[key]
         if "error" in meta:
             raise SourceFailedError(source_of(url), meta["error"])
@@ -371,6 +435,7 @@ class UrlFetcher:
         self._sleep = sleep
         self._utcnow = utcnow
         self._cache: dict[tuple[str, str, bytes | None], Response] = {}
+        self._ranges: dict[tuple[str, str, bytes | None], Response] = {}
         self._sent: dict[str, deque[float]] = {}
         self._429s: dict[str, int] = {}
         self.failed_sources: dict[str, str] = {}
@@ -384,60 +449,107 @@ class UrlFetcher:
     def post(self, url: str, body: bytes) -> Response:
         return self._send("POST", url, body)
 
+    def get_range(self, url: str, length: int) -> Response:
+        """A ``GET`` of the first ``length`` bytes only (feature 003, research A4).
+
+        Sends ``Range: bytes=0-{length - 1}`` on every hop and follows redirects under the same
+        rules as ``get``. At most ``length`` bytes are read, whether the server answers ``206`` or
+        ignores the range and answers ``200``; the connection is then closed. A ranged answer is
+        never put in the ETag cache, and the run's cache keys it by URL and range. An answer that
+        ends before the bytes it promised was cut off mid-read and fails the source.
+        """
+        wanted = range_header(length)
+
+        def send(method: str, target: str, body: bytes | None, asked: str | None) -> Response:
+            return self._send(method, target, body, asked, wanted=wanted, limit=length)
+
+        response = _follow(send, "GET", url, None, True)
+        check_ranged_length(source_of(url), response, length)
+        return response
+
     def _send(
-        self, method: str, url: str, body: bytes | None, asked: str | None = None
+        self,
+        method: str,
+        url: str,
+        body: bytes | None,
+        asked: str | None = None,
+        *,
+        wanted: str | None = None,
+        limit: int | None = None,
     ) -> Response:
         # One request at a time per source (research U13).
         with self._locks.setdefault(source_of(url), threading.Lock()):
-            return self._send_one(method, url, body, asked)
+            return self._send_one(method, url, body, asked, wanted=wanted, limit=limit)
 
     def _send_one(
-        self, method: str, url: str, body: bytes | None, asked: str | None = None
+        self,
+        method: str,
+        url: str,
+        body: bytes | None,
+        asked: str | None = None,
+        *,
+        wanted: str | None = None,
+        limit: int | None = None,
     ) -> Response:
         source = source_of(url)
         if source in self.failed_sources:
             raise SourceFailedError(source, self.failed_sources[source])
-        key = (method, url, body)
-        if key in self._cache:
-            return self._cache[key]
+        key = (method, url, body) if wanted is None else (method, url, wanted.encode("ascii"))
+        cache = self._cache if wanted is None else self._ranges
+        if key in cache:
+            return cache[key]
 
-        cached = self._etags.get(url) if self._etags is not None and method == "GET" else None
+        use_etags = self._etags is not None and method == "GET" and wanted is None
+        cached = self._etags.get(url) if use_etags and self._etags is not None else None
         etag = cached.headers.get("ETag") if cached is not None else None
+
+        def read(stream: Any) -> bytes:
+            return self._read(stream, source) if limit is None else self._read_lead(stream, limit)
 
         reason = "no attempt made"
         for attempt in range(self._retries + 1):
             self._throttle(source)
             delay = self._backoff * 2**attempt
             try:
-                request = self._build(method, url, body, etag=etag)
+                request = self._build(method, url, body, etag=etag, wanted=wanted)
                 with self._opener(request, timeout=self._timeout) as raw:
-                    body_read = self._read(raw, source)
-                    response = self._answer(url, raw.status, body_read, raw.headers, cached, asked)
+                    body_read = read(raw)
+                    response = self._answer(
+                        url, raw.status, body_read, raw.headers, cached, asked, use_etags
+                    )
                 self._429s[source] = 0
-                self._cache[key] = response
+                cache[key] = response
                 return response
             except urllib.error.HTTPError as error:
                 status = error.code
                 reason = f"HTTP {status}"
                 if status < 400:
-                    body_read = self._read(error, source)
-                    response = self._answer(url, status, body_read, error.headers, cached, asked)
-                    self._cache[key] = response
+                    body_read = read(error)
+                    response = self._answer(
+                        url, status, body_read, error.headers, cached, asked, use_etags
+                    )
+                    cache[key] = response
                     return response
                 if status == 429:
                     self._429s[source] = self._429s.get(source, 0) + 1
                     if self._429s[source] >= self._max_429s:
                         self._fail(source, f"HTTP 429 {self._429s[source]} times")
                 elif status < 500:
-                    body_read = self._read(error, source)
-                    response = self._answer(url, status, body_read, error.headers, None, asked)
-                    self._cache[key] = response
+                    body_read = read(error)
+                    response = self._answer(
+                        url, status, body_read, error.headers, None, asked, use_etags
+                    )
+                    cache[key] = response
                     return response
                 retry_after = self._retry_after(error.headers)
                 if retry_after is not None:
                     if retry_after > self._max_retry_after:
                         self._fail(source, f"{reason}, asked to wait {retry_after:.0f} s")
                     delay = retry_after
+            except http.client.IncompleteRead as error:
+                raise SourceFailedError(
+                    source, f"the answer was cut off mid-read ({error!r})"
+                ) from None
             except (urllib.error.URLError, TimeoutError, OSError) as error:
                 reason = f"{type(error).__name__}: {error}"
             if attempt < self._retries:
@@ -445,7 +557,13 @@ class UrlFetcher:
         raise SourceFailedError(source, f"{reason} after {self._retries + 1} attempts")
 
     def _build(
-        self, method: str, url: str, body: bytes | None, *, etag: str | None = None
+        self,
+        method: str,
+        url: str,
+        body: bytes | None,
+        *,
+        etag: str | None = None,
+        wanted: str | None = None,
     ) -> urllib.request.Request:
         if method not in READ_METHODS:
             raise ValueError(f"the fetcher only reads; {method} is not allowed")
@@ -454,6 +572,8 @@ class UrlFetcher:
             headers["Content-Type"] = "application/json"
         if etag:
             headers["If-None-Match"] = etag
+        if wanted:
+            headers["Range"] = wanted
         return urllib.request.Request(url, data=body, headers=headers, method=method)
 
     def _response(
@@ -470,6 +590,7 @@ class UrlFetcher:
         headers: Any,
         cached: Response | None,
         asked: str | None = None,
+        use_etags: bool = True,
     ) -> Response:
         """A response as recorded: a 304 served from the ETag cache, a 3xx with its target."""
         if status == 304 and cached is not None:
@@ -478,9 +599,27 @@ class UrlFetcher:
         if 300 <= status < 400:
             target = _location(url, headers)
             return replace(response, redirected_from=url, redirected_to=target)
-        if self._etags is not None and 200 <= status < 300 and response.headers.get("ETag"):
+        if (
+            use_etags
+            and self._etags is not None
+            and 200 <= status < 300
+            and response.headers.get("ETag")
+        ):
             self._etags[url] = response
         return response
+
+    @staticmethod
+    def _read_lead(stream: Any, limit: int) -> bytes:
+        """At most the first ``limit`` bytes of ``stream``; the rest is never read (feature 003)."""
+        chunks: list[bytes] = []
+        size = 0
+        while size < limit:
+            chunk = stream.read(min(1 << 20, limit - size))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+        return b"".join(chunks)
 
     def _read(self, stream: Any, source: str) -> bytes:
         """The whole body of ``stream``, never more than the cap plus one byte (SEC-03, #11)."""

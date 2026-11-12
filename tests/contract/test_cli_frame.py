@@ -28,6 +28,8 @@ INVOCATIONS = {
     "import": ["import", "bom.json", "--model-id", "m"],
     "inventory show": ["inventory", "show", "m", "--version", "2"],
     "inventory export": ["inventory", "export", "m", "-o", "out.json"],
+    # feature 003 (contracts/cli.md)
+    "inventory audit": ["inventory", "audit", "m", "--version", "2", "--stale-after", "48"],
     "check": ["check", "m", "--source", "osv,picklescan,hf-scan"],
     "policy": ["policy", "m", "--format", "strict", "--by", "Owner"],
     "alerts": ["alerts", "m", "--state", "all"],
@@ -142,8 +144,9 @@ def test_check_accepts_all_without_an_id() -> None:
     assert main(["check", "--all"], handlers=handlers_for("check", recorder)) == EXIT_OK
     assert recorder.args.all is True
     # Feature 002 adds six upstream sources; omitting --source still runs every source.
-    assert recorder.args.sources[:3] == ["osv", "picklescan", "hf-scan"]
-    assert recorder.args.sources[3:] == [
+    # Feature 003 adds format-check to the default list (contracts/cli.md).
+    assert recorder.args.sources[:4] == ["osv", "picklescan", "hf-scan", "format-check"]
+    assert recorder.args.sources[4:] == [
         "hf-hub",
         "hf-takedowns",
         "crossref",

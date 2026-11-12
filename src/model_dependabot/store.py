@@ -95,6 +95,8 @@ FORMAT_ORIGINS = ("bytes", "name", "record", "import")
 CLAIMS = ("code_free", "identity")
 CLAIM_OUTCOMES = ("confirmed", "contradicted", "unreadable")
 TRIGGERS = ("scheduled", "on_demand")
+# The scope ``check --all`` records; here so that the store and the reports share it.
+SCOPE_ALL = "all"
 OUTCOMES = ("reachable", "refused", "not_found", "removed", "redirected")
 LICENCE_FORMS = ("spdx", "expression", "unrecognised", "none")
 REPOSITORIES = ("zenodo", "figshare", "other")
@@ -409,8 +411,46 @@ def same_evidence(evidence: Mapping[str, Any], source: str, url: str, body: byte
     return content_key(evidence) == (canonical_sha256(body) or hashlib.sha256(body).hexdigest())
 
 
+class OutdatedDatabaseError(ValueError):
+    """A database too old to read without upgrading it (feature 003, research A12)."""
+
+
 class Store:
     """The service's database and evidence store, opened from a database path."""
+
+    read_only = False
+
+    @classmethod
+    def open_read_only(
+        cls, path: Path | str, *, now: Callable[[], datetime] | None = None
+    ) -> Store:
+        """Open an existing database for reading only (feature 003, FR-013).
+
+        SQLite opens it with ``mode=ro``: no schema is created, nothing is migrated or
+        back-filled and no timestamp is written, so the file stays byte-identical. A column or
+        table a later feature adds and the file lacks reads as its default (an origin of null, no
+        claim checks). A missing file raises ``FileNotFoundError``; a schema older than feature
+        002 raises ``OutdatedDatabaseError``.
+        """
+        store = cls.__new__(cls)
+        store.path = Path(path)
+        if not store.path.is_file():
+            raise FileNotFoundError(f"no database at {store.path}")
+        store.evidence_dir = store.path.parent / "evidence"
+        store._now = now or (lambda: datetime.now(UTC))
+        store.read_only = True
+        uri = store.path.resolve().as_uri() + "?mode=ro"
+        store.conn = sqlite3.connect(uri, uri=True)
+        store.conn.row_factory = sqlite3.Row
+        tables = store.tables()
+        if (
+            "upstream_observations" not in tables
+            or "check_runs" not in tables
+            or "trigger" not in store.columns("check_runs")
+        ):
+            store.conn.close()
+            raise OutdatedDatabaseError("run any check once to upgrade this database")
+        return store
 
     def __init__(self, path: Path | str, *, now: Callable[[], datetime] | None = None) -> None:
         self.path = Path(path)
@@ -727,7 +767,12 @@ class Store:
         )
         result = []
         for row in rows:
-            record = {name: row[name] for name in ENTRY_FIELDS if name != "version"}
+            present = set(row.keys())  # a database read-only from before 003 lacks format_origin
+            record = {
+                name: row[name] if name in present else None
+                for name in ENTRY_FIELDS
+                if name != "version"
+            }
             record["version"] = row["package_version"]
             record["pinned"] = bool(row["pinned"])
             record["can_run_code"] = _bool(row["can_run_code"])
@@ -784,6 +829,8 @@ class Store:
         self, model_id: str, version: int, identifier: str, *, claim: str = "code_free"
     ) -> dict[str, Any] | None:
         """The latest check of one entry's ``claim`` in a version, which decides its state."""
+        if self.read_only and "claim_checks" not in self.tables():
+            return None
         row = self.conn.execute(
             "SELECT * FROM claim_checks WHERE model_id = ? AND version = ?"
             " AND entry_identifier = ? AND claim = ? ORDER BY claim_check_id DESC LIMIT 1",
@@ -793,6 +840,8 @@ class Store:
 
     def claim_checks(self, model_id: str, version: int) -> list[dict[str, Any]]:
         """Every claim check of a version, oldest first."""
+        if self.read_only and "claim_checks" not in self.tables():
+            return []  # a database from before 003, read without upgrading it
         rows = self.conn.execute(
             "SELECT * FROM claim_checks WHERE model_id = ? AND version = ? ORDER BY claim_check_id",
             (model_id, version),
@@ -1046,6 +1095,33 @@ class Store:
             query += " WHERE scope IN (" + ", ".join("?" for _ in params) + ")"
         row = self.conn.execute(query, params).fetchone()
         return None if row["r"] is None else self.get_check_run(row["r"])
+
+    def check_runs_for(self, model_id: str, since: str) -> list[dict[str, Any]]:
+        """Finished runs started at or after ``since`` whose scope covered the model, newest first.
+
+        A run covers the model when its scope is ``all`` or names it (``check ID`` records the
+        id; a run over several models records them joined by commas).
+        """
+        rows = self.conn.execute(
+            "SELECT * FROM check_runs WHERE finished_at IS NOT NULL AND started_at >= ?"
+            " ORDER BY run_id DESC",
+            (since,),
+        ).fetchall()
+        runs = []
+        for row in rows:
+            if row["scope"] != SCOPE_ALL and model_id not in str(row["scope"]).split(","):
+                continue
+            record = dict(row)
+            record["sources"] = _loads(record["sources"]) or {}
+            runs.append(record)
+        return runs
+
+    def registered_at(self, model_id: str, version: int) -> str | None:
+        row = self.conn.execute(
+            "SELECT registered_at FROM model_versions WHERE model_id = ? AND version = ?",
+            (model_id, version),
+        ).fetchone()
+        return None if row is None else str(row["registered_at"])
 
     # --- models, alerts and watch events as the checks use them -------------------------------
 

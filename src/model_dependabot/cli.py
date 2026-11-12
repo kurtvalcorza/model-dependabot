@@ -20,6 +20,8 @@ from typing import Any
 
 from jsonschema import ValidationError
 
+from model_dependabot.assurance.audit import DEFAULT_STALE_AFTER_HOURS, audit_report
+from model_dependabot.assurance.format_check import measure_imported, record_import_contradictions
 from model_dependabot.inventory.build import build_entries, record_licences
 from model_dependabot.inventory.cyclonedx import InventoryError, export_bom, import_bom, validate
 from model_dependabot.inventory.record import (
@@ -43,6 +45,8 @@ from model_dependabot.reports import (
     alert_view,
     alerts_report,
     alerts_text,
+    audit_text,
+    claim_note,
     evidence_line,
     history_report,
     history_text,
@@ -50,7 +54,7 @@ from model_dependabot.reports import (
 from model_dependabot.sources.datacite import ensure_repository
 from model_dependabot.sources.doi_ra import ensure_agency
 from model_dependabot.sources.fetcher import Fetcher, SourceFailedError, UrlFetcher
-from model_dependabot.store import DISMISSAL_REASONS, EtagCache, Store
+from model_dependabot.store import DISMISSAL_REASONS, EtagCache, OutdatedDatabaseError, Store
 
 EXIT_OK = 0
 EXIT_INVALID_INPUT = 1
@@ -59,7 +63,7 @@ EXIT_UNEXPECTED = 3
 
 DEFAULT_DB = "./model-dependabot.db"
 UPSTREAM_SOURCES = ("hf-hub", "hf-takedowns", "crossref", "datacite", "zenodo", "figshare")
-CHECK_SOURCES = ("osv", "picklescan", "hf-scan", *UPSTREAM_SOURCES)
+CHECK_SOURCES = ("osv", "picklescan", "hf-scan", "format-check", *UPSTREAM_SOURCES)
 
 COMMANDS = (
     "record",
@@ -67,6 +71,7 @@ COMMANDS = (
     "import",
     "inventory show",
     "inventory export",
+    "inventory audit",
     "check",
     "policy",
     "alerts",
@@ -113,6 +118,16 @@ def _sources(text: str) -> list[str]:
             f"sources must be from {', '.join(CHECK_SOURCES)}; got {text!r}"
         )
     return names
+
+
+def _hours(text: str) -> float:
+    try:
+        hours = float(text)
+    except ValueError:
+        hours = 0.0
+    if not hours > 0:
+        raise argparse.ArgumentTypeError(f"hours must be a positive number, got {text!r}")
+    return hours
 
 
 def _common(suppress: bool) -> argparse.ArgumentParser:
@@ -174,6 +189,22 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("model_id", metavar="ID")
     export.add_argument("--version", type=int, metavar="N")
     export.add_argument("-o", dest="output", metavar="FILE", required=True)
+    audit = leaf(
+        inventory_commands,
+        "audit",
+        "inventory audit",
+        "findings, inventory assurance and check coverage, from the stored data (read-only)",
+    )
+    audit.add_argument("model_id", metavar="ID")
+    audit.add_argument("--version", type=int, metavar="N")
+    audit.add_argument(
+        "--stale-after",
+        dest="stale_after",
+        type=_hours,
+        default=DEFAULT_STALE_AFTER_HOURS,
+        metavar="HOURS",
+        help="a source's result older than this is stale (default 24)",
+    )
 
     check = leaf(commands, "check", "check", "run the checks now")
     check.add_argument("model_id", metavar="ID", nargs="?")
@@ -295,10 +326,26 @@ def _entry_label(entry: Mapping[str, Any]) -> str:
     return "dataset"
 
 
-def _inventory_text(payload: Mapping[str, Any], heading: str) -> str:
+def _claim_notes(store: Store, model_id: str, version: int) -> dict[str, str]:
+    """Per pinned entry, how far an imported or legacy code-free claim is established (US1)."""
+    record = store.get_version(model_id, version) or {}
+    checks = store.claim_checks(model_id, version)
+    notes = {}
+    for entry in store.entries(model_id, version):
+        note = claim_note(entry, record.get("origin"), checks)
+        if note is not None:
+            notes[entry["identifier"]] = note
+    return notes
+
+
+def _inventory_text(
+    payload: Mapping[str, Any], heading: str, notes: Mapping[str, str] | None = None
+) -> str:
     lines = [heading, f"Entries ({len(payload['entries'])}):"]
     for entry in payload["entries"]:
-        lines.append(f"  {entry['kind']:<12} {entry['identifier']}  {_entry_label(entry)}")
+        line = f"  {entry['kind']:<12} {entry['identifier']}  {_entry_label(entry)}"
+        note = (notes or {}).get(entry["identifier"])
+        lines.append(f"{line}  [{note}]" if note else line)
     lines.append(f"Gaps ({len(payload['gaps'])}):")
     for entry in payload["gaps"]:
         lines.append(f"  {entry['kind']:<12} {_entry_label(entry)}: {entry['gap_reason']}")
@@ -505,7 +552,11 @@ def make_handlers(
         except InventoryError as error:
             raise InvalidInputError(str(error)) from None
         model_id = args.model_id
+        base_dir = Path(args.bom).parent
         with _open(args.db) as store:
+            # Feature 003, research A5: a local weight file present beside the document is
+            # classified from its bytes, which win over the document's claim.
+            measures = measure_imported(entries, base_dir, store.now())
             # As register does, so a targeted Zenodo or Figshare check finds the imported DOIs
             # (review F-05). A licence the document records is kept; only a missing one is read.
             fetcher_ = _fetcher(store)
@@ -517,12 +568,15 @@ def make_handlers(
                 model_id,
                 entries,
                 hashlib.sha256(raw).hexdigest(),
-                base_dir=Path(args.bom).parent,
+                base_dir=base_dir,
                 origin="import",
             )
+            record_import_contradictions(store, model_id, version, measures)
             payload = _inventory_payload(model_id, version, store.entries(model_id, version))
             payload["alerts"] = reevaluate_version(store, model_id, version)
-        return CommandResult(payload, _inventory_text(payload, f"Imported {model_id} v{version}"))
+            notes = _claim_notes(store, model_id, version)
+        text = _inventory_text(payload, f"Imported {model_id} v{version}", notes)
+        return CommandResult(payload, text)
 
     def show(args: argparse.Namespace) -> CommandResult:
         with _open(args.db) as store:
@@ -530,7 +584,9 @@ def make_handlers(
             payload = _inventory_payload(
                 args.model_id, version, store.entries(args.model_id, version)
             )
-        return CommandResult(payload, _inventory_text(payload, f"{args.model_id} v{version}"))
+            notes = _claim_notes(store, args.model_id, version)
+        text = _inventory_text(payload, f"{args.model_id} v{version}", notes)
+        return CommandResult(payload, text)
 
     def export(args: argparse.Namespace) -> CommandResult:
         with _open(args.db) as store:
@@ -542,6 +598,23 @@ def make_handlers(
         Path(args.output).write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
         payload = {"model_id": args.model_id, "version": version, "output": args.output}
         return CommandResult(payload, f"Wrote {args.model_id} v{version} to {args.output}")
+
+    def inventory_audit(args: argparse.Namespace) -> CommandResult:
+        # FR-013: read-only; an older database is read as it is and never upgraded.
+        try:
+            store = Store.open_read_only(args.db, now=now)
+        except FileNotFoundError:
+            raise InvalidInputError(f"no model {args.model_id!r} is registered") from None
+        except OutdatedDatabaseError as error:
+            raise InvalidInputError(str(error)) from None
+        with store:
+            try:
+                payload = audit_report(
+                    store, args.model_id, args.version, stale_after_hours=args.stale_after
+                )
+            except LookupError as error:
+                raise InvalidInputError(str(error).strip("'\"")) from None
+        return CommandResult(payload, audit_text(payload))
 
     def check(args: argparse.Namespace) -> CommandResult:
         with _open(args.db) as store:
@@ -628,6 +701,7 @@ def make_handlers(
         "import": import_inventory,
         "inventory show": show,
         "inventory export": export,
+        "inventory audit": inventory_audit,
         "check": check,
         "policy": policy,
         "alerts": alerts,

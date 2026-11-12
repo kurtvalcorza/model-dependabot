@@ -1,0 +1,68 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.7.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "version": 1,
+  "metadata": {
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "name": "model-dependabot",
+          "version": "0.1.0"
+        }
+      ]
+    },
+    "component": {
+      "type": "machine-learning-model",
+      "bom-ref": "model:forged-detector@1",
+      "name": "forged-detector",
+      "version": "1"
+    }
+  },
+  "components": [
+    {
+      "type": "file",
+      "bom-ref": "file:0",
+      "name": "model.safetensors",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7c5d3f4b8b76583b422fcb9189ad6c89d5d97a094541ce8932dce3ecabde1421"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://huggingface.co/model-dependabot-fixture/forged/resolve/f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0/model.safetensors"
+        }
+      ],
+      "properties": [
+        {
+          "name": "model-dependabot:format",
+          "value": "safetensors"
+        },
+        {
+          "name": "model-dependabot:can-run-code",
+          "value": "false"
+        },
+        {
+          "name": "model-dependabot:size",
+          "value": "548118077"
+        },
+        {
+          "name": "model-dependabot:hub-repo",
+          "value": "model-dependabot-fixture/forged"
+        },
+        {
+          "name": "model-dependabot:hub-revision",
+          "value": "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+        },
+        {
+          "name": "model-dependabot:hub-file",
+          "value": "model.safetensors"
+        }
+      ]
+    }
+  ]
+}

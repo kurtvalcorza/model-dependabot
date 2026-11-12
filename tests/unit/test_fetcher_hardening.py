@@ -271,3 +271,108 @@ def test_a_recorded_malformed_successful_body_fails_the_source(tmp_path: Path) -
     (tmp_path / "x.meta.json").write_text(json.dumps(meta), "utf-8")
     with pytest.raises(SourceFailedError):
         RecordedFetcher(tmp_path).get(SENSITIVE["zenodo"])
+
+
+# --- feature 003: bounded ranged reads (T011, research A4) ----------------------------------------
+
+RESOLVE = "https://huggingface.co/o/n/resolve/" + "a" * 40 + "/model.safetensors"
+CDN = "https://cdn.example.net/xet/abc"
+
+
+def _ranged(total: bytes, *, honour: bool = True, redirect_from: str | None = RESOLVE):
+    """An opener answer: a redirect from the resolve URL, then ``total`` served by range."""
+
+    def answer(request: urllib.request.Request):
+        if redirect_from is not None and request.full_url == redirect_from:
+            return 302, b"", {"Location": CDN}
+        wanted = request.get_header("Range")
+        if not honour or wanted is None:
+            return 200, total, {"Content-Length": str(len(total))}
+        start, end = (int(part) for part in wanted.removeprefix("bytes=").split("-"))
+        part = total[start : end + 1]
+        headers = {"Content-Range": f"bytes {start}-{start + len(part) - 1}/{len(total)}"}
+        return 206, part, headers | {"Content-Length": str(len(part))}
+
+    return answer
+
+
+def test_get_range_asks_for_the_first_bytes_and_follows_the_redirect() -> None:
+    content = bytes(range(256)) * 100
+    opener = Opener(_ranged(content))
+    seen: list[str | None] = []
+    inner = opener.answer
+    opener.answer = lambda r: seen.append(r.get_header("Range")) or inner(r)
+    response = fetcher_for(opener).get_range(RESOLVE, 1000)
+    assert response.status == 206
+    assert response.body == content[:1000]
+    assert response.headers["Content-Range"] == f"bytes 0-999/{len(content)}"
+    assert response.redirected_from == RESOLVE
+    assert seen == ["bytes=0-999", "bytes=0-999"]
+
+
+def test_get_range_reads_at_most_the_length_when_the_range_is_ignored() -> None:
+    content = b"x" * 5000
+    opener = Opener(_ranged(content, honour=False))
+    response = fetcher_for(opener).get_range(RESOLVE, 1000)
+    assert response.status == 200
+    assert response.body == content[:1000]
+    assert response.headers["Content-Length"] == "5000"
+    assert sum(amount for amount in opener.responses[-1].reads if amount > 0) <= 1000
+
+
+def test_get_range_checks_every_redirect_like_get() -> None:
+    opener = Opener(lambda r: (302, b"", {"Location": "https://127.0.0.1/x"}))
+    with pytest.raises(SourceFailedError, match="not a public host"):
+        fetcher_for(opener).get_range(RESOLVE, 1000)
+
+
+def test_get_range_never_writes_the_etag_cache_and_caches_by_url_and_range() -> None:
+    content = b"y" * 3000
+    opener = Opener(_ranged(content, redirect_from=None))
+    cache: dict[str, object] = {}
+    fetcher = fetcher_for(opener, etag_cache=cache)
+    first = fetcher.get_range(RESOLVE, 1000)
+    again = fetcher.get_range(RESOLVE, 1000)
+    longer = fetcher.get_range(RESOLVE, 2000)
+    assert again is first
+    assert len(longer.body) == 2000
+    assert len(opener.requests) == 2
+    assert cache == {}
+
+
+def test_get_range_cut_off_before_its_length_fails_the_source() -> None:
+    """A 206 that ends before the bytes its Content-Range promises was cut off mid-read."""
+
+    def answer(request: urllib.request.Request):
+        return 206, b"z" * 10, {"Content-Range": "bytes 0-999/5000"}
+
+    with pytest.raises(SourceFailedError, match="cut off"):
+        fetcher_for(Opener(answer)).get_range(RESOLVE, 1000)
+
+
+def test_get_range_returns_a_refusal_as_it_is() -> None:
+    opener = Opener(lambda r: (403, b"denied", {}))
+    assert fetcher_for(opener).get_range(RESOLVE, 1000).status == 403
+
+
+def test_recorded_get_range_matches_the_range_key(tmp_path: Path) -> None:
+    body = b"\x01" * 2048
+    (tmp_path / "lead.bin").write_bytes(body)
+    for name, wanted in (("a", "bytes=0-1023"), ("b", None)):
+        meta = {
+            "method": "GET",
+            "url": RESOLVE,
+            "status": 206 if wanted else 200,
+            "headers": {"Content-Range": "bytes 0-1023/2048"} if wanted else {},
+            "retrieved_at": "2026-11-12T00:00:00Z",
+            "body_file": "lead.bin",
+        }
+        if wanted:
+            meta["range"] = wanted
+        (tmp_path / f"{name}.meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    recorded = RecordedFetcher(tmp_path)
+    ranged = recorded.get_range(RESOLVE, 1024)
+    assert ranged.status == 206 and ranged.body == body[:1024]
+    assert recorded.get(RESOLVE).status == 200
+    with pytest.raises(LookupError):
+        recorded.get_range(RESOLVE, 512)

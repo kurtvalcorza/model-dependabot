@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "url": "https://huggingface.co/openai-community/gpt2/resolve/607a30d783dfa663caf39e06633721c8d4cfcd7e/pytorch_model.bin",
+  "range": "bytes=0-1048575",
+  "status": 302,
+  "headers": {
+    "content-type": "text/plain; charset=utf-8",
+    "x-repo-commit": "607a30d783dfa663caf39e06633721c8d4cfcd7e"
+  },
+  "retrieved_at": "2026-11-12T16:20:26Z",
+  "body_file": "gpt2-pickle-range.bin",
+  "redirected_to": "https://us.aws.cdn.hf.co/xet-bridge-us/621ffdc036468d709f17434d/03d2dc814eb3c85f9acaf2ff2c5bb925c319f1032f61fca6f20ec2054839ef56",
+  "trimmed": "query string of the redirect target removed"
+}

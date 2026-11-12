@@ -1,0 +1,13 @@
+{
+  "method": "GET",
+  "url": "https://huggingface.co/hf-internal-testing/dummy-gated-model/resolve/9a039e123af345a94ba89c5e4cc3a0f6dac50bd9/gated_file.txt",
+  "range": "bytes=0-1048575",
+  "status": 401,
+  "headers": {
+    "content-type": "text/plain; charset=utf-8",
+    "content-length": "145",
+    "x-error-code": "GatedRepo"
+  },
+  "retrieved_at": "2026-11-12T16:20:30Z",
+  "body_file": "gated-refused-range.bin"
+}

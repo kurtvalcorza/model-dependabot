@@ -62,8 +62,20 @@ P_HUB_REPO = PREFIX + "hub-repo"
 P_HUB_REVISION = PREFIX + "hub-revision"
 P_HUB_FILE = PREFIX + "hub-file"
 P_GAP = PREFIX + "gap"
+# Feature 003 (contracts/inventory-profile.md): where the format claim came from. Written on
+# export; ignored on import, where every claim is a third party's.
+P_FORMAT_ORIGIN = PREFIX + "format-origin"
 PROPERTIES = frozenset(
-    {P_FORMAT, P_CAN_RUN_CODE, P_SIZE, P_HUB_REPO, P_HUB_REVISION, P_HUB_FILE, P_GAP}
+    {
+        P_FORMAT,
+        P_CAN_RUN_CODE,
+        P_SIZE,
+        P_HUB_REPO,
+        P_HUB_REVISION,
+        P_HUB_FILE,
+        P_GAP,
+        P_FORMAT_ORIGIN,
+    }
 )
 
 SCHEMA_DIR = Path(__file__).resolve().parent / "schema"
@@ -192,6 +204,7 @@ def _weight_component(index: int, entry: dict[str, Any]) -> dict[str, Any]:
                 (P_HUB_REVISION, entry["hub_revision"]),
                 (P_HUB_FILE, entry["hub_file"]),
                 (P_GAP, entry["gap_reason"]),
+                (P_FORMAT_ORIGIN, entry.get("format_origin")),
             ]
         ),
     )
@@ -400,6 +413,9 @@ def _import_weight(item: dict[str, Any]) -> dict[str, Any]:
         hub_repo=props.get(P_HUB_REPO),
         hub_revision=props.get(P_HUB_REVISION),
         hub_file=props.get(P_HUB_FILE),
+        # Whatever the document says (P_FORMAT_ORIGIN included), its claims are a third
+        # party's: they count only once confirmed (feature 003, FR-002).
+        format_origin="import",
     )
 
 
