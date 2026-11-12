@@ -22,6 +22,8 @@ from jsonschema import ValidationError
 
 from model_dependabot.assurance.audit import DEFAULT_STALE_AFTER_HOURS, audit_report
 from model_dependabot.assurance.format_check import measure_imported, record_import_contradictions
+from model_dependabot.discover.project import discover, write_proposal
+from model_dependabot.discover.propose import OutputExistsError
 from model_dependabot.inventory.build import build_entries, record_licences
 from model_dependabot.inventory.cyclonedx import InventoryError, export_bom, import_bom, validate
 from model_dependabot.inventory.record import (
@@ -47,6 +49,7 @@ from model_dependabot.reports import (
     alerts_text,
     audit_text,
     claim_note,
+    discover_text,
     evidence_line,
     history_report,
     history_text,
@@ -72,6 +75,7 @@ COMMANDS = (
     "inventory show",
     "inventory export",
     "inventory audit",
+    "discover",
     "check",
     "policy",
     "alerts",
@@ -206,6 +210,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="a source's result older than this is stale (default 24)",
     )
 
+    discovery = leaf(
+        commands,
+        "discover",
+        "discover",
+        "propose candidate dependencies from a project folder (reads only inside it)",
+    )
+    discovery.add_argument("path", metavar="PATH")
+    discovery.add_argument("--manifest", metavar="FILE", help="compare with this manifest")
+    discovery.add_argument("--model-id", metavar="ID", help="[model] id of a proposed manifest")
+    discovery.add_argument(
+        "--upstream",
+        action="store_true",
+        help="look up the base models and hub datasets the project names on the hub",
+    )
+    discovery.add_argument("-o", dest="output", metavar="FILE", help="write a proposed manifest")
+    discovery.add_argument("--force", action="store_true", help="replace an existing -o file")
+
     check = leaf(commands, "check", "check", "run the checks now")
     check.add_argument("model_id", metavar="ID", nargs="?")
     check.add_argument("--all", action="store_true", help="check every model's current version")
@@ -248,6 +269,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _validate(args: argparse.Namespace) -> None:
+    if args.command_key == "discover" and args.force and not args.output:
+        raise InvalidInputError("--force needs -o")
     if args.command_key == "check" and (args.model_id is None) == (not args.all):
         raise InvalidInputError("check needs a model ID or --all, but not both")
     if args.command_key == "check" and args.scheduled and not args.all:
@@ -616,6 +639,33 @@ def make_handlers(
                 raise InvalidInputError(str(error).strip("'\"")) from None
         return CommandResult(payload, audit_text(payload))
 
+    def discover_command(args: argparse.Namespace) -> CommandResult:
+        # FR-022: no database is opened, so --db is ignored; nothing is written but -o.
+        root = Path(args.path)
+        if not root.is_dir():
+            raise InvalidInputError(f"{args.path} is not a directory")
+        manifest = None
+        if args.manifest:
+            try:
+                manifest = load_manifest(args.manifest, weights_present=False)
+            except ManifestError as error:
+                raise InvalidInputError(str(error)) from None
+        output = Path(args.output) if args.output else None
+        if output is not None and output.exists() and not args.force:
+            raise InvalidInputError(f"{output} exists; give --force to replace it")
+        hub = None
+        if args.upstream:
+            # Research A11: the same fetcher as check, without an ETag cache (no database).
+            hub = fetcher or (UrlFetcher() if now is None else UrlFetcher(utcnow=now))
+        result = discover(root, manifest=manifest, fetcher=hub, now=now)
+        if output is not None:
+            model_id = args.model_id or root.resolve().name
+            try:
+                write_proposal(result, output, model_id=model_id, force=args.force)
+            except OutputExistsError as error:
+                raise InvalidInputError(str(error)) from None
+        return CommandResult(result, discover_text(result))
+
     def check(args: argparse.Namespace) -> CommandResult:
         with _open(args.db) as store:
             if args.all:
@@ -702,6 +752,7 @@ def make_handlers(
         "inventory show": show,
         "inventory export": export,
         "inventory audit": inventory_audit,
+        "discover": discover_command,
         "check": check,
         "policy": policy,
         "alerts": alerts,

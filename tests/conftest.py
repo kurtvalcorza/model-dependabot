@@ -360,3 +360,56 @@ def derive_format_check(tmp_path: Path) -> Callable[..., Path]:
         return root
 
     return derive
+
+
+# --- feature 003 discovery (T033) -----------------------------------------------------------------
+
+PROJECT_FIXTURE = FIXTURES / "projects" / "detector"
+DEEP_LEVELS = 26
+
+
+def make_directory_link(link: Path, target: Path) -> str:
+    """A link from ``link`` to the directory ``target``: a symbolic link where the platform
+    allows one, else (Windows without the privilege) a junction. Returns which it made."""
+    try:
+        link.symlink_to(target, target_is_directory=True)
+        return "symlink"
+    except OSError:
+        import _winapi  # Windows only; a junction needs no privilege
+
+        _winapi.CreateJunction(str(target), str(link))
+        return "junction"
+
+
+@pytest.fixture
+def detector_project(tmp_path: Path) -> Path:
+    """The ``detector`` project, copied into ``tmp_path`` with the parts git cannot hold.
+
+    ``work/detector`` gets a link ``link-out`` to ``work/outside-dir`` (a directory outside the
+    project holding a weight file), a requirements file over 1 MiB, a tree deeper than 24 levels
+    with a weight file at the bottom and a ``.venv/`` with a weight file in it.
+    ``work/outside.txt``, which ``requirements-dev.txt`` includes, exists and is hash-locked, so
+    reading it would show.
+    """
+    work = tmp_path / "work"
+    project = work / "detector"
+    shutil.copytree(PROJECT_FIXTURE, project)
+    outside = work / "outside-dir"
+    outside.mkdir()
+    (outside / "secret.safetensors").write_bytes(b"\x80\x04K\x01.")
+    (work / "outside.txt").write_text(
+        "leaked==1.0 --hash=sha256:" + "9" * 64 + "\n", encoding="utf-8"
+    )
+    make_directory_link(project / "link-out", outside)
+    (project / "big-requirements.txt").write_text(
+        "# padding\n" * ((1 << 20) // 10 + 1) + "huge==1.0\n", encoding="utf-8"
+    )
+    deep = project / "deep"
+    for level in range(DEEP_LEVELS):
+        deep = deep / f"d{level}"
+    deep.mkdir(parents=True)
+    (deep / "buried.safetensors").write_bytes(b"\x80\x04K\x02.")
+    venv = project / ".venv" / "lib"
+    venv.mkdir(parents=True)
+    (venv / "inside-venv.safetensors").write_bytes(b"\x80\x04K\x03.")
+    return project

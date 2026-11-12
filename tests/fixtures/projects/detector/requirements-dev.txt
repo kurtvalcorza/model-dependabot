@@ -1,0 +1,4 @@
+-r ../outside.txt
+pytest
+ruff>=0.6
+numpy==2.0.2

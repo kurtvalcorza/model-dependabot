@@ -30,6 +30,7 @@ INVOCATIONS = {
     "inventory export": ["inventory", "export", "m", "-o", "out.json"],
     # feature 003 (contracts/cli.md)
     "inventory audit": ["inventory", "audit", "m", "--version", "2", "--stale-after", "48"],
+    "discover": ["discover", ".", "--manifest", "model.toml", "--upstream", "-o", "p.toml"],
     "check": ["check", "m", "--source", "osv,picklescan,hf-scan"],
     "policy": ["policy", "m", "--format", "strict", "--by", "Owner"],
     "alerts": ["alerts", "m", "--state", "all"],
@@ -129,6 +130,8 @@ def test_json_output_with_json(capsys: pytest.CaptureFixture[str]) -> None:
         ["alert", "dismiss", "17", "--reason", "bored", "--by", "Owner"],
         ["alert", "dismiss", "17", "--reason", "risk_accepted"],
         ["history", "m", "--unknown-flag"],
+        ["discover"],
+        ["discover", ".", "--force"],
     ],
 )
 def test_invalid_arguments_exit_1(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:

@@ -114,3 +114,12 @@ def test_pinned_needs_both_an_exact_version_and_a_hash(
 ) -> None:
     (entry,) = parse_lock(text + "\n")
     assert (entry.pinned, entry.gap_reason) == (pinned, reason)
+
+
+def test_numbered_lines_give_the_line_each_requirement_starts_on() -> None:
+    from model_dependabot.lockfile import numbered_lines
+
+    text = "# header\n\nnumpy==2.1.0 \\\n    --hash=sha256:" + "a" * 64 + "\n# c\ntorch==2.5.1\n"
+    assert [number for number, _ in numbered_lines(text)] == [3, 6]
+    first = numbered_lines(text)[0][1]
+    assert first.startswith("numpy==2.1.0") and "--hash=sha256:" in first

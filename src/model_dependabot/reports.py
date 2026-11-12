@@ -323,3 +323,62 @@ def audit_text(payload: Mapping[str, Any]) -> str:
         where = item["location"] or item["identifier"] or ""
         lines.append(f"    {item['kind']} {where}: {item['reason']}".replace("  :", " :"))
     return "\n".join(lines)
+
+
+def _identity_text(item: Mapping[str, Any]) -> str:
+    identity = item["identity"]
+    kind = item["kind"]
+    if kind == "weight_file":
+        if "sha256" not in identity:
+            return str(identity.get("path"))
+        runs = "can run code" if identity.get("can_run_code") else "code-free"
+        if identity.get("can_run_code") is None:
+            runs = "may run code"
+        return f"{identity['path']} sha256:{identity['sha256']} {identity['format']} ({runs})"
+    if kind == "package":
+        if identity.get("requirement"):
+            return str(identity["requirement"])
+        return f"{identity.get('name')}=={identity.get('version')}"
+    if kind == "environment":
+        return f"{identity['lock']} ({identity.get('packages')} packages, hash-locked)"
+    if kind == "licence":
+        spdx = identity.get("spdx")
+        return str(identity.get("licence")) + (f" (SPDX {spdx})" if spdx else "")
+    return str(identity.get("hub_repo") or identity.get("doi") or identity)
+
+
+def discover_text(payload: Mapping[str, Any]) -> str:
+    """Discovery for people: the statement first, then candidates, comparison and skips."""
+    lookups = "with hub lookups" if payload["upstream"] else "no network requests"
+    candidates = payload["candidates"]
+    lines = [
+        f"Discovery of {payload['project']} at {payload['observed_at']} ({lookups})",
+        payload["statement"],
+        f"Candidates ({len(candidates)}):",
+    ]
+    for item in candidates:
+        extra = [f"gaps: {', '.join(item['gaps'])}"] if item["gaps"] else []
+        if item.get("manifest"):
+            value = item.get("manifest_value") if item["manifest"] == "conflicts" else None
+            shown = ", ".join(str(v) for v in (value or {}).values() if v is not None)
+            extra.append(f"manifest: {item['manifest']}" + (f" ({shown})" if shown else ""))
+        if item.get("note"):
+            extra.append(item["note"])
+        if item.get("proposed_revision"):
+            revision = item["proposed_revision"]
+            extra.append(f"hub head {revision['revision']} ({revision['label']})")
+        tail = f" [{'; '.join(extra)}]" if extra else ""
+        lines.append(f"  {item['status']:<24} {item['kind']:<12} {_identity_text(item)}{tail}")
+    if payload["declared_not_seen"]:
+        lines.append(f"Declared in the manifest, not seen ({len(payload['declared_not_seen'])}):")
+        for item in payload["declared_not_seen"]:
+            identity = ", ".join(f"{k} {v}" for k, v in item["identity"].items() if v is not None)
+            reason = f": {item['reason']}" if item.get("reason") else ""
+            lines.append(f"  {item['kind']} {identity}{reason}")
+    lines.append(f"Skipped ({len(payload['skipped'])}):")
+    for item in payload["skipped"]:
+        keys = f" ({', '.join(item['keys'])})" if item.get("keys") else ""
+        lines.append(f"  {item['path']}: {item['reason']}{keys}")
+    if payload.get("output"):
+        lines.append(f"Proposed manifest written to {payload['output']['path']}")
+    return "\n".join(lines)
