@@ -83,3 +83,22 @@ The intervals are wide. A perfect 10/10 gives a Wilson 95% interval of [0.72, 1.
 Smaller risks: package selection is restricted to an ML list I chose (withdrawn advisories are not restricted
 this way). The Zenodo licence frame is the 100 most-viewed datasets. The Crossref paper negatives all sit at
 listing offset 40.
+
+## Discovery evaluation (feature 003)
+
+`discover_eval.py` tallies `model-dependabot discover` against held-out projects whose dependencies a
+person labelled before discovery was run on them (FR-026, SC-008):
+
+```bash
+uv run python -I research/heldout/discover_eval.py LABELS.json        # a Markdown table
+uv run python -I research/heldout/discover_eval.py LABELS.json --json # the same counts as JSON
+```
+
+The labels file lists each project folder and its labelled dependencies as `{kind, key}` pairs. The key
+is `name==version` (or the bare name) for a package, the project-relative path for a weight file, the hub
+name for a base model or dataset, the SPDX identifier for a licence and the lock file's path for an
+environment. For each kind the script reports how many labelled dependencies were found, how many were
+missed and how many candidates were proposed that no label names. It never reports a pooled figure, for
+the reason given above for the other kinds. Discovery runs offline and writes nothing. No discovery
+corpus has been collected yet, so there are no results in `results/`; the report will be produced
+separately from the test suite.

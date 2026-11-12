@@ -48,7 +48,7 @@ model in the same database keeps exactly its earlier alerts (FR-007).
 
 ## 4. Audit after a clean check (User Story 2)
 
-`tests/integration/test_audit.py` performs, with recorded answers in which one source fails:
+`tests/integration/test_inventory_audit.py` performs, with recorded answers in which one source fails:
 
 ```bash
 model-dependabot register tests/fixtures/manifests/example.toml
