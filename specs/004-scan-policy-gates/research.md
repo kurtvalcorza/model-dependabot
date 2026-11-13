@@ -280,6 +280,11 @@ and a model none of whose relevant entries an asked source covers reads `checked
 took precedence; exit 3 prints no payload. Without `--fail-on`, the `gate` object is absent and every
 code is as today (FR-018), which the contract test of every row in the exit-code table guards (SC-005).
 
+**Review round 1 (2026-11-14)**: the `policy` row is not coverage, so a model whose only non-failed row
+is `policy` reads `checked: false` and trips the gate (K1). An item no source can ever read (S6,
+uncheckable) does not trip it (K3, owner's ruling "uncheckable, not incomplete"). An alert whose exception
+has lapsed counts again from the next check of any sources (K5).
+
 **Alternatives considered**: counting only alerts the run itself opened or carried forward (a pipeline
 asking `--source osv` would pass with an open HIGH weight alert); letting the gate win over 2 (a
 pipeline would read "findings" when the truth is "not fully checked"); reusing 1 or 2 (a scheduler
@@ -326,6 +331,13 @@ aggregate each source over the run: the worst state across models (`failed` > `i
 `alerted` > `passed`) and summed counts; a source asked that no model needed is `passed` with
 `entries: 0` and the note "no entry needed this source". The overview is written to
 `check_run_overview` when the run finishes, and on an interrupted run with what was tallied.
+
+**Review round 1 (2026-11-14)**: rows count the entries as measured (a code-free claim that
+format-check contradicted counts as a pickle, X1). Upstream items are tallied to the source passed with
+them, else to the source of their evidence. A watch event raised because no source can be asked about a
+DOI (`_not_asked`: a paper at an agency without retraction notices, a dataset at an agency no source
+reads) is listed under the model's `uncheckable`, with its reason, and is neither incomplete nor counted
+to a source (K3). The `policy` row is not coverage (K1).
 
 **Alternatives considered**: deriving the overview afterwards from evidence (wrong for reused evidence
 and a different source vocabulary); one state per source with no per-model rows (cannot answer SC-004);
@@ -494,6 +506,14 @@ Not volatile: OSV `modified` (changes only with the advisory, which is new evide
 or the repository); `doi_ra/`, `figshare/` and `hf_takedowns/` carry no counters or request ids. A test per
 source (`tests/unit/test_dismissal_hold.py`) shows the matching key unchanged when only these fields
 change, and changed by any other field.
+
+**Review round 1 (2026-11-14)**: a weight scan's evidence matches without its URL (an absolute file URL
+or a registration record's URL), and `VOLATILE_FIELDS` drops `file_name`, `scanned_at` and `verdict` from
+`picklescan` bodies, so the same bytes read from another folder or a fresh record hold the dismissal (K4).
+`set_by` and `set_at` are dropped from `format-policy` and `globals-policy` records, and a globals policy
+record is new evidence only when it lists a global the dismissed alert's records did not (K2). On the OSV
+path a held check reuses the dismissed alert's identical records for the same pinned package, so it
+stores no unlinked duplicate (K6).
 
 **Decision**: a store method `latest_alert(model_id, cause_key)` returns the most recent alert for the
 key in any state. In each insert path, when there is no open alert and that latest alert is `dismissed`,

@@ -790,7 +790,14 @@ def make_handlers(
         )
 
     def run_show(args: argparse.Namespace) -> CommandResult:
-        with _open(args.db) as store:
+        # Review X3: reads only, like ``inventory audit``; never creates or upgrades a database.
+        try:
+            store = Store.open_read_only(args.db, now=now)
+        except FileNotFoundError:
+            raise InvalidInputError(f"no database at {args.db}") from None
+        except OutdatedDatabaseError as error:
+            raise InvalidInputError(str(error)) from None
+        with store:
             run = store.get_check_run(args.run_id)
             if run is None:
                 raise InvalidInputError(f"no check run {args.run_id}")

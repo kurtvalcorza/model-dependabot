@@ -224,13 +224,23 @@ def _note(
     *,
     kind: str | None = None,
     identifier: str | None = None,
+    source: str | None = None,
+    uncheckable: str | None = None,
 ) -> None:
     """Tally an alert, a closed alert or a watch event to the check source being applied.
 
-    The upstream pass applies several sources at once, so its items are tallied to the source of
-    their evidence. Outside a check run (registration) nothing is tallied.
+    The upstream pass applies several sources at once, so its items are tallied to ``source`` when
+    given, else to the source of their evidence. An item no source can ever read (``uncheckable``,
+    the reason) is listed apart: it is neither incomplete nor counted to a source (review K3,
+    owner's ruling). Outside a check run (registration) nothing is tallied.
     """
-    source = target.source
+    if uncheckable is not None:
+        if target.source:
+            target.uncheckable.append(
+                {"kind": kind, "identifier": identifier, "reason": uncheckable}
+            )
+        return
+    source = source or target.source
     if source == UPSTREAM_PASS:
         source = ""
         for evidence_id in evidence_ids:
@@ -272,18 +282,38 @@ def _held_dismissal(
     latest = store.latest_alert(target.model_id, cause_key)
     if latest is None or latest["state"] != "dismissed":
         return False, None
+    dismissed = store.alert_evidence(latest["alert_id"])
     linked = {
-        (e["source"], e["url"], _row_key(store, e), e["matched_identifier"])
-        for e in store.alert_evidence(latest["alert_id"])
+        (e["source"], _url(e["source"], e["url"]), _row_key(store, e), e["matched_identifier"])
+        for e in dismissed
     }
     items = [
-        (o.source, o.url, matching_key(o.source, o.body), identifier) for o in observations or ()
+        (o.source, _url(o.source, o.url), matching_key(o.source, o.body), identifier)
+        for o in observations or ()
     ]
     for evidence_id in evidence_ids or ():
         e = store.get_evidence(int(evidence_id))
         if e is not None:
-            items.append((e["source"], e["url"], _row_key(store, e), e["matched_identifier"]))
+            items.append(
+                (
+                    e["source"],
+                    _url(e["source"], e["url"]),
+                    _row_key(store, e),
+                    e["matched_identifier"],
+                )
+            )
     new = any(item not in linked for item in items)
+    # Review K2: a globals policy record is new evidence only when it lists a global the dismissed
+    # alert's records did not (a shrinking list or a re-asserted policy is not).
+    before = {
+        name
+        for e in dismissed
+        if e["source"] == GLOBALS_POLICY_SOURCE
+        for name in (e.get("detail") or {}).get("unlisted", [])
+    }
+    for o in observations or ():
+        if o.source == GLOBALS_POLICY_SOURCE and set(o.detail.get("unlisted", [])) - before:
+            new = True
     if not new and severity_rank(severity) >= severity_rank(latest["severity"]):
         alert_id = int(latest["alert_id"])
         held = target.summary.setdefault("dismissals_held", [])
@@ -301,6 +331,15 @@ def _held_dismissal(
         "dismissal_reason": latest["dismissal_reason"],
         "closed_at": latest["closed_at"],
     }
+
+
+# Review K4: a scan's evidence is matched by the bytes' identifier and the report's content, not by
+# where the bytes were read (an absolute file URL or a registration record's URL).
+_LOCATION_FREE_SOURCES = frozenset({pickle_scan.SCANNER})
+
+
+def _url(source: str, url: str) -> str:
+    return "" if source in _LOCATION_FREE_SOURCES else url
 
 
 def _row_key(store: Store, evidence: Mapping[str, Any]) -> str:
@@ -341,6 +380,7 @@ class _Target:
     source: str = ""
     tally: dict[str, dict[str, set[Any]]] = field(default_factory=dict)
     held: dict[str, list[int]] = field(default_factory=dict)  # held dismissals by source (FR-020)
+    uncheckable: list[dict[str, Any]] = field(default_factory=list)  # review K3
 
 
 @dataclass
@@ -407,9 +447,10 @@ def _store_overview(
             store,
             model_id=target.model_id,
             version=target.version,
-            entries=target.entries,
+            entries=_measured_target(store, target),  # review X1: as the bytes showed them
             origin=target.origin,
             tally=target.tally,
+            uncheckable=target.uncheckable,
             held=target.held,
             sources=sources,
             statuses=statuses,
@@ -505,6 +546,12 @@ def _check(
             target.source = POLICY_ROW
             _apply_format_rules(store, run_id, target)
             _apply_globals_rules(store, run_id, target)
+    else:
+        # Review K5: whether an exception has lapsed needs no source, so every check releases the
+        # alerts a revoked or expired exception covered; a new exception still waits (FR-010).
+        for target in targets:
+            target.source = POLICY_ROW
+            _apply_globals_rules(store, run_id, target, apply_new=False)
     completed.update(WEIGHT_SOURCES)
     if upstream is not None:
         observed = _Observed(store, run_id)
@@ -875,6 +922,16 @@ def _raise_or_carry(
             severity, origin = keeper["severity"], keeper["severity_origin"]
             cause["severity_from"] = keeper["cause"].get("severity_from")
     linked = store.alert_evidence(keeper["alert_id"]) if keeper else []
+    if keeper is None:
+        # Review K6: a held dismissal reuses the dismissed alert's identical records, for the same
+        # pinned package only, so a held check stores no unlinked duplicate.
+        latest = store.latest_alert(target.model_id, cause_key)
+        if latest is not None and latest["state"] == "dismissed":
+            linked = [
+                e
+                for e in store.alert_evidence(latest["alert_id"])
+                if e["matched_identifier"] == entry["identifier"]
+            ]
     evidence_ids = []
     for record in group:
         detail = details[record.advisory["id"]]
@@ -920,6 +977,8 @@ def _raise_or_carry(
             record = run.read.records.get(advisory_id)
             if record is not None and withdrawn(record.advisory):
                 _withdrawal(run, keeper, record)  # a withdrawn alias, kept as evidence
+        if "reopens" in keeper["cause"] and "reopens" not in cause:
+            cause["reopens"] = keeper["cause"]["reopens"]  # review X2
         store.update_open_alert(
             alert_id,
             current_version=max(keeper["current_version"], target.version),
@@ -1159,7 +1218,7 @@ def _weight_alert(
     # Feature 004: what exceptions covered and released stays with the alert (research S8).
     kept = {
         key: existing["cause"][key]
-        for key in EXCEPTION_KEYS
+        for key in CARRIED_KEYS
         if key in existing["cause"] and key not in cause
     }
     cause = {**cause, **kept}
@@ -1273,6 +1332,8 @@ def _apply_format_rules(store: Store, run_id: int, target: _Target) -> None:
 # --- feature 004: exceptions for globals (research S4, S8) ---------------------------------------
 
 EXCEPTION_KEYS = ("excepted", "released")
+# What a carried-forward alert keeps from its earlier cause (review X2: ``reopens`` too).
+CARRIED_KEYS = (*EXCEPTION_KEYS, "reopens")
 
 
 def _dangerous_pairs(store: Store, sha256: str, names: Sequence[str]) -> list[tuple[str, str]]:
@@ -1286,7 +1347,9 @@ def _dangerous_pairs(store: Store, sha256: str, names: Sequence[str]) -> list[tu
     return [scanned.get(text) or tuple(text.rsplit(".", 1)) for text in names]  # type: ignore[misc]
 
 
-def _apply_globals_rules(store: Store, run_id: int, target: _Target) -> None:
+def _apply_globals_rules(
+    store: Store, run_id: int, target: _Target, *, apply_new: bool = True
+) -> None:
     """Mark the model's open ``weight_file_scan`` alerts excepted, or release them (S8).
 
     An alert is excepted when every dangerous global in its cause is covered by an active
@@ -1304,6 +1367,9 @@ def _apply_globals_rules(store: Store, run_id: int, target: _Target) -> None:
         sha256 = str(cause.get("identifier", "")).removeprefix("sha256:")
         names = list(cause.get("dangerous") or [])
         active = store.exceptions(sha256)
+        if not apply_new:
+            known = {item["exception_id"] for item in cause.get("excepted") or []}
+            active = [e for e in active if e["exception_id"] in known]
         covered = []
         for module, name in _dangerous_pairs(store, sha256, names):
             found = covering(active, module, name)
@@ -1346,7 +1412,8 @@ def _apply_globals_rules(store: Store, run_id: int, target: _Target) -> None:
         excepted_at = (alert["excepted_at"] or stamp) if whole else None
         if cause != alert["cause"] or excepted_at != alert["excepted_at"]:
             store.set_alert_exception(alert["alert_id"], excepted_at=excepted_at, cause=cause)
-    _apply_globals_policy(store, run_id, target)
+    if apply_new:
+        _apply_globals_policy(store, run_id, target)
 
 
 def _exception_item(record: Mapping[str, Any]) -> dict[str, Any]:
@@ -1374,6 +1441,25 @@ def _apply_globals_policy(store: Store, run_id: int, target: _Target) -> None:
     policy = model.get("globals_policy") or "default"
     now = store.now()
     safe = globals_policy.current_safe_list() if policy == "strict" else None
+    if safe is None:
+        # Review X4: the policy is the alert's source, so its change clears every open
+        # ``globals_policy`` alert of the model, whatever its entry has become.
+        for open_alert in store.alerts_for(target.model_id, ["open"]):
+            if open_alert["kind"] != GLOBALS_POLICY_ALERT:
+                continue
+            identifier = open_alert["cause"]["identifier"]
+            record = {
+                "model_id": target.model_id,
+                "identifier": identifier,
+                "globals_policy": policy,
+                "set_by": model.get("globals_policy_set_by"),
+                "set_at": model.get("globals_policy_set_at"),
+            }
+            observation = _Observation(GLOBALS_POLICY_SOURCE, "", now, _json_body(record), record)
+            linked = store.alert_evidence(open_alert["alert_id"])
+            ids = _store_observations(store, run_id, identifier, [observation], linked)
+            _close(store, target, open_alert, "cleared", ids, note="cleared: policy")
+        return
     for entry in _code_capable(_measured_target(store, target)):
         if entry.get("hub_repo") or not entry.get("location") or not entry.get("identifier"):
             continue
@@ -2511,6 +2597,8 @@ def _upstream_alert(
                 store.link_alert_evidence(alert_id, evidence_id)
     else:
         _link_new(store, alert_id, evidence_ids)
+    if "reopens" in existing["cause"] and "reopens" not in cause:
+        cause = {**cause, "reopens": existing["cause"]["reopens"]}  # review X2
     store.update_open_alert(
         alert_id,
         current_version=max(existing["current_version"], target.version),
@@ -2530,6 +2618,8 @@ def _upstream_watch(
     identifier: str,
     detail: Mapping[str, Any],
     evidence_ids: Sequence[int],
+    *,
+    uncheckable: str | None = None,
 ) -> None:
     watch_event_id = store.record_watch_event(
         model_id=target.model_id,
@@ -2549,6 +2639,7 @@ def _upstream_watch(
         evidence_ids,
         kind=kind,
         identifier=identifier,
+        uncheckable=uncheckable,
     )
 
 
@@ -2639,7 +2730,9 @@ def _not_asked(
     kind = DATASET_UNREACHABLE if dataset is None else PAPER_NOT_FOUND
     if dataset is not None:
         detail["dataset"] = dataset
-    _upstream_watch(store, target, kind, doi, detail, observed.agency(read, doi))
+    _upstream_watch(
+        store, target, kind, doi, detail, observed.agency(read, doi), uncheckable=reason
+    )
 
 
 def _apply_doi_dataset(

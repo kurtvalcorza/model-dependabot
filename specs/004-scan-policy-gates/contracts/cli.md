@@ -159,7 +159,16 @@ Per command:
 `check` without `--fail-on` still never exits non-zero just because alerts exist, so a scheduler does
 not mistake findings for failures (SC-005).
 
-## As built (T065, 2026-11-14)
+## As built (T065, 2026-11-14; review round 1)
+
+- Review round 1: `run show` opens the database read-only, as `inventory audit` does: a missing file exits
+  1 ("no database at PATH") and creates nothing; an older database is read as it is, never upgraded.
+- Review round 1: each model of the overview has `uncheckable` (`[{kind, identifier, reason}]`), shown in
+  text as `  uncheckable: KIND IDENTIFIER: REASON`; such items never trip `--fail-on`.
+- Review round 1: a model whose only rows are `policy` and failed sources reads `checked: false` and trips
+  `--fail-on`.
+- Review round 1: every `check` releases alerts whose exception was revoked or has expired, whatever the
+  sources asked; recording an exception still takes effect only at a check that asks a weight source.
 
 - `run show RUN_ID --json` prints `{run_id, scope, trigger, started_at, finished_at, sources, overview}`;
   its text is the run's header, each source's status, then the overview block. An unknown run exits 1

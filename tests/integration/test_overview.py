@@ -86,7 +86,10 @@ def test_four_states_in_json(
     assert _row(models["alerted"]["sources"], "picklescan")["state"] == "alerted"
     assert _row(models["partial"]["sources"], "picklescan")["state"] == "incomplete"
     assert _row(models["hubbed"]["sources"], "hf-scan")["state"] == "failed"
-    assert models["hubbed"]["checked"] is True  # its policy row was not failed
+    # Review K1: the policy row is not coverage, so a model whose one real source failed is not
+    # checked.
+    assert models["hubbed"]["checked"] is False
+    assert models["hubbed"]["reason"] == "every source that could check this model failed"
     assert models["onnx"]["checked"] is False
     assert models["onnx"]["reason"] == "no entry of this model can be checked by the sources asked"
     assert models["onnx"]["sources"] == []

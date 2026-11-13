@@ -206,7 +206,15 @@ No new column. Each model in the `check` payload gains `dismissals_held` (alert 
 `findings.excepted` lists them in the shape `alerts` prints. When the database has overview rows for the
 version, `coverage.sources[]` items gain `last_state` (the row's state in that source's latest run).
 
-## As built (T065, 2026-11-14)
+## As built (T065, 2026-11-14; review round 1)
+
+- Review round 1: each model in the overview gains `uncheckable`, `[{kind, identifier, reason}]`, stored as
+  one `check_run_overview` row with source `uncheckable` whose `reason` holds the list as JSON; it is not a
+  source row, not coverage and not in the run-wide rows. The `policy` row is not coverage either.
+- Review round 1: `VOLATILE_FIELDS` also holds `format-policy` and `globals-policy` (`set_by`, `set_at`;
+  the latter also `unlisted` and `excepted`, compared apart: only a growing list is new) and `picklescan`
+  (`file_name`, `scanned_at`, `verdict`); `picklescan` evidence matches without its URL.
+- Review round 1: a carried-forward alert keeps `reopens` on every path.
 
 - The `globals-policy` evidence record is `{model_id, identifier, globals_policy, set_by, set_at,
   safe_list_version, safe_list_sha256, unlisted, excepted}`, with `unlisted` and `excepted` sorted global

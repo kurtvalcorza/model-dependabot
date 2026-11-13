@@ -574,6 +574,11 @@ VOLATILE_FIELDS: dict[str, tuple[str, ...]] = {
     "zenodo": ("stats",),
     "crossref": ("message.indexed", "message.is-referenced-by-count"),
     "datacite": _DATACITE_COUNTERS,
+    # Review K2 and K4: who set a policy and when, and where or when bytes were scanned, are not
+    # new evidence; a globals policy record's lists are compared apart (only a growing list is).
+    "format-policy": ("set_by", "set_at"),
+    "globals-policy": ("set_by", "set_at", "unlisted", "excepted"),
+    "picklescan": ("file_name", "scanned_at", "verdict"),
 }
 
 
@@ -1284,6 +1289,8 @@ class Store:
 
     def check_run_target_versions(self, run_id: int) -> list[tuple[str, int]]:
         """The models and versions a run checked, in model order."""
+        if "check_run_targets" not in self.tables():
+            return []  # a database older than feature 003, opened read-only
         rows = self.conn.execute(
             "SELECT model_id, version FROM check_run_targets WHERE run_id = ? ORDER BY model_id",
             (run_id,),

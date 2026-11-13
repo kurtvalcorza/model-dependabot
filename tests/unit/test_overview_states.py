@@ -85,3 +85,31 @@ def test_the_policy_row_counts_pinned_code_capable_weight_files(tmp_path: Path) 
         ("policy", 0),
     ]
     assert rows[0]["entries"] == 1  # only the pinned code-capable local file
+
+
+def test_uncheckable_items_are_listed_apart_and_never_coverage() -> None:
+    """Review K3: an item no source can ever read is shown as uncheckable, not incomplete."""
+    covered = {
+        "sources": [],
+        "models": [
+            {
+                "model_id": "m",
+                "version": 1,
+                "checked": True,
+                "reason": None,
+                "sources": [],
+                "uncheckable": [{"kind": "paper_not_found", "identifier": "10.1/a", "reason": "r"}],
+            }
+        ],
+    }
+    assert "  uncheckable: paper_not_found 10.1/a: r" in overview.text(1, "m", covered)
+    rows = overview.run_rows(
+        [
+            {"model_id": "m", "version": 1, "source": "uncheckable", "state": "passed",
+             "reason": "[]", "entries": 1} | dict.fromkeys(overview.COUNTS[1:])
+        ],
+        ["crossref"],
+        {"crossref": "ok"},
+    )  # fmt: skip
+    assert [row["source"] for row in rows] == ["crossref"]
+    assert rows[0]["reason"] == "no entry needed this source"

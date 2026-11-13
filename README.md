@@ -246,7 +246,9 @@ found or a refused base model), `alerted` (an alert from it is open and not exce
 counts are the relevant entries, the entries not finished, open and excepted alerts, held dismissals
 and watch events. The format rules and the globals policy have their own row, `policy`. A model none of
 whose entries any source asked can check is shown as not checked, so no findings is never read as
-checked.
+checked; the `policy` row does not count as checking. An item no source can ever read, such as a paper
+DOI registered where no retraction source reads, is listed as uncheckable with the reason and does not
+trip `--fail-on`.
 
 ### Rule IDs
 
@@ -260,7 +262,9 @@ A dismissed alert stays dismissed: a later check that finds the same cause with 
 new alert and lists the dismissed one under the model's `dismissals_held` (and in the overview's `held`
 column). Evidence is new when its source, URL, matched identifier or content differs from every piece
 linked to the dismissed alert, or the severity is higher; counters that move on every request (download
-and view counts, re-indexing times) are ignored for this comparison only. New evidence opens a new alert
+and view counts, re-indexing times) are ignored for this comparison only. A weight file's scan is compared
+by the bytes and the report, wherever the file was read; a policy set again to the same value, or a
+globals list that only shrinks, is not new evidence. New evidence opens a new alert
 whose cause names the dismissed one under `reopens`.
 
 ### Exceptions for globals
@@ -285,8 +289,9 @@ At the next check that asks a weight source (`picklescan`, `hf-scan` or `format-
 whose every dangerous global is covered is shown as `excepted`, with the exceptions as its evidence,
 and no longer counts as open. An alert with a global left uncovered stays open and lists the covered
 ones under `excepted`. When an exception is revoked, or its expiry date has passed (it covers that
-whole day in UTC), the next such check returns the finding on the same alert, recording the release.
-A check with only other sources, `osv` say, does not apply exceptions. Hub weight files are not
+whole day in UTC), the next check, whatever sources it asks, returns the finding on the same alert,
+recording the release. A new exception, though, takes effect only at a check that asks a weight source:
+a check with only other sources, `osv` say, does not apply it. Hub weight files are not
 covered: no source reads their globals, so an exception for a hub file's hash is listed as not in use.
 
 Under `policy ID --globals strict` the bar is higher: every global in a scanned local pickle file that is

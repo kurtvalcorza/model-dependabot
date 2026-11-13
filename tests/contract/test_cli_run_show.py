@@ -47,7 +47,7 @@ def test_run_show_matches_the_check(cli) -> None:
     )
     assert shown["overview"] == checked["overview"]
     [model] = shown["overview"]["models"]
-    assert set(model) == {"model_id", "version", "checked", "reason", "sources"}
+    assert set(model) == {"model_id", "version", "checked", "reason", "sources", "uncheckable"}
     assert set(model["sources"][0]) == {
         "source", "state", "reason", "entries", "incomplete", "alerts_open",
         "alerts_excepted", "watch_events", "dismissals_held",

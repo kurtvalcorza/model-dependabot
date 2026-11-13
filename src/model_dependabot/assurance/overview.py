@@ -12,6 +12,7 @@ end of the run) and ``passed``. The format rules and the globals policy are tall
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
@@ -21,6 +22,7 @@ from model_dependabot.rules import rule_for
 from model_dependabot.store import Store
 
 POLICY = "policy"
+UNCHECKABLE = "uncheckable"
 WEIGHT_SOURCES = ("picklescan", "hf-scan", "format-check")
 STATES = ("failed", "incomplete", "alerted", "passed")  # worst first
 COUNTS = (
@@ -89,9 +91,18 @@ def model_rows(
     held: Mapping[str, Sequence[int]] | None,
     sources: Sequence[str],
     statuses: Mapping[str, str],
+    uncheckable: Sequence[Mapping[str, Any]] = (),
 ) -> list[dict[str, Any]]:
-    """One model's rows: one per source asked that has a relevant entry (research S6)."""
+    """One model's rows: one per source asked that has a relevant entry (research S6), and one
+    ``uncheckable`` row listing items no source can ever read (review K3), its ``reason`` the
+    list as JSON."""
     rows = []
+    if uncheckable:
+        rows.append(
+            {"model_id": model_id, "version": version, "source": UNCHECKABLE, "state": "passed",
+             "reason": json.dumps(list(uncheckable)), "entries": len(uncheckable)}
+            | {key: None for key in COUNTS if key != "entries"}
+        )  # fmt: skip
     for source in row_sources(sources):
         count = entries_for(store, entries, origin, source)
         if not count:
@@ -131,7 +142,7 @@ def run_rows(
     wide = []
     for source in row_sources(sources):
         status = "ok" if source == POLICY else statuses.get(source)
-        mine = [row for row in rows if row["source"] == source]
+        mine = [row for row in rows if row["source"] == source and row["source"] != UNCHECKABLE]
         row: dict[str, Any] = {"model_id": None, "version": None, "source": source}
         if _failed(status):
             row |= {"state": "failed", "reason": _reason(status)}
@@ -162,9 +173,19 @@ def payload(store: Store, run_id: int) -> dict[str, Any]:
 
     models = []
     for model_id, version in targets:
-        rows = ordered(row for row in stored if row["model_id"] == model_id)
-        checked = any(row["state"] != "failed" for row in rows)
-        reason = None if checked else (ALL_FAILED if rows else NOT_CHECKABLE)
+        mine = [row for row in stored if row["model_id"] == model_id]
+        items = [
+            item
+            for row in mine
+            if row["source"] == UNCHECKABLE
+            for item in json.loads(row["reason"])
+        ]
+        rows = ordered(row for row in mine if row["source"] != UNCHECKABLE)
+        # Review K1: the ``policy`` row judges the inventory and the owner's policy, not the bytes,
+        # so it is not coverage (FR-021).
+        covering = [row for row in rows if row["source"] != POLICY]
+        checked = any(row["state"] != "failed" for row in covering)
+        reason = None if checked else (ALL_FAILED if covering else NOT_CHECKABLE)
         models.append(
             {
                 "model_id": model_id,
@@ -172,6 +193,7 @@ def payload(store: Store, run_id: int) -> dict[str, Any]:
                 "checked": checked,
                 "reason": reason,
                 "sources": [view(row) for row in rows],
+                "uncheckable": items,
             }
         )
     return {
@@ -211,6 +233,8 @@ def text(run_id: int, scope: str, overview: Mapping[str, Any]) -> str:
         if model["checked"]:
             lines.append(f"{model['model_id']} v{model['version']}: checked")
             lines += [_line(row) for row in model["sources"]]
+        for item in model.get("uncheckable") or []:
+            lines.append(f"  uncheckable: {item['kind']} {item['identifier']}: {item['reason']}")
         else:
             lines.append(f"{model['model_id']} v{model['version']}: not checked: {model['reason']}")
     return "\n".join(lines)

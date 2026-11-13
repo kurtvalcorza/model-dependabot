@@ -92,6 +92,21 @@ Rulings by the owner on the plan's open decisions (research.md, Decisions on the
 - Q: Where does an excepted alert appear in the `alerts` JSON? → A: Only in `excepted`; `alerts` never holds an
   excepted alert, and `--state excepted` gives `alerts: []` and the list (contracts/cli.md).
 
+### Session 2026-11-14 (pull request review, round 1)
+
+- Q: Does a paper DOI no retraction source can ever read trip `--fail-on`? → A: No: "uncheckable, not
+  incomplete". The overview lists it as uncheckable, as the feature 003 audit does; `paper_not_found` from a
+  source that was asked counts as incomplete (FR-021).
+- Q: Does the `policy` row count as coverage? → A: No. A model whose only rows are `policy` and failed sources
+  reads `checked: false` (FR-021).
+- Q: When does a lapsed exception return its finding? → A: At the next check, whatever sources it asks: an
+  expired or revoked exception is a store-only decision. A new exception still waits for a check that asks a
+  weight source (FR-010).
+- Q: What is new evidence for a dismissed weight or policy alert? → A: For a scan, the file's SHA-256, the
+  scanner version and the report's content, wherever the bytes were read. For a policy record, a change of
+  policy or, for the globals policy, a global the dismissed alert did not list; re-asserting the same policy
+  or a shrinking list is not new evidence (FR-020).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Accept a reviewed global in one exact file (Priority: P1)
@@ -337,7 +352,11 @@ the gate code.
 - **FR-021**: With `--fail-on`, the command MUST also exit with the gate code, when no source failed, if any model in
   the run's scope has a source in the incomplete state, if no relevant source checked a model or if the scope
   matched no model, and MUST name each such source, model or the empty scope. Without `--fail-on` none of this
-  changes any exit code.
+  changes any exit code. The `policy` row (format rules and globals policy) is not a source that checked a
+  model. An item no source can ever read (a paper DOI registered where no retraction source reads, a DOI of an
+  agency no source asks) is uncheckable: the overview lists it apart and it does not trip the gate; the same
+  kind of item from a source that was asked and could not finish (`paper_not_found` from Crossref, say) is
+  incomplete and trips it.
 
 ### Key Entities
 
