@@ -422,3 +422,50 @@ def test_an_onnx_prefix_in_front_of_a_zip_is_not_confirmed(store: Store, tmp_pat
     target = _target(store, [_onnx("model.onnx", content)], base_dir=tmp_path / "bom")
     _run(store, NoNetwork(), [target])
     assert ("code_free", "unreadable", None) in _outcomes(store, target)
+
+
+# --- PR #15 round 3, T5: the bytes classified are the bytes hashed ------------------------------
+
+
+def _swap_after_first_hash(monkeypatch: pytest.MonkeyPatch, path: Path, later: bytes) -> None:
+    """Replace the file's bytes right after its first hash, as a racing writer would."""
+    from model_dependabot.assurance import format_check
+    from model_dependabot.inventory import build
+
+    real = build.hash_stream
+    calls = []
+
+    def hash_then_swap(handle: Any) -> tuple[str, int]:
+        answer = real(handle)
+        if not calls:
+            calls.append(answer)
+            path.write_bytes(later)
+        return answer
+
+    monkeypatch.setattr(build, "hash_stream", hash_then_swap)
+    monkeypatch.setattr(format_check, "hash_stream", hash_then_swap, raising=False)
+
+
+def test_a_file_swapped_after_its_hash_is_never_confirmed(
+    store: Store, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "bom").mkdir()
+    path = tmp_path / "bom" / "model.safetensors"
+    path.write_bytes(PICKLE)  # the pinned bytes: a pickle claimed code-free
+    target = _target(store, [_local("model.safetensors", PICKLE)], base_dir=tmp_path / "bom")
+    _swap_after_first_hash(monkeypatch, path, _safetensors())
+    _run(store, NoNetwork(), [target])
+    outcomes = _outcomes(store, target)
+    assert ("code_free", "confirmed", "safetensors") not in outcomes
+    assert ("code_free", "unreadable", None) in outcomes
+
+
+def test_import_never_measures_a_file_swapped_after_its_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "model.safetensors"
+    path.write_bytes(PICKLE)
+    entry = _local("model.safetensors", PICKLE)
+    _swap_after_first_hash(monkeypatch, path, _safetensors())
+    assert measure_imported([entry], tmp_path, NOW) == []
+    assert entry["format_origin"] == "import"

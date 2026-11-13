@@ -298,6 +298,27 @@ def classify(name: str, head: bytes | Path | None) -> tuple[str, bool | None]:
     return _classify(suffix, read, _size(head), lambda: _is_pytorch_zip(head))
 
 
+def classify_handle(name: str, handle: BinaryIO, size: int) -> tuple[str, bool | None]:
+    """``classify`` of a local file read through ``handle``, an open, seekable file of ``size``
+    bytes, so the bytes classified are those the caller hashes on the same handle (PR #15
+    round 3, T5). A zip's central directory is read through the handle too."""
+
+    def read(n: int) -> bytes:
+        handle.seek(0)
+        return handle.read(n)
+
+    def pytorch_zip() -> bool:
+        handle.seek(0)
+        try:
+            with zipfile.ZipFile(handle) as archive:  # a handle passed in is left open
+                names = archive.namelist()
+        except zipfile.BadZipFile:
+            return False
+        return any(PurePosixPath(item).name == "data.pkl" for item in names)
+
+    return _classify(PurePosixPath(name).suffix.lower(), read, size, pytorch_zip)
+
+
 def _classify(
     suffix: str, read: Read, size: int, pytorch_zip: Callable[[], bool] | None
 ) -> tuple[str, bool | None]:

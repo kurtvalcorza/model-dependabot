@@ -36,8 +36,8 @@ from model_dependabot.assurance.trust import (
 from model_dependabot.inventory.build import (
     NO_ONNX_STRUCTURE,
     ZIP_TAIL,
-    classify,
-    hash_file,
+    classify_handle,
+    hash_stream,
     shows_onnx,
 )
 from model_dependabot.sources.fetcher import Fetcher, SourceFailedError
@@ -133,9 +133,43 @@ def pending(
 
 def _ends(handle: BinaryIO, size: int) -> tuple[bytes, bytes]:
     """A local file's first ``HEADER_LEAD`` bytes and its last ``ZIP_TAIL`` bytes."""
+    handle.seek(0)
     lead = handle.read(HEADER_LEAD)
     handle.seek(max(0, size - ZIP_TAIL))
     return lead, handle.read(ZIP_TAIL)
+
+
+class FileChangedError(OSError):
+    """The file's bytes changed while it was hashed and classified (PR #15 round 3, T5)."""
+
+
+@dataclass(frozen=True)
+class _Measured:
+    sha256: str
+    size: int
+    lead: bytes
+    tail: bytes
+    format: str
+    can_run_code: bool | None
+
+
+def _measure(path: Path) -> _Measured:
+    """Hash, read and classify a local file through one handle, then hash it again.
+
+    One handle means the bytes classified are the bytes hashed, as for picklescan
+    (``_read_local_scans``); the second hash catches a change written into the file meanwhile,
+    and ``FileChangedError`` says so rather than confirming a claim on bytes that were not the
+    ones pinned.
+    """
+    with path.open("rb") as handle:
+        sha256, size = hash_stream(handle)
+        lead, tail = _ends(handle, size)
+        file_format, can_run_code = classify_handle(path.name, handle, size)
+        handle.seek(0)
+        again, _ = hash_stream(handle)
+    if again != sha256:
+        raise FileChangedError("the file changed while it was read")
+    return _Measured(sha256, size, lead, tail, file_format, can_run_code)
 
 
 def _unproven_onnx(
@@ -258,14 +292,13 @@ def measure_imported(
         if path is None or not path.is_file():
             continue
         try:
-            sha256, size = hash_file(path)
-            if f"sha256:{sha256}" != entry["identifier"]:
-                continue
-            with path.open("rb") as handle:
-                lead, tail = _ends(handle, size)
-            file_format, can_run_code = classify(path.name, path)
-        except OSError:
+            measured = _measure(path)
+        except OSError:  # unreadable, or changed while read: format-check reads it later
             continue
+        if f"sha256:{measured.sha256}" != entry["identifier"]:
+            continue
+        sha256, size, lead, tail = measured.sha256, measured.size, measured.lead, measured.tail
+        file_format, can_run_code = measured.format, measured.can_run_code
         if _unproven_onnx(file_format, can_run_code, lead, size, tail):
             continue  # the name alone confirms nothing: format-check reads it as unverified
         claimed = (entry["format"], entry["can_run_code"])
@@ -350,12 +383,13 @@ def read_local(
     if not path.is_file():
         return unreadable(FILE_ABSENT, path.as_uri())
     try:
-        sha256, size = hash_file(path)
-        with path.open("rb") as handle:
-            lead, tail = _ends(handle, size)
-        file_format, can_run_code = classify(path.name, path)
+        measured = _measure(path)
+    except FileChangedError as error:
+        return unreadable(str(error), path.as_uri())
     except OSError as error:
         return unreadable(f"cannot read the file: {error.strerror or error}", path.as_uri())
+    sha256, size, lead, tail = measured.sha256, measured.size, measured.lead, measured.tail
+    file_format, can_run_code = measured.format, measured.can_run_code
     summary |= {
         "sha256": f"sha256:{sha256}",
         "total_size": size,
