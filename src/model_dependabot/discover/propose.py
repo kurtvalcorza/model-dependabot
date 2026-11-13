@@ -33,6 +33,25 @@ class OutputExistsError(FileExistsError):
     """The output file exists and ``--force`` was not given."""
 
 
+class OutputLinkError(ValueError):
+    """The output path is a link (PR #15 round 3, T1): it is refused, never followed."""
+
+
+def is_link(path: Path) -> bool:
+    """Whether ``path`` itself is a symbolic link or a junction, dangling or not."""
+    return path.is_symlink() or path.is_junction()
+
+
+def refuse_link(output: Path) -> None:
+    """Refuse an output path that is a link, whatever it points at and with or without
+    ``--force``: a link inside an untrusted project must never choose where a proposal lands."""
+    if is_link(output):
+        raise OutputLinkError(
+            f"{output} is a link; discover writes only to the path it is given, never through a"
+            " link, so name a file that is not one"
+        )
+
+
 def toml_string(text: str) -> str:
     """``text`` as a TOML basic string, with every character TOML needs escaped."""
     escaped = []
@@ -178,6 +197,7 @@ def render(result: Mapping[str, Any], model_id: str, root: Path, output: Path) -
 def write(text: str, output: Path, *, force: bool) -> None:
     """Write ``text`` to ``output`` through a temporary file beside it, checked to load as a
     manifest first; ``OutputExistsError`` if ``output`` exists and ``force`` is false."""
+    refuse_link(output)
     output = output.absolute()
     if output.exists() and not force:
         raise OutputExistsError(f"{output} exists; give --force to replace it")

@@ -62,14 +62,14 @@ def write_proposal(
 ) -> dict[str, Any]:
     """Write the proposed manifest for ``result`` to ``output`` and record it in the result.
 
-    The paths in it are relative to where ``output`` resolves to, as the project root is
-    resolved, so a link or short name in either spelling never makes them climb out (review F9).
-    The file is written where ``output`` resolves to as well: a link given as ``output`` is
-    written through, and kept, so the paths are checked and used beside the file they belong to
-    (PR #15 round 2, S1).
+    The paths in it are relative to the folder ``output`` is in, resolved as the project root
+    is, so a link or short name in either spelling never makes them climb out (review F9). Only
+    the folder is resolved: ``output`` itself must not be a link (``OutputLinkError``, PR #15
+    round 3, T1), so the file is written, checked and replaced at the path given.
     """
+    propose.refuse_link(output)
     root = Path(result["project"]).resolve()
-    destination = output.resolve()
+    destination = output.absolute().parent.resolve() / output.name
     text = propose.render(result, model_id, root, destination)
     propose.write(text, destination, force=force)
     result["output"] = {"path": str(output), "written": True}

@@ -96,7 +96,7 @@ output; both may go before or after the command name.
 | `inventory show ID [--version N]` | Lists the entries with their identifiers and the gaps with their reasons |
 | `inventory export ID [--version N] -o FILE` | Writes the stored CycloneDX 1.7 inventory, validated against the official schema |
 | `inventory audit ID [--version N] [--stale-after HOURS]` | Reports one version's findings, how far each entry is verified and which sources have checked it, from the stored data only; see [Auditing an inventory](#auditing-an-inventory). Opens the database read-only, contacts no source and writes nothing |
-| `discover PATH [--manifest FILE] [--model-id ID] [--upstream] [-o FILE [--force]]` | Proposes candidate dependencies for a project folder; see [Discovering dependencies](#discovering-dependencies). Reads nothing outside `PATH` and opens no database. Makes no request unless `--upstream`. Writes nothing unless `-o`, and never replaces a file unless `--force` |
+| `discover PATH [--manifest FILE] [--model-id ID] [--upstream] [-o FILE [--force]]` | Proposes candidate dependencies for a project folder; see [Discovering dependencies](#discovering-dependencies). Reads nothing outside `PATH` and opens no database. Makes no request unless `--upstream`. Writes nothing unless `-o`, never replaces a file unless `--force` and refuses an `-o` path that is a link |
 | `check (ID \| --all) [--scheduled] [--source ...]` | Runs the checks now and records a check run. Sources: `osv`, `picklescan`, `hf-scan`, `format-check`, `hf-hub`, `hf-takedowns`, `crossref`, `datacite`, `zenodo` and `figshare`; without `--source` every source runs. `--scheduled` marks the run as scheduled and needs `--all` (`check ID --scheduled` exits 1); see [Scheduling](#scheduling) |
 | `policy ID --format (default\|strict) --by NAME` | Sets the model's weight-format policy, recording who set it and when. Under `default` a format that can run code when loaded is a watch event; under `strict` a code-capable weight file with no pinned code-free file beside it in the same version raises an alert (an unpinned name proves nothing). Takes effect at the next check |
 | `alerts ID [--state open\|closed\|all]` | Lists alerts by severity (`CRITICAL`, `HIGH`, `MODERATE`, `LOW`, `UNKNOWN`), then the watch events, each with its evidence |
@@ -193,7 +193,7 @@ and [`specs/002-upstream-watch/contracts/cli.md`](specs/002-upstream-watch/contr
 | Code | Meaning |
 | :-- | :-- |
 | 0 | Success. For `check`: the check completed, whether or not it found anything |
-| 1 | Invalid input (manifest, inventory or arguments); for `inventory audit` also an unknown model or version or a database older than feature 002; for `discover` a `PATH` that is not a folder or an existing `-o` file without `--force` |
+| 1 | Invalid input (manifest, inventory or arguments); for `inventory audit` also an unknown model or version or a database older than feature 002; for `discover` a `PATH` that is not a folder, an existing `-o` file without `--force` or an `-o` path that is a link |
 | 2 | `check` finished but at least one source failed; alerts that depend on it were left unchanged |
 | 3 | Unexpected error |
 
@@ -387,7 +387,9 @@ who removed a record) are dropped. Such evidence keeps the SHA-256 of the respon
 - It never sends `PUT`, `PATCH` or `DELETE`. The only `POST` is OSV's read-only query.
 - It never loads a weight file to inspect it: pickles are scanned as data, without running them.
 - `discover` reads nothing outside the folder it is given, runs no project code, opens no database,
-  makes no request without `--upstream` and writes only the `-o` file.
+  makes no request without `--upstream` and writes only the `-o` file. It refuses an `-o` path that
+  is a symbolic link or junction, even a dangling one and even with `--force`, so a link in the
+  project cannot choose where the proposal is written.
 - It never sends a token, an account name or personal data to a source; every upstream request is a
   `GET` or `HEAD`.
 - It never stores the requesting party of a takedown or the names of people in a source's answer.

@@ -23,7 +23,7 @@ from jsonschema import ValidationError
 from model_dependabot.assurance.audit import DEFAULT_STALE_AFTER_HOURS, audit_report
 from model_dependabot.assurance.format_check import measure_imported, record_import_contradictions
 from model_dependabot.discover.project import discover, write_proposal
-from model_dependabot.discover.propose import OutputExistsError
+from model_dependabot.discover.propose import OutputExistsError, OutputLinkError, refuse_link
 from model_dependabot.inventory.build import build_entries, record_licences
 from model_dependabot.inventory.cyclonedx import InventoryError, export_bom, import_bom, validate
 from model_dependabot.inventory.record import (
@@ -651,6 +651,11 @@ def make_handlers(
             except ManifestError as error:
                 raise InvalidInputError(str(error)) from None
         output = Path(args.output) if args.output else None
+        if output is not None:
+            try:
+                refuse_link(output)  # before anything is read (PR #15 round 3, T1)
+            except OutputLinkError as error:
+                raise InvalidInputError(str(error)) from None
         if output is not None and output.exists() and not args.force:
             raise InvalidInputError(f"{output} exists; give --force to replace it")
         hub = None
@@ -662,7 +667,7 @@ def make_handlers(
             model_id = args.model_id or root.resolve().name
             try:
                 write_proposal(result, output, model_id=model_id, force=args.force)
-            except OutputExistsError as error:
+            except (OutputExistsError, OutputLinkError) as error:
                 raise InvalidInputError(str(error)) from None
         return CommandResult(result, discover_text(result))
 

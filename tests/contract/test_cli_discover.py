@@ -113,3 +113,22 @@ def test_db_is_accepted_and_ignored(
     code, _, _ = run(["discover", str(detector_project), "--db", str(db), "--json"], capsys)
     assert code == EXIT_OK
     assert not db.exists()
+
+
+def test_an_output_link_exits_1_and_writes_nothing(
+    detector_project: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """PR #15 round 3, T1: refused before discovery, with or without --force."""
+    from conftest import make_directory_link
+
+    link = tmp_path / "proposed.toml"
+    (tmp_path / "planted").mkdir()
+    make_directory_link(link, tmp_path / "planted")
+    (tmp_path / "planted").rmdir()  # the link now dangles
+    for extra in ([], ["--force"]):
+        code, _, out_text = run(
+            ["discover", str(detector_project), "-o", str(link), *extra], capsys
+        )
+        assert code == EXIT_INVALID_INPUT
+        assert "is a link" in out_text
+    assert not (tmp_path / "planted").exists()
