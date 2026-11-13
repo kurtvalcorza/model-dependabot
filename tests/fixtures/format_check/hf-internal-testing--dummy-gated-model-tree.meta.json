@@ -1,0 +1,11 @@
+{
+  "method": "GET",
+  "url": "https://huggingface.co/api/models/hf-internal-testing/dummy-gated-model/tree/9a039e123af345a94ba89c5e4cc3a0f6dac50bd9",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "etag": "W/\"125-aQCsQtlJtiXYGPx7Y/uFPKdQVj4\""
+  },
+  "retrieved_at": "2026-11-12T16:20:30Z",
+  "body_file": "hf-internal-testing--dummy-gated-model-tree.json"
+}

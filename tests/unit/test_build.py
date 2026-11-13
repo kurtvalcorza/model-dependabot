@@ -16,6 +16,7 @@ from model_dependabot.inventory.build import (
     classify,
     merge_datasets,
     new_entry,
+    shows_onnx,
 )
 from model_dependabot.manifest import load_manifest
 from model_dependabot.sources.fetcher import RecordedFetcher
@@ -268,3 +269,138 @@ def test_a_dataset_listed_again_keeps_a_licence_only_the_later_listing_records()
     )
     [kept] = merge_datasets([mit, cc0])
     assert kept["recorded_licence"] == "MIT"  # the first recorded licence stays the baseline
+
+
+# --- classify_lead: the same rules on the first bytes and the true size (T006, research A4) -------
+
+LEAD = 1 << 20
+
+
+def _lead_cases() -> list[tuple[str, bytes]]:
+    return [
+        ("model.safetensors", _safetensors(64)),
+        ("model.safetensors", _safetensors(640, b'{"w":{"data_offsets":[0,9]}}') + b"\x00" * 9),
+        ("model.safetensors", _safetensors(640, b'{"w":{"data_offsets":[0,9]}}')),
+        ("model.safetensors", b"\x80\x04\x95\x00" + b"\x00" * 64),
+        ("model.safetensors", b""),
+        ("model.gguf", _gguf(3)),
+        ("model.gguf", _gguf(3, tensors=1, pairs=1, size=24 + 24 + 11)),
+        ("model.gguf", b"cos\nsystem\n."),
+        ("model.onnx", b"\x08\x07" + b"\x00" * 32),
+        ("model.onnx", b"\x80\x02}q\x00."),
+        *[
+            (f"model.{ext}", b"\x80" + bytes([protocol]) + b"}q\x00.")
+            for ext in ("pt", "bin")
+            for protocol in (2, 3, 4, 5)
+        ],
+        ("model.safetensors", b"\x80\x05\x95\x00" + b"\x00" * 64),
+        ("model.pt", _zip(["archive/data.pkl", "archive/version"])),
+        ("model.safetensors", _zip(["notes.txt"])),
+        ("model.gguf", _zip(["archive/data.pkl"])),
+        ("model.h5", b"\x89HDF"),
+    ]
+
+
+@pytest.mark.parametrize(("name", "content"), _lead_cases())
+def test_classify_lead_agrees_with_classify_on_the_whole_file(name: str, content: bytes) -> None:
+    from model_dependabot.inventory.build import classify_lead
+
+    assert classify_lead(name, content[:LEAD], len(content)) == classify(name, content)
+
+
+def test_classify_lead_uses_the_true_size_not_the_lead_length() -> None:
+    """Offsets and counts must fit the whole file, which is larger than the lead."""
+    from model_dependabot.inventory.build import classify_lead
+
+    big = _safetensors(64, b'{"w":{"data_offsets":[0,2000000]}}') + b"\x00" * 2_000_000
+    assert classify_lead("model.safetensors", big[:LEAD], len(big)) == classify(
+        "model.safetensors", big
+    )
+    assert classify_lead("model.safetensors", big[:LEAD], len(big)) == ("safetensors", False)
+    # The same header claimed for a file too small to hold its data is not safetensors.
+    assert classify_lead("model.safetensors", big[:LEAD], 100) == ("pickle", True)
+    gguf = _gguf(3, tensors=50_000, size=LEAD)
+    assert classify_lead("model.gguf", gguf, 24 + 24 * 50_000) == ("gguf", False)
+    assert classify_lead("model.gguf", gguf, LEAD) == ("pickle", True)
+
+
+def test_a_lead_that_starts_like_a_zip_is_never_code_free() -> None:
+    """The central directory is at the end of a zip, out of the lead's reach."""
+    from model_dependabot.inventory.build import classify_lead
+
+    archive = _zip(["archive/data.pkl"]) + b"\x00" * (2 * LEAD)
+    for name in ("model.safetensors", "model.gguf", "model.onnx"):
+        file_format, can_run_code = classify_lead(name, archive[:LEAD], len(archive))
+        assert can_run_code is not False
+        assert file_format != "safetensors"
+
+
+def test_a_safetensors_header_longer_than_the_lead_asks_for_more_bytes() -> None:
+    from model_dependabot.inventory.build import NeedMoreBytes, classify_lead
+
+    header = b'{"w":{"data_offsets":[0,4]}}'
+    content = _safetensors(3 * LEAD, header) + b"\x00" * 4
+    answer = classify_lead("model.safetensors", content[:LEAD], len(content))
+    assert answer == NeedMoreBytes(8 + 3 * LEAD)
+    assert classify_lead("model.safetensors", content[: 8 + 3 * LEAD], len(content)) == (
+        "safetensors",
+        False,
+    )
+
+
+# --- review F2 (PR #15 R5): positive ONNX structure ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("lead", "total", "shown"),
+    [
+        (FIXTURES / "manifests" / "weights" / "tiny.onnx", None, True),
+        (
+            b"\x08\x08\x12\x04test\x3a\xff\xff\x03" + b"\x0a" * 100,
+            70_000,
+            True,
+        ),  # graph read in part
+        (b"cos\nsystem\n(S'echo hi'\ntR.", None, False),  # a protocol 0 pickle
+        (b"(dp0\nS'a'\np1\nI1\ns.", None, False),  # protocol 0 again
+        (b"\x80\x02}q\x00.", None, False),  # protocol 2
+        (b"PK\x03\x04" + bytes(30), None, False),
+        (b"just some text", None, False),
+        (b"", None, False),
+        (b"\x08\x00", None, False),  # ir_version 0
+        (b"\x08\x07\x48\x01", None, False),  # field 9 is not a ModelProto field
+        (b"\x08\x07\x12\x05ab", None, False),  # a string longer than the file
+        (b"\x08\x07\x3a\xff\xff\x03", 100, False),  # a graph longer than the file
+    ],
+)
+def test_shows_onnx_needs_a_model_proto(lead: bytes | Path, total: int | None, shown: bool) -> None:
+    data = lead.read_bytes() if isinstance(lead, Path) else lead
+    assert shows_onnx(data, len(data) if total is None else total) is shown
+
+
+def _pickle_zip() -> bytes:
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("archive/data.pkl", b"\x80\x04N.")
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("lead", "total", "tail"),
+    [
+        (b"\x08\x07\x10\x01", None, b""),  # field 2 (producer_name) given as a varint
+        (b"\x08\x07\x0a\x00", None, b""),  # field 1 (ir_version) given as a length
+        (b"\x08\x07", 0, b""),  # a lead longer than the file it is said to begin
+        (b"\x08\x07", 1, b""),
+        # a zip inside a field, then a zip at the end of the file, past the lead
+        (b"\x08\x08\x3a" + bytes([len(_pickle_zip())]) + _pickle_zip(), None, b""),
+        (b"\x08\x08\x3a\xff\xff\x7f", 3_000_000, _pickle_zip()),
+    ],
+)
+def test_shows_onnx_refuses_wrong_wire_types_sizes_and_zips(
+    lead: bytes, total: int | None, tail: bytes
+) -> None:
+    """PR #15 round 2, G2 and G3."""
+    assert shows_onnx(lead, len(lead) if total is None else total, tail) is False

@@ -1,0 +1,13 @@
+{
+  "method": "GET",
+  "url": "https://us.aws.cdn.hf.co/xet-bridge-us/621ffdc036468d709f17434d/03d2dc814eb3c85f9acaf2ff2c5bb925c319f1032f61fca6f20ec2054839ef56",
+  "range": "bytes=0-1048575",
+  "status": 206,
+  "headers": {
+    "content-type": "application/octet-stream",
+    "content-range": "bytes 0-1048575/548118077",
+    "content-length": "1048576"
+  },
+  "retrieved_at": "2026-11-12T16:20:27Z",
+  "body_file": "gpt2-pickle-range-1.bin"
+}

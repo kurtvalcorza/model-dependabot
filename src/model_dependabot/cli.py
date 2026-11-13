@@ -20,6 +20,10 @@ from typing import Any
 
 from jsonschema import ValidationError
 
+from model_dependabot.assurance.audit import DEFAULT_STALE_AFTER_HOURS, audit_report
+from model_dependabot.assurance.format_check import measure_imported, record_import_contradictions
+from model_dependabot.discover.project import discover, write_proposal
+from model_dependabot.discover.propose import OutputExistsError, OutputLinkError, refuse_link
 from model_dependabot.inventory.build import build_entries, record_licences
 from model_dependabot.inventory.cyclonedx import InventoryError, export_bom, import_bom, validate
 from model_dependabot.inventory.record import (
@@ -43,6 +47,9 @@ from model_dependabot.reports import (
     alert_view,
     alerts_report,
     alerts_text,
+    audit_text,
+    claim_note,
+    discover_text,
     evidence_line,
     history_report,
     history_text,
@@ -50,7 +57,7 @@ from model_dependabot.reports import (
 from model_dependabot.sources.datacite import ensure_repository
 from model_dependabot.sources.doi_ra import ensure_agency
 from model_dependabot.sources.fetcher import Fetcher, SourceFailedError, UrlFetcher
-from model_dependabot.store import DISMISSAL_REASONS, EtagCache, Store
+from model_dependabot.store import DISMISSAL_REASONS, EtagCache, OutdatedDatabaseError, Store
 
 EXIT_OK = 0
 EXIT_INVALID_INPUT = 1
@@ -59,7 +66,7 @@ EXIT_UNEXPECTED = 3
 
 DEFAULT_DB = "./model-dependabot.db"
 UPSTREAM_SOURCES = ("hf-hub", "hf-takedowns", "crossref", "datacite", "zenodo", "figshare")
-CHECK_SOURCES = ("osv", "picklescan", "hf-scan", *UPSTREAM_SOURCES)
+CHECK_SOURCES = ("osv", "picklescan", "hf-scan", "format-check", *UPSTREAM_SOURCES)
 
 COMMANDS = (
     "record",
@@ -67,6 +74,8 @@ COMMANDS = (
     "import",
     "inventory show",
     "inventory export",
+    "inventory audit",
+    "discover",
     "check",
     "policy",
     "alerts",
@@ -113,6 +122,16 @@ def _sources(text: str) -> list[str]:
             f"sources must be from {', '.join(CHECK_SOURCES)}; got {text!r}"
         )
     return names
+
+
+def _hours(text: str) -> float:
+    try:
+        hours = float(text)
+    except ValueError:
+        hours = 0.0
+    if not hours > 0:
+        raise argparse.ArgumentTypeError(f"hours must be a positive number, got {text!r}")
+    return hours
 
 
 def _common(suppress: bool) -> argparse.ArgumentParser:
@@ -174,6 +193,39 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("model_id", metavar="ID")
     export.add_argument("--version", type=int, metavar="N")
     export.add_argument("-o", dest="output", metavar="FILE", required=True)
+    audit = leaf(
+        inventory_commands,
+        "audit",
+        "inventory audit",
+        "findings, inventory assurance and check coverage, from the stored data (read-only)",
+    )
+    audit.add_argument("model_id", metavar="ID")
+    audit.add_argument("--version", type=int, metavar="N")
+    audit.add_argument(
+        "--stale-after",
+        dest="stale_after",
+        type=_hours,
+        default=DEFAULT_STALE_AFTER_HOURS,
+        metavar="HOURS",
+        help="a source's result older than this is stale (default 24)",
+    )
+
+    discovery = leaf(
+        commands,
+        "discover",
+        "discover",
+        "propose candidate dependencies from a project folder (reads only inside it)",
+    )
+    discovery.add_argument("path", metavar="PATH")
+    discovery.add_argument("--manifest", metavar="FILE", help="compare with this manifest")
+    discovery.add_argument("--model-id", metavar="ID", help="[model] id of a proposed manifest")
+    discovery.add_argument(
+        "--upstream",
+        action="store_true",
+        help="look up the base models and hub datasets the project names on the hub",
+    )
+    discovery.add_argument("-o", dest="output", metavar="FILE", help="write a proposed manifest")
+    discovery.add_argument("--force", action="store_true", help="replace an existing -o file")
 
     check = leaf(commands, "check", "check", "run the checks now")
     check.add_argument("model_id", metavar="ID", nargs="?")
@@ -217,6 +269,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _validate(args: argparse.Namespace) -> None:
+    if args.command_key == "discover" and args.force and not args.output:
+        raise InvalidInputError("--force needs -o")
     if args.command_key == "check" and (args.model_id is None) == (not args.all):
         raise InvalidInputError("check needs a model ID or --all, but not both")
     if args.command_key == "check" and args.scheduled and not args.all:
@@ -295,10 +349,26 @@ def _entry_label(entry: Mapping[str, Any]) -> str:
     return "dataset"
 
 
-def _inventory_text(payload: Mapping[str, Any], heading: str) -> str:
+def _claim_notes(store: Store, model_id: str, version: int) -> dict[str, str]:
+    """Per pinned entry, how far an imported or legacy code-free claim is established (US1)."""
+    record = store.get_version(model_id, version) or {}
+    checks = store.claim_checks(model_id, version)
+    notes = {}
+    for entry in store.entries(model_id, version):
+        note = claim_note(entry, record.get("origin"), checks)
+        if note is not None:
+            notes[entry["identifier"]] = note
+    return notes
+
+
+def _inventory_text(
+    payload: Mapping[str, Any], heading: str, notes: Mapping[str, str] | None = None
+) -> str:
     lines = [heading, f"Entries ({len(payload['entries'])}):"]
     for entry in payload["entries"]:
-        lines.append(f"  {entry['kind']:<12} {entry['identifier']}  {_entry_label(entry)}")
+        line = f"  {entry['kind']:<12} {entry['identifier']}  {_entry_label(entry)}"
+        note = (notes or {}).get(entry["identifier"])
+        lines.append(f"{line}  [{note}]" if note else line)
     lines.append(f"Gaps ({len(payload['gaps'])}):")
     for entry in payload["gaps"]:
         lines.append(f"  {entry['kind']:<12} {_entry_label(entry)}: {entry['gap_reason']}")
@@ -324,8 +394,12 @@ def _record(
     owner: str | None = None,
     base_dir: Path | None = None,
     registration_record_sha256: str | None = None,
+    origin: str,
 ) -> int:
-    """Record the next version with its validated CycloneDX 1.7 document (FR-004, FR-005)."""
+    """Record the next version with its validated CycloneDX 1.7 document (FR-004, FR-005).
+
+    ``origin`` is how it was registered: ``manifest``, ``record`` or ``import`` (feature 003).
+    """
     if store.get_model(model_id) is None:
         store.add_model(model_id, name=name, owner=owner)
     version = (store.latest_version(model_id) or 0) + 1
@@ -342,6 +416,7 @@ def _record(
         entries,
         base_dir=base_dir,
         registration_record_sha256=registration_record_sha256,
+        origin=origin,
     )
     if recorded != version:
         raise RuntimeError(f"expected to record version {version}, recorded {recorded}")
@@ -472,6 +547,7 @@ def make_handlers(
                 owner=manifest.owner,
                 base_dir=Path(args.manifest).parent,
                 registration_record_sha256=None if checked is None else checked.record_sha256,
+                origin="manifest" if checked is None else "record",
             )
             payload = _inventory_payload(model_id, version, store.entries(model_id, version))
             payload["alerts"] = reevaluate_version(store, model_id, version)
@@ -499,7 +575,11 @@ def make_handlers(
         except InventoryError as error:
             raise InvalidInputError(str(error)) from None
         model_id = args.model_id
+        base_dir = Path(args.bom).parent
         with _open(args.db) as store:
+            # Feature 003, research A5: a local weight file present beside the document is
+            # classified from its bytes, which win over the document's claim.
+            measures = measure_imported(entries, base_dir, store.now())
             # As register does, so a targeted Zenodo or Figshare check finds the imported DOIs
             # (review F-05). A licence the document records is kept; only a missing one is read.
             fetcher_ = _fetcher(store)
@@ -511,11 +591,15 @@ def make_handlers(
                 model_id,
                 entries,
                 hashlib.sha256(raw).hexdigest(),
-                base_dir=Path(args.bom).parent,
+                base_dir=base_dir,
+                origin="import",
             )
+            record_import_contradictions(store, model_id, version, measures)
             payload = _inventory_payload(model_id, version, store.entries(model_id, version))
             payload["alerts"] = reevaluate_version(store, model_id, version)
-        return CommandResult(payload, _inventory_text(payload, f"Imported {model_id} v{version}"))
+            notes = _claim_notes(store, model_id, version)
+        text = _inventory_text(payload, f"Imported {model_id} v{version}", notes)
+        return CommandResult(payload, text)
 
     def show(args: argparse.Namespace) -> CommandResult:
         with _open(args.db) as store:
@@ -523,7 +607,9 @@ def make_handlers(
             payload = _inventory_payload(
                 args.model_id, version, store.entries(args.model_id, version)
             )
-        return CommandResult(payload, _inventory_text(payload, f"{args.model_id} v{version}"))
+            notes = _claim_notes(store, args.model_id, version)
+        text = _inventory_text(payload, f"{args.model_id} v{version}", notes)
+        return CommandResult(payload, text)
 
     def export(args: argparse.Namespace) -> CommandResult:
         with _open(args.db) as store:
@@ -535,6 +621,55 @@ def make_handlers(
         Path(args.output).write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
         payload = {"model_id": args.model_id, "version": version, "output": args.output}
         return CommandResult(payload, f"Wrote {args.model_id} v{version} to {args.output}")
+
+    def inventory_audit(args: argparse.Namespace) -> CommandResult:
+        # FR-013: read-only; an older database is read as it is and never upgraded.
+        try:
+            store = Store.open_read_only(args.db, now=now)
+        except FileNotFoundError:
+            raise InvalidInputError(f"no model {args.model_id!r} is registered") from None
+        except OutdatedDatabaseError as error:
+            raise InvalidInputError(str(error)) from None
+        with store:
+            try:
+                payload = audit_report(
+                    store, args.model_id, args.version, stale_after_hours=args.stale_after
+                )
+            except LookupError as error:
+                raise InvalidInputError(str(error).strip("'\"")) from None
+        return CommandResult(payload, audit_text(payload))
+
+    def discover_command(args: argparse.Namespace) -> CommandResult:
+        # FR-022: no database is opened, so --db is ignored; nothing is written but -o.
+        root = Path(args.path)
+        if not root.is_dir():
+            raise InvalidInputError(f"{args.path} is not a directory")
+        manifest = None
+        if args.manifest:
+            try:
+                manifest = load_manifest(args.manifest, weights_present=False)
+            except ManifestError as error:
+                raise InvalidInputError(str(error)) from None
+        output = Path(args.output) if args.output else None
+        if output is not None:
+            try:
+                refuse_link(output)  # before anything is read (PR #15 round 3, T1)
+            except OutputLinkError as error:
+                raise InvalidInputError(str(error)) from None
+        if output is not None and output.exists() and not args.force:
+            raise InvalidInputError(f"{output} exists; give --force to replace it")
+        hub = None
+        if args.upstream:
+            # Research A11: the same fetcher as check, without an ETag cache (no database).
+            hub = fetcher or (UrlFetcher() if now is None else UrlFetcher(utcnow=now))
+        result = discover(root, manifest=manifest, fetcher=hub, now=now)
+        if output is not None:
+            model_id = args.model_id or root.resolve().name
+            try:
+                write_proposal(result, output, model_id=model_id, force=args.force)
+            except (OutputExistsError, OutputLinkError) as error:
+                raise InvalidInputError(str(error)) from None
+        return CommandResult(result, discover_text(result))
 
     def check(args: argparse.Namespace) -> CommandResult:
         with _open(args.db) as store:
@@ -621,6 +756,8 @@ def make_handlers(
         "import": import_inventory,
         "inventory show": show,
         "inventory export": export,
+        "inventory audit": inventory_audit,
+        "discover": discover_command,
         "check": check,
         "policy": policy,
         "alerts": alerts,

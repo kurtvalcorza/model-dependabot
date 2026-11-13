@@ -1,0 +1,7 @@
+[project]
+name = "detector"
+version = "0.1.0"
+dependencies = ["numpy>=1.26"]
+
+[project.optional-dependencies]
+train = ["detector-utils @ git+https://example.org/detector-utils.git"]

@@ -68,6 +68,7 @@ def test_the_property_set_is_exactly_the_documented_one() -> None:
                     "hub-revision",
                     "hub-file",
                     "gap",
+                    "format-origin",  # feature 003, contracts/inventory-profile.md
                 )
             }
         )
@@ -101,6 +102,7 @@ def test_weight_files_are_file_components_with_sha256(
         PREFIX + "format": "pytorch-zip",
         PREFIX + "can-run-code": "true",
         PREFIX + "size": str(expected["size"]),
+        PREFIX + "format-origin": "bytes",
     }
 
 
@@ -154,15 +156,37 @@ def test_only_documented_custom_properties_are_written(bom: dict[str, Any]) -> N
     assert set(names) <= PROPERTIES
 
 
+def _without_origin(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The entries apart from where each format claim came from, which an import never keeps
+    (feature 003: an imported claim is a third party's, contracts/inventory-profile.md)."""
+    return [{k: v for k, v in entry.items() if k != "format_origin"} for entry in entries]
+
+
 def test_export_then_import_yields_the_same_entries(
     bom: dict[str, Any], entries: list[dict[str, Any]]
 ) -> None:
-    assert import_bom(bom) == entries
+    assert _without_origin(import_bom(bom)) == _without_origin(entries)
+
+
+def _strip_origin(document: Any) -> Any:
+    """The document without its format-origin properties (an import makes every one ``import``)."""
+    if isinstance(document, dict):
+        return {key: _strip_origin(value) for key, value in document.items()}
+    if isinstance(document, list):
+        return [
+            _strip_origin(item)
+            for item in document
+            if not (isinstance(item, dict) and item.get("name") == PREFIX + "format-origin")
+        ]
+    return document
 
 
 def test_export_import_export_is_stable(bom: dict[str, Any]) -> None:
     again = export_bom("example-detector", 3, import_bom(bom))
-    assert again == bom
+    assert _strip_origin(again) == _strip_origin(bom)
+    # Re-exported, every weight file's claim is an imported one (inventory-profile.md).
+    files = [c for c in again["components"] if c["type"] == "file"]
+    assert {_props(c)[PREFIX + "format-origin"] for c in files} == {"import"}
 
 
 @pytest.mark.parametrize("spec_version", ["1.5", "1.6"])
@@ -172,7 +196,7 @@ def test_older_cyclonedx_versions_import(
     older = copy.deepcopy(bom)
     older["specVersion"] = spec_version
     older["$schema"] = f"http://cyclonedx.org/schema/bom-{spec_version}.schema.json"
-    assert import_bom(older) == entries
+    assert _without_origin(import_bom(older)) == _without_origin(entries)
 
 
 def test_unreadable_entries_become_gaps() -> None:
@@ -357,3 +381,35 @@ def test_two_components_sharing_a_dataset_bom_ref_import_as_one_entry(tmp_path: 
     datasets = document["metadata"]["component"]["modelCard"]["modelParameters"]["datasets"]
     datasets.append(copy.deepcopy(datasets[0]))
     assert len(_datasets(import_bom(document))) == 1
+
+
+# --- feature 003: where each format claim came from (T019, contracts/inventory-profile.md) --------
+
+FORMAT_ORIGIN = PREFIX + "format-origin"
+
+
+def test_export_writes_the_format_origin_of_each_weight_file(bom: dict[str, Any]) -> None:
+    files = [c for c in bom["components"] if c["type"] == "file"]
+    origins = {c["name"]: _props(c).get(FORMAT_ORIGIN) for c in files}
+    assert origins == {
+        "weights/tiny.pt": "bytes",
+        "weights/tiny.safetensors": "bytes",
+        "weights/tiny.onnx": "bytes",
+        "model.safetensors": "name",
+        "pytorch_model.bin": "name",
+    }
+    assert FORMAT_ORIGIN in PROPERTIES
+    validate(bom)
+
+
+def test_a_legacy_entry_has_no_format_origin_property(entries: list[dict[str, Any]]) -> None:
+    legacy = [dict(entry, format_origin=None) for entry in entries]
+    document = export_bom("legacy-model", 1, legacy)
+    assert FORMAT_ORIGIN not in _all_properties(document)
+    validate(document)
+
+
+def test_import_stores_every_weight_claim_as_imported(bom: dict[str, Any]) -> None:
+    imported = import_bom(bom)
+    assert {e["format_origin"] for e in imported if e["kind"] == "weight_file"} == {"import"}
+    assert {e["format_origin"] for e in imported if e["kind"] != "weight_file"} == {None}

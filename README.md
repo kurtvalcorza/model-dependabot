@@ -9,6 +9,11 @@ no longer publicly available. When something it depends on becomes vulnerable, u
 raises an alert, and it closes the alert when a new version of the model fixes the cause or the source
 withdraws or clears it.
 
+Two more commands help you trust the inventory itself. `inventory audit` says which entries are verified,
+which are only declared and which sources have and have not checked them, so that "no alerts" is never
+read as "complete" or "safe". `discover` reads a project folder and proposes the dependencies it can
+show evidence for, as a draft manifest for you to review.
+
 It only reads. It never changes, deletes, retrains, re-exports or unpublishes a model or a file, and it
 never writes to a model's repository (see [What it never does](#what-it-never-does)).
 
@@ -24,7 +29,9 @@ uv run model-dependabot --help
 ```
 
 `uv sync` creates a virtual environment in `.venv` with the pinned dependencies from `uv.lock`
-(`packaging`, `jsonschema`, `picklescan` and `cvss`) and the test tools.
+(`packaging`, `jsonschema`, `picklescan`, `cvss` and `pyyaml`) and the test tools. PyYAML is pinned to one
+exact version and is used only by `discover`, to read a model card's YAML front matter. It reads with the
+safe loader, refuses anchors and aliases and reads at most the first 256 KiB.
 
 ## The manifest
 
@@ -88,7 +95,9 @@ output; both may go before or after the command name.
 | `import BOM.json --model-id ID` | Registers a version from an existing CycloneDX inventory, looking up its DOIs' registration agencies as `register` does |
 | `inventory show ID [--version N]` | Lists the entries with their identifiers and the gaps with their reasons |
 | `inventory export ID [--version N] -o FILE` | Writes the stored CycloneDX 1.7 inventory, validated against the official schema |
-| `check (ID \| --all) [--scheduled] [--source ...]` | Runs the checks now and records a check run. Sources: `osv`, `picklescan`, `hf-scan`, `hf-hub`, `hf-takedowns`, `crossref`, `datacite`, `zenodo` and `figshare`; without `--source` every source runs. `--scheduled` marks the run as scheduled and needs `--all` (`check ID --scheduled` exits 1); see [Scheduling](#scheduling) |
+| `inventory audit ID [--version N] [--stale-after HOURS]` | Reports one version's findings, how far each entry is verified and which sources have checked it, from the stored data only; see [Auditing an inventory](#auditing-an-inventory). Opens the database read-only, contacts no source and writes nothing |
+| `discover PATH [--manifest FILE] [--model-id ID] [--upstream] [-o FILE [--force]]` | Proposes candidate dependencies for a project folder; see [Discovering dependencies](#discovering-dependencies). Reads nothing outside `PATH` and opens no database. Makes no request unless `--upstream`. Writes nothing unless `-o`, never replaces a file unless `--force` and refuses an `-o` path that is a link |
+| `check (ID \| --all) [--scheduled] [--source ...]` | Runs the checks now and records a check run. Sources: `osv`, `picklescan`, `hf-scan`, `format-check`, `hf-hub`, `hf-takedowns`, `crossref`, `datacite`, `zenodo` and `figshare`; without `--source` every source runs. `--scheduled` marks the run as scheduled and needs `--all` (`check ID --scheduled` exits 1); see [Scheduling](#scheduling) |
 | `policy ID --format (default\|strict) --by NAME` | Sets the model's weight-format policy, recording who set it and when. Under `default` a format that can run code when loaded is a watch event; under `strict` a code-capable weight file with no pinned code-free file beside it in the same version raises an alert (an unpinned name proves nothing). Takes effect at the next check |
 | `alerts ID [--state open\|closed\|all]` | Lists alerts by severity (`CRITICAL`, `HIGH`, `MODERATE`, `LOW`, `UNKNOWN`), then the watch events, each with its evidence |
 | `alert show ALERT_ID` | One alert with all its evidence; for a redacted response, both hashes and the fields removed |
@@ -184,12 +193,84 @@ and [`specs/002-upstream-watch/contracts/cli.md`](specs/002-upstream-watch/contr
 | Code | Meaning |
 | :-- | :-- |
 | 0 | Success. For `check`: the check completed, whether or not it found anything |
-| 1 | Invalid input (manifest, inventory or arguments) |
+| 1 | Invalid input (manifest, inventory or arguments); for `inventory audit` also an unknown model or version or a database older than feature 002; for `discover` a `PATH` that is not a folder, an existing `-o` file without `--force` or an `-o` path that is a link |
 | 2 | `check` finished but at least one source failed; alerts that depend on it were left unchanged |
 | 3 | Unexpected error |
 
 `check` never exits non-zero just because alerts exist, so a scheduler does not mistake findings for
-failures. Scripts read the `--json` output instead.
+failures. Scripts read the `--json` output instead. In the same way `inventory audit` exits 0 whatever it
+reports, and `discover` exits 0 when it completes, even if a hub lookup failed (that candidate is then
+`unavailable`).
+
+### Imported inventories and claims that need confirming
+
+A CycloneDX inventory can say that a weight file cannot run code, but the inventory is only a claim:
+a pickle labelled `safetensors` would otherwise satisfy the `strict` policy. So a code-free claim that
+came from `import` counts under `strict` only once it is confirmed. The `format-check` source
+confirms it. For a local file it hashes the file and reads its format from its bytes. For a hub file
+pinned to a commit it compares the hub's SHA-256 at that commit and reads only the start of the file
+(1 MiB, or a safetensors header of at most 16 MiB). A confirmed claim counts and clears a
+`format_policy` alert it no longer supports. A contradicted claim is treated as what the bytes show and
+raises a `format_claim_contradicted` watch event. An unreadable one (refused, missing or too long) keeps
+the alert open, raises `format_claim_unreadable` and is tried again at the next check. ONNX files have
+no magic number, so an imported claim that an `.onnx` file cannot run code is confirmed only when its
+bytes read as an ONNX model; otherwise it stays unverified. Claims recorded by `register` from your
+manifest are yours and are trusted as before.
+
+Each inventory entry records where its format claim came from (`bytes`, `name`, `record` or `import`),
+and an exported inventory carries it as the property `model-dependabot:format-origin`; an imported
+inventory is always marked `import`, whatever that property says. A version registered before this
+feature has no origin. It counts as imported unless it was registered from a registration record, so its
+code-free claims also need confirming. `inventory show` notes each claim still unverified.
+
+### Auditing an inventory
+
+`inventory audit ID` answers three questions separately, from the stored data:
+
+- **Findings**: the open alerts and the version's watch events. They are "checked" once every source
+  relevant to the version has succeeded in a check of that version, "partly checked" while only some
+  have, and "not yet checked" while none has.
+- **Assurance**: each entry as `verified`, `declared-but-unverified`, `conflicting` or `unavailable`,
+  with each claim's origin and whether a check confirmed it, and the dependency kinds the inventory does
+  not declare at all.
+- **Coverage**: for each source relevant to the entries, its latest result after the version was
+  registered, how old that is (older than `--stale-after`, 24 hours by default, is stale) and whether it
+  failed; and the entries no source can check, with the reason.
+
+It always states that no alerts is not evidence that the inventory is complete or the model is safe.
+It opens the database read-only, so a database from an earlier version is read as it is and never
+upgraded.
+
+### Discovering dependencies
+
+`discover PATH` reads a project folder and proposes the dependencies it finds evidence for. Each
+candidate carries its kind, identity, the file and line or key it came from, its status, when it was read
+and any gaps:
+
+- packages from requirements files (`*requirements*.txt`, `*constraints*.txt`, `*.lock.txt`): a file
+  where every requirement is pinned with `==` and a hash is a lock (`declared-but-unverified`); any
+  other requirement, and every `pyproject.toml` dependency, has the gap `not locked` or
+  `no exact version`. `uv.lock`, `poetry.lock`, `Pipfile.lock` and `pylock.toml` are listed as not read
+  in this version;
+- local weight files, hashed and classified from their bytes as registration does (`verified`), so a
+  pickle named `.safetensors` shows as a pickle;
+- the base model, datasets and licence named in the `README.md` front matter; nothing is inferred from
+  the card's text, and a base model always has the gap `no revision`.
+
+With `--manifest` each candidate is marked `matches`, `missing_from_manifest` or `conflicts`, and what
+the manifest declares but discovery did not see is listed. With `--upstream` it looks up the base
+models and hub datasets the card names; the hub's current commit is shown as a proposed revision,
+labelled as the head when it was read, never as the training revision. With `-o FILE` it writes a draft
+manifest in the usual format: only the model id, the local weight files and a single hash-locked
+requirements file that pins no conflicting package are active; every other candidate is a comment, so
+registering the draft as written
+registers none of them.
+
+Discovery never runs project code, imports model code or loads weights. It follows no URL and no link
+out of the folder. It stops at published limits: 50,000 entries, 24 levels, 2,000 weight files, 1 MiB
+per text file and 256 KiB of card front matter. It skips `.git`, `.venv`, `node_modules`, caches and
+similar folders. Everything it skipped is listed with the reason. Its output says that it proposes
+dependencies from the evidence available and cannot establish complete training provenance.
 
 ## Scheduling
 
@@ -267,7 +348,7 @@ with its body, already stripped of personal data, in `evidence/`), so a later ru
 | Source | Used for | Requests |
 | :-- | :-- | :-- |
 | [OSV.dev](https://osv.dev) | Advisories for the locked PyPI packages | `POST /v1/querybatch` (a read-only query) and `GET /v1/vulns/{id}` |
-| [Hugging Face Hub API](https://huggingface.co/docs/hub/api) | Pinning hub files and base models to a commit; the hub's own security scan of hosted weight files; whether the base model and hub datasets are disabled, gated, moved or refused, their licence and newest revision | `GET /api/models/...` and `GET /api/datasets/...` only |
+| [Hugging Face Hub API](https://huggingface.co/docs/hub/api) | Pinning hub files and base models to a commit; the hub's own security scan of hosted weight files; whether the base model and hub datasets are disabled, gated, moved or refused, their licence and newest revision; for `format-check`, the start of an imported hub weight file | `GET /api/models/...` and `GET /api/datasets/...`; for `format-check` also a ranged `GET` of `/{repo}/resolve/{commit}/{file}` (at most its first 16 MiB), following its redirect to the hub's file store |
 | [Hub takedown log](https://huggingface.co/datasets/huggingface-legal/takedown-notices) | The notice date of a takedown naming a hub dataset (a notice date, not a removal date) | `GET` of the public `index.csv` |
 | [doi.org](https://www.doi.org/) | Which agency registered each DOI | `GET /doiRA/{doi}` |
 | [Crossref](https://www.crossref.org/documentation/retrieve-metadata/rest-api/) | Retractions, withdrawals, corrections and expressions of concern for Crossref DOIs | `GET /works/{doi}` |
@@ -306,6 +387,10 @@ who removed a record) are dropped. Such evidence keeps the SHA-256 of the respon
   file byte-for-byte unchanged (a test checks their SHA-256 and modification times).
 - It never sends `PUT`, `PATCH` or `DELETE`. The only `POST` is OSV's read-only query.
 - It never loads a weight file to inspect it: pickles are scanned as data, without running them.
+- `discover` reads nothing outside the folder it is given, runs no project code, opens no database,
+  makes no request without `--upstream` and writes only the `-o` file. It refuses an `-o` path that
+  is a symbolic link or junction, even a dangling one and even with `--force`, so a link in the
+  project cannot choose where the proposal is written.
 - It never sends a token, an account name or personal data to a source; every upstream request is a
   `GET` or `HEAD`.
 - It never stores the requesting party of a takedown or the names of people in a source's answer.
@@ -314,7 +399,7 @@ who removed a record) are dropped. Such evidence keeps the SHA-256 of the respon
 - It never closes an alert because a source failed to answer; missing data leaves alerts as they were.
 
 The only files it writes are its own database, its `evidence/` folder and, when asked, the file named by
-`inventory export -o`.
+`inventory export -o` or `discover -o`.
 
 ## Development
 
@@ -327,7 +412,8 @@ uv run ruff check
 Tests run against recorded source responses in `tests/fixtures/`; `tools/record_fixtures.py` re-records
 them. The live tests are left out of the default run. `tests/property/` drives the alert lifecycle through
 random sequences of registrations, source answers and checks with `hypothesis`, against the identity and
-clearance table of `specs/002-upstream-watch/data-model.md`; the default run is derandomised, and setting
+clearance table of `specs/002-upstream-watch/data-model.md`, and the claim trust rule through random
+imports, policy changes, confirmations and new versions; the default run is derandomised, and setting
 `MODEL_DEPENDABOT_PROPERTY_EXAMPLES` to a number runs that many random sequences instead.
 
 `.github/workflows/live-compat.yml` runs the live tests once a week (Mondays 03:17 UTC, or by hand from the
@@ -353,3 +439,5 @@ anonymously and needs no secrets.
   contracts and validation record for this first feature.
 - [`specs/002-upstream-watch/`](specs/002-upstream-watch/): the same for the upstream watch of base models
   and training datasets.
+- [`specs/003-inventory-assurance/`](specs/003-inventory-assurance/): the same for confirming imported
+  claims, the inventory audit and discovery.

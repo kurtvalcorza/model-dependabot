@@ -24,6 +24,7 @@ the hash from their stored bodies where the body is still there and is JSON.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -84,8 +85,19 @@ WATCH_KINDS = (
     "weight_file_absent",
     # review F1, amended 2026-10-31: OSV answered 404 for a record fetched by its id
     "advisory_gone",
+    # feature 003 (data-model.md, Watch event): an imported code-free claim checked
+    "format_claim_contradicted",
+    "format_claim_unreadable",
 )
+# Feature 003 (data-model.md): how a version was registered and where a weight file's format
+# claim came from; which claim a claim check confirmed and how it came out.
+VERSION_ORIGINS = ("manifest", "record", "import")
+FORMAT_ORIGINS = ("bytes", "name", "record", "import")
+CLAIMS = ("code_free", "identity")
+CLAIM_OUTCOMES = ("confirmed", "contradicted", "unreadable")
 TRIGGERS = ("scheduled", "on_demand")
+# The scope ``check --all`` records; here so that the store and the reports share it.
+SCOPE_ALL = "all"
 OUTCOMES = ("reachable", "refused", "not_found", "removed", "redirected")
 LICENCE_FORMS = ("spdx", "expression", "unrecognised", "none")
 REPOSITORIES = ("zenodo", "figshare", "other")
@@ -119,6 +131,7 @@ CREATE TABLE IF NOT EXISTS model_versions (
     inventory TEXT NOT NULL,
     base_dir TEXT,
     registration_record_sha256 TEXT,
+    origin TEXT CHECK (origin IS NULL OR origin IN {_in(VERSION_ORIGINS)}),
     PRIMARY KEY (model_id, version)
 );
 
@@ -143,6 +156,7 @@ CREATE TABLE IF NOT EXISTS inventory_entries (
     recorded_licence TEXT,
     licence_form TEXT CHECK (licence_form IS NULL OR licence_form IN {_in(LICENCE_FORMS)}),
     paper_dois TEXT,
+    format_origin TEXT CHECK (format_origin IS NULL OR format_origin IN {_in(FORMAT_ORIGINS)}),
     FOREIGN KEY (model_id, version) REFERENCES model_versions (model_id, version),
     CHECK (pinned = 1 OR gap_reason IS NOT NULL),
     CHECK (pinned = 0 OR identifier IS NOT NULL)
@@ -273,6 +287,44 @@ CREATE TABLE IF NOT EXISTS watch_event_evidence (
     PRIMARY KEY (watch_event_id, evidence_id)
 );
 
+-- Feature 003 (data-model.md, Claim check): one confirmation attempt of one entry's claim in one
+-- check run (``run_id``) or at import (``run_id`` null). The latest row per claim decides.
+CREATE TABLE IF NOT EXISTS claim_checks (
+    claim_check_id INTEGER PRIMARY KEY,
+    model_id TEXT NOT NULL,
+    version INTEGER NOT NULL CHECK (version >= 1),
+    entry_identifier TEXT NOT NULL,
+    claim TEXT NOT NULL CHECK (claim IN {_in(CLAIMS)}),
+    run_id INTEGER REFERENCES check_runs (run_id),
+    outcome TEXT NOT NULL CHECK (outcome IN {_in(CLAIM_OUTCOMES)}),
+    measured_format TEXT,
+    measured_can_run_code INTEGER CHECK (measured_can_run_code IN (0, 1)),
+    reason TEXT,
+    evidence_id INTEGER NOT NULL REFERENCES evidence (evidence_id),
+    checked_at TEXT NOT NULL,
+    FOREIGN KEY (model_id, version) REFERENCES model_versions (model_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS claim_checks_by_entry
+    ON claim_checks (model_id, version, entry_identifier, claim, claim_check_id);
+
+-- PR #15 round 2, G1: the version each check run checked of each model, so the audit credits a
+-- run to exactly that version. Runs written before this table have no rows here.
+CREATE TABLE IF NOT EXISTS check_run_targets (
+    run_id INTEGER NOT NULL REFERENCES check_runs (run_id),
+    model_id TEXT NOT NULL,
+    version INTEGER NOT NULL CHECK (version >= 1),
+    PRIMARY KEY (run_id, model_id),
+    FOREIGN KEY (model_id, version) REFERENCES model_versions (model_id, version)
+);
+
+-- PR #15 round 3, T3: facts about the database itself; ``first_linked_run`` is the first run
+-- that records its targets, so a run before it is legacy.
+CREATE TABLE IF NOT EXISTS store_marks (
+    name TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 -- Review C2, research U13: the ETag cache, kept across runs so a later run revalidates with
 -- If-None-Match. One row per URL; the body is the redacted one, kept in the evidence store.
 CREATE TABLE IF NOT EXISTS etag_cache (
@@ -316,6 +368,7 @@ ENTRY_FIELDS = (
     "recorded_licence",
     "licence_form",
     "paper_dois",
+    "format_origin",
 )
 _OBSERVATION_FIELDS = (
     "http_status",
@@ -376,8 +429,46 @@ def same_evidence(evidence: Mapping[str, Any], source: str, url: str, body: byte
     return content_key(evidence) == (canonical_sha256(body) or hashlib.sha256(body).hexdigest())
 
 
+class OutdatedDatabaseError(ValueError):
+    """A database too old to read without upgrading it (feature 003, research A12)."""
+
+
 class Store:
     """The service's database and evidence store, opened from a database path."""
+
+    read_only = False
+
+    @classmethod
+    def open_read_only(
+        cls, path: Path | str, *, now: Callable[[], datetime] | None = None
+    ) -> Store:
+        """Open an existing database for reading only (feature 003, FR-013).
+
+        SQLite opens it with ``mode=ro``: no schema is created, nothing is migrated or
+        back-filled and no timestamp is written, so the file stays byte-identical. A column or
+        table a later feature adds and the file lacks reads as its default (an origin of null, no
+        claim checks). A missing file raises ``FileNotFoundError``; a schema older than feature
+        002 raises ``OutdatedDatabaseError``.
+        """
+        store = cls.__new__(cls)
+        store.path = Path(path)
+        if not store.path.is_file():
+            raise FileNotFoundError(f"no database at {store.path}")
+        store.evidence_dir = store.path.parent / "evidence"
+        store._now = now or (lambda: datetime.now(UTC))
+        store.read_only = True
+        uri = store.path.resolve().as_uri() + "?mode=ro"
+        store.conn = sqlite3.connect(uri, uri=True)
+        store.conn.row_factory = sqlite3.Row
+        tables = store.tables()
+        if (
+            "upstream_observations" not in tables
+            or "check_runs" not in tables
+            or "trigger" not in store.columns("check_runs")
+        ):
+            store.conn.close()
+            raise OutdatedDatabaseError("run any check once to upgrade this database")
+        return store
 
     def __init__(self, path: Path | str, *, now: Callable[[], datetime] | None = None) -> None:
         self.path = Path(path)
@@ -387,7 +478,9 @@ class Store:
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
+        had_targets = "check_run_targets" in self.tables()
         self.conn.executescript(SCHEMA)
+        self._mark_first_linked_run(had_targets)
         if "used_at" not in self.columns("etag_cache"):
             with self.conn:
                 self.conn.execute("ALTER TABLE etag_cache ADD COLUMN used_at TEXT")
@@ -398,8 +491,109 @@ class Store:
                 )
         if "canonical_sha256" not in self.columns("evidence"):
             self._add_canonical_hashes()
+        self._add_origins()
         self._widen_watch_kinds()
         self._rekey_repository_alerts()
+
+    def _mark_first_linked_run(self, had_targets: bool) -> None:
+        """Record the first run that records its targets, once (PR #15 round 3, T3).
+
+        Runs before it were written before ``check_run_targets`` existed: they are legacy, and the
+        audit falls back to their start time. A run from this mark on that has no target row for a
+        model did not check it. A database that gains the table now marks the next run; one that
+        already had the table without a mark (written by an earlier build of this feature) marks
+        its first linked run, or the next run if it has none.
+        """
+        if self.conn.execute(
+            "SELECT 1 FROM store_marks WHERE name = 'first_linked_run'"
+        ).fetchone():
+            return
+        first = None
+        if had_targets:
+            first = self.conn.execute("SELECT min(run_id) FROM check_run_targets").fetchone()[0]
+        if first is None:
+            first = self.conn.execute(
+                "SELECT coalesce(max(run_id), 0) + 1 FROM check_runs"
+            ).fetchone()[0]
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO store_marks (name, value) VALUES ('first_linked_run', ?)",
+                (str(first),),
+            )
+
+    def first_linked_run(self) -> int | None:
+        """The first run that records its targets, or ``None`` when every run is legacy (an older
+        database opened read-only, without the table)."""
+        tables = self.tables()
+        if "store_marks" in tables:
+            row = self.conn.execute(
+                "SELECT value FROM store_marks WHERE name = 'first_linked_run'"
+            ).fetchone()
+            if row is not None:
+                return int(row["value"])
+        if "check_run_targets" in tables:
+            first = self.conn.execute("SELECT min(run_id) FROM check_run_targets").fetchone()[0]
+            return None if first is None else int(first)
+        return None
+
+    @contextlib.contextmanager
+    def _atomic(self) -> Iterator[None]:
+        """One explicit transaction, committed at the end or rolled back on any error.
+
+        ``sqlite3`` opens a transaction implicitly only before a data statement, so a schema
+        statement (``ALTER``, ``CREATE``, ``DROP``) would otherwise commit on its own and leave a
+        migration half done if the open were interrupted (review F5).
+        """
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+        except BaseException:
+            self.conn.rollback()
+            raise
+        self.conn.commit()
+
+    def _add_origins(self) -> None:
+        """Add feature 003's ``origin`` and ``format_origin`` to an older database (research A2).
+
+        A version registered from a registration record is back-filled as ``record``; every other
+        old version keeps a null origin (legacy) and every old entry a null ``format_origin``.
+        The versions stay immutable: the trigger that guards them is lifted for the back-fill
+        only, inside the one transaction that adds the columns, and put back. Every version
+        registered since this feature has an origin, so a record-registered version without one
+        can only be left by an interrupted upgrade, and it is back-filled on the next open.
+        """
+        added = "origin" not in self.columns("model_versions")
+        if not added and "format_origin" in self.columns("inventory_entries"):  # a cheap first look
+            pending = self.conn.execute(
+                "SELECT 1 FROM model_versions WHERE origin IS NULL"
+                " AND registration_record_sha256 IS NOT NULL LIMIT 1"
+            ).fetchone()
+            if pending is None:
+                return
+        with self._atomic():
+            # Read again under the write lock: another process may have upgraded the database
+            # while this one waited for it (PR #15 round 2, G4).
+            trigger = self.conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'trigger'"
+                " AND name = 'model_versions_no_update'"
+            ).fetchone()
+            if "format_origin" not in self.columns("inventory_entries"):
+                self.conn.execute(
+                    "ALTER TABLE inventory_entries ADD COLUMN format_origin TEXT CHECK"
+                    f" (format_origin IS NULL OR format_origin IN {_in(FORMAT_ORIGINS)})"
+                )
+            if "origin" not in self.columns("model_versions"):
+                self.conn.execute(
+                    "ALTER TABLE model_versions ADD COLUMN origin TEXT CHECK"
+                    f" (origin IS NULL OR origin IN {_in(VERSION_ORIGINS)})"
+                )
+            self.conn.execute("DROP TRIGGER IF EXISTS model_versions_no_update")
+            self.conn.execute(
+                "UPDATE model_versions SET origin = 'record'"
+                " WHERE registration_record_sha256 IS NOT NULL AND origin IS NULL"
+            )
+            if trigger is not None:
+                self.conn.execute(trigger["sql"])
 
     def _add_canonical_hashes(self) -> None:
         """Add ``evidence.canonical_sha256`` to an older database and fill it where it can (006).
@@ -432,8 +626,10 @@ class Store:
 
         SQLite cannot change a CHECK constraint in place, so a database written before a watch kind
         was added (``base_model_moved``, held-out scoring 2026-10-25) has its table rebuilt with
-        the current schema, every row and id kept (the SQLite twelve-step procedure).
+        the current schema, every row and id kept (the SQLite twelve-step procedure). The rebuild
+        is one transaction (``_atomic``), so an interrupted open leaves the old table as it was.
         """
+        self._resolve_interrupted_widening()
         row = self.conn.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'watch_events'"
         ).fetchone()
@@ -444,13 +640,39 @@ class Store:
         ddl = ddl.replace("IF NOT EXISTS watch_events (", "watch_events_widened (", 1)
         self.conn.execute("PRAGMA foreign_keys = OFF")
         try:
-            with self.conn:
+            with self._atomic():
+                row = self.conn.execute(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'watch_events'"
+                ).fetchone()
+                if all(f"'{kind}'" in row["sql"] for kind in WATCH_KINDS):
+                    return  # another process rebuilt it while this one waited (G4)
                 self.conn.execute(ddl)
                 self.conn.execute("INSERT INTO watch_events_widened SELECT * FROM watch_events")
                 self.conn.execute("DROP TABLE watch_events")
                 self.conn.execute("ALTER TABLE watch_events_widened RENAME TO watch_events")
                 if self.conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
                     raise sqlite3.IntegrityError("watch_events rebuild broke a foreign key")
+        finally:
+            self.conn.execute("PRAGMA foreign_keys = ON")
+
+    def _resolve_interrupted_widening(self) -> None:
+        """Settle a ``watch_events_widened`` left by a rebuild an earlier release did not finish.
+
+        That release committed each schema statement on its own. If it had dropped the old table,
+        the open recreates ``watch_events`` empty and the leftover copy holds the rows, so the copy
+        takes its place; otherwise the old table still holds them and the copy is dropped.
+        """
+        if "watch_events_widened" not in self.tables():
+            return
+        rows = self.conn.execute("SELECT count(*) FROM watch_events").fetchone()[0]
+        self.conn.execute("PRAGMA foreign_keys = OFF")
+        try:
+            with self._atomic():
+                if rows == 0:
+                    self.conn.execute("DROP TABLE watch_events")
+                    self.conn.execute("ALTER TABLE watch_events_widened RENAME TO watch_events")
+                else:
+                    self.conn.execute("DROP TABLE watch_events_widened")
         finally:
             self.conn.execute("PRAGMA foreign_keys = ON")
 
@@ -575,19 +797,22 @@ class Store:
         *,
         base_dir: Path | str | None = None,
         registration_record_sha256: str | None = None,
+        origin: str | None = None,
     ) -> int:
         """Record the next version of a model with its inventory and entries, all or nothing.
 
         ``base_dir`` is the directory that local weight-file locations are relative to (the
         manifest's or the imported inventory's), so a check can find the files to scan.
         ``registration_record_sha256`` is set when the local weight files were registered from a
-        registration record, without their bytes (feature 005).
+        registration record, without their bytes (feature 005). ``origin`` is how the version was
+        registered: ``manifest``, ``record`` or ``import`` (feature 003).
         """
         with self.conn:
             version = (self.latest_version(model_id) or 0) + 1
             self.conn.execute(
                 "INSERT INTO model_versions (model_id, version, registered_at, manifest_sha256,"
-                " inventory, base_dir, registration_record_sha256) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                " inventory, base_dir, registration_record_sha256, origin)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     model_id,
                     version,
@@ -596,6 +821,7 @@ class Store:
                     json.dumps(inventory),
                     None if base_dir is None else str(Path(base_dir).resolve()),
                     registration_record_sha256,
+                    origin,
                 ),
             )
             for entry in entries:
@@ -613,7 +839,8 @@ class Store:
             "INSERT INTO inventory_entries (model_id, version, kind, identifier, pinned,"
             " gap_reason, location, size, format, can_run_code, hub_repo, hub_revision,"
             " hub_file, name, package_version, hashes, recorded_licence, licence_form,"
-            " paper_dois) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " paper_dois, format_origin)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 model_id,
                 version,
@@ -634,6 +861,7 @@ class Store:
                 entry.get("recorded_licence"),
                 entry.get("licence_form"),
                 None if paper_dois is None else json.dumps(list(paper_dois)),
+                entry.get("format_origin"),
             ),
         )
 
@@ -654,7 +882,12 @@ class Store:
         )
         result = []
         for row in rows:
-            record = {name: row[name] for name in ENTRY_FIELDS if name != "version"}
+            present = set(row.keys())  # a database read-only from before 003 lacks format_origin
+            record = {
+                name: row[name] if name in present else None
+                for name in ENTRY_FIELDS
+                if name != "version"
+            }
             record["version"] = row["package_version"]
             record["pinned"] = bool(row["pinned"])
             record["can_run_code"] = _bool(row["can_run_code"])
@@ -662,6 +895,73 @@ class Store:
             record["paper_dois"] = _loads(row["paper_dois"])
             result.append(record)
         return result
+
+    # --- claim checks (feature 003, data-model.md) ----------------------------------------------
+
+    def add_claim_check(
+        self,
+        *,
+        model_id: str,
+        version: int,
+        entry_identifier: str,
+        claim: str,
+        run_id: int | None,
+        outcome: str,
+        measured_format: str | None,
+        measured_can_run_code: bool | None,
+        reason: str | None,
+        evidence_id: int,
+    ) -> int:
+        """Record one confirmation attempt of one entry's claim (``code_free`` or ``identity``)."""
+        with self.conn:
+            cursor = self.conn.execute(
+                "INSERT INTO claim_checks (model_id, version, entry_identifier, claim, run_id,"
+                " outcome, measured_format, measured_can_run_code, reason, evidence_id,"
+                " checked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    model_id,
+                    version,
+                    entry_identifier,
+                    claim,
+                    run_id,
+                    outcome,
+                    measured_format,
+                    None if measured_can_run_code is None else int(bool(measured_can_run_code)),
+                    reason,
+                    evidence_id,
+                    self._stamp(),
+                ),
+            )
+        return int(cursor.lastrowid)
+
+    @staticmethod
+    def _claim_check(row: sqlite3.Row) -> dict[str, Any]:
+        record = dict(row)
+        record["measured_can_run_code"] = _bool(record["measured_can_run_code"])
+        return record
+
+    def latest_claim_check(
+        self, model_id: str, version: int, identifier: str, *, claim: str = "code_free"
+    ) -> dict[str, Any] | None:
+        """The latest check of one entry's ``claim`` in a version, which decides its state."""
+        if self.read_only and "claim_checks" not in self.tables():
+            return None
+        row = self.conn.execute(
+            "SELECT * FROM claim_checks WHERE model_id = ? AND version = ?"
+            " AND entry_identifier = ? AND claim = ? ORDER BY claim_check_id DESC LIMIT 1",
+            (model_id, version, identifier, claim),
+        ).fetchone()
+        return None if row is None else self._claim_check(row)
+
+    def claim_checks(self, model_id: str, version: int) -> list[dict[str, Any]]:
+        """Every claim check of a version, oldest first."""
+        if self.read_only and "claim_checks" not in self.tables():
+            return []  # a database from before 003, read without upgrading it
+        rows = self.conn.execute(
+            "SELECT * FROM claim_checks WHERE model_id = ? AND version = ? ORDER BY claim_check_id",
+            (model_id, version),
+        ).fetchall()
+        return [self._claim_check(row) for row in rows]
 
     # --- evidence ------------------------------------------------------------------------------
 
@@ -910,6 +1210,60 @@ class Store:
             query += " WHERE scope IN (" + ", ".join("?" for _ in params) + ")"
         row = self.conn.execute(query, params).fetchone()
         return None if row["r"] is None else self.get_check_run(row["r"])
+
+    def check_runs_for(
+        self, model_id: str, since: str, until: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Finished runs started at or after ``since`` (and before ``until``, if given) whose scope
+        covered the model, newest first. Each has ``version``: the version of the model it
+        checked, or ``None`` when it has no target row for it, and ``legacy``: whether the run
+        was recorded before runs recorded their targets (``first_linked_run``).
+
+        A run covers the model when its scope is ``all`` or names it (``check ID`` records the
+        id; a run over several models records them joined by commas).
+        """
+        query = "SELECT * FROM check_runs WHERE finished_at IS NOT NULL AND started_at >= ?"
+        params: tuple[str, ...] = (since,)
+        if until is not None:
+            query += " AND started_at < ?"
+            params += (until,)
+        rows = self.conn.execute(query + " ORDER BY run_id DESC", params).fetchall()
+        linked: dict[int, int] = {}
+        if "check_run_targets" in self.tables():  # absent from a read-only older database
+            linked = {
+                int(row["run_id"]): int(row["version"])
+                for row in self.conn.execute(
+                    "SELECT run_id, version FROM check_run_targets WHERE model_id = ?",
+                    (model_id,),
+                )
+            }
+        first = self.first_linked_run()
+        runs = []
+        for row in rows:
+            if row["scope"] != SCOPE_ALL and model_id not in str(row["scope"]).split(","):
+                continue
+            record = dict(row)
+            record["sources"] = _loads(record["sources"]) or {}
+            record["version"] = linked.get(record["run_id"])
+            record["legacy"] = first is None or record["run_id"] < first
+            runs.append(record)
+        return runs
+
+    def add_check_run_target(self, run_id: int, model_id: str, version: int) -> None:
+        """Record that run ``run_id`` checked ``version`` of ``model_id`` (G1)."""
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO check_run_targets (run_id, model_id, version)"
+                " VALUES (?, ?, ?)",
+                (run_id, model_id, version),
+            )
+
+    def registered_at(self, model_id: str, version: int) -> str | None:
+        row = self.conn.execute(
+            "SELECT registered_at FROM model_versions WHERE model_id = ? AND version = ?",
+            (model_id, version),
+        ).fetchone()
+        return None if row is None else str(row["registered_at"])
 
     # --- models, alerts and watch events as the checks use them -------------------------------
 

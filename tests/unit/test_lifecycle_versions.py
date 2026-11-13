@@ -64,7 +64,10 @@ def store(tmp_path: Path) -> Store:
 
 
 def register(store: Store, entries: list[dict[str, Any]], base: Path | None = None) -> int:
-    version = store.add_version("m", {"bomFormat": "CycloneDX"}, "0" * 64, entries, base_dir=base)
+    # A manifest registration: its format claims are the owner's (feature 003, FR-007).
+    version = store.add_version(
+        "m", {"bomFormat": "CycloneDX"}, "0" * 64, entries, base_dir=base, origin="manifest"
+    )
     reevaluate_version(store, "m", version)
     return version
 

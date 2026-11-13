@@ -61,6 +61,13 @@ it is pinned, `can_run_code` is false, and its claim is owner-trusted or its lat
 No new column. `format-check` is one more source name in `sources`, with status `ok`, `failed: reason` or
 `skipped`, as for the existing sources.
 
+Two tables are added (PR #15 rounds 2 and 3), created when the database is opened:
+
+| Table | Fields | Rule |
+| :-- | :-- | :-- |
+| `check_run_targets` | `run_id`, `model_id`, `version`; key `(run_id, model_id)` | one row per model a run checked, with the version it checked (always the latest at the time); the audit counts a run for that version only |
+| `store_marks` | `name`, `value`; the row `first_linked_run` | the first run that records its targets; a run before it is legacy and the audit counts it by its start time (from the version's registration to the next one's), while a later run with no target row for a model did not check it |
+
 ## Watch event (extended)
 
 | Kind | When | Detail |
@@ -81,7 +88,7 @@ claims exist in the version, `unconfirmed_claims`: a list of `{identifier, locat
 | :-- | :-- |
 | `model_id`, `version`, `produced_at`, `stale_after_hours` | |
 | `summary` | counts: `alerts_open`, `watch_events`, `entries`, `verified`, `declared_but_unverified`, `conflicting`, `unavailable`, `gaps`, `uncheckable`, `sources_failed`, `sources_stale`, `sources_not_checked`; and `checked` (boolean) |
-| `findings` | `{state: "not_yet_checked" \| "checked", alerts: [...], watch_events: [...]}` in the shapes `alerts` already prints |
+| `findings` | `{state: "not_yet_checked" \| "partly_checked" \| "checked", alerts: [...], watch_events: [...]}` (checked once every relevant source succeeded in a run of this version; PR #15 round 2) in the shapes `alerts` already prints |
 | `assurance.entries[]` | `{kind, identifier, location, status, gap_reason, claims: [{claim, value, origin, verification}]}`; `claim` is `format`, `can_run_code`, `sha256` or `revision`; `verification` is `owner`, `measured`, `confirmed`, `unverified` or `contradicted` |
 | `assurance.undeclared_kinds[]` | kinds the inventory has none of: `environment`, `base_model`, `datasets`, `weights` |
 | `coverage.sources[]` | `{source, relevant_entries: [identifier or location, …], last_run_id, last_finished_at, status, age_hours, stale}` |

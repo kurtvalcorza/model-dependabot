@@ -28,6 +28,9 @@ INVOCATIONS = {
     "import": ["import", "bom.json", "--model-id", "m"],
     "inventory show": ["inventory", "show", "m", "--version", "2"],
     "inventory export": ["inventory", "export", "m", "-o", "out.json"],
+    # feature 003 (contracts/cli.md)
+    "inventory audit": ["inventory", "audit", "m", "--version", "2", "--stale-after", "48"],
+    "discover": ["discover", ".", "--manifest", "model.toml", "--upstream", "-o", "p.toml"],
     "check": ["check", "m", "--source", "osv,picklescan,hf-scan"],
     "policy": ["policy", "m", "--format", "strict", "--by", "Owner"],
     "alerts": ["alerts", "m", "--state", "all"],
@@ -127,6 +130,8 @@ def test_json_output_with_json(capsys: pytest.CaptureFixture[str]) -> None:
         ["alert", "dismiss", "17", "--reason", "bored", "--by", "Owner"],
         ["alert", "dismiss", "17", "--reason", "risk_accepted"],
         ["history", "m", "--unknown-flag"],
+        ["discover"],
+        ["discover", ".", "--force"],
     ],
 )
 def test_invalid_arguments_exit_1(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
@@ -142,8 +147,9 @@ def test_check_accepts_all_without_an_id() -> None:
     assert main(["check", "--all"], handlers=handlers_for("check", recorder)) == EXIT_OK
     assert recorder.args.all is True
     # Feature 002 adds six upstream sources; omitting --source still runs every source.
-    assert recorder.args.sources[:3] == ["osv", "picklescan", "hf-scan"]
-    assert recorder.args.sources[3:] == [
+    # Feature 003 adds format-check to the default list (contracts/cli.md).
+    assert recorder.args.sources[:4] == ["osv", "picklescan", "hf-scan", "format-check"]
+    assert recorder.args.sources[4:] == [
         "hf-hub",
         "hf-takedowns",
         "crossref",

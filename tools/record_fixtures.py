@@ -7,6 +7,7 @@ Usage::
     uv run python tools/record_fixtures.py hf-scan
     uv run python tools/record_fixtures.py upstream
     uv run python tools/record_fixtures.py unregistered
+    uv run python tools/record_fixtures.py format-check
 
 Requests are anonymous and carry only the generic User-Agent of ``UrlFetcher``; no token is sent.
 Each response is written in ``RecordedFetcher``'s format: ``NAME.meta.json`` beside the body file.
@@ -600,7 +601,107 @@ def record_unregistered() -> None:
     _append_notes()
 
 
+# --- feature 003: hub trees and ranged reads of hub files (research A4, T010) ---------------------
+
+FORMAT_CHECK_LEAD = 1 << 20
+# (recording name, repository, commit, file): public files at pinned commits, chosen 2026-11-13.
+# gpt2's ``model.safetensors`` (a real safetensors header, 14,283 bytes) and ``pytorch_model.bin``
+# (a protocol 2 pickle); a GGUF file; a small test repository's zip ``pytorch_model.bin``, whose
+# whole file fits in the lead; a gated test repository's file, which the hub refuses anonymously.
+FORMAT_CHECK_FILES = (
+    ("gpt2-safetensors", HF_REPO, "607a30d783dfa663caf39e06633721c8d4cfcd7e", "model.safetensors"),
+    ("gpt2-pickle", HF_REPO, "607a30d783dfa663caf39e06633721c8d4cfcd7e", "pytorch_model.bin"),
+    (
+        "tinyllama-gguf",
+        "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
+        "52e7645ba7c309695bec7ac98f4f005b139cf465",
+        "tinyllama-1.1b-chat-v1.0.Q2_K.gguf",
+    ),
+    (
+        "tiny-bert-zip",
+        "hf-internal-testing/tiny-random-bert",
+        "f171d7baecaf37b5da5a3616d8833b9969753535",
+        "pytorch_model.bin",
+    ),
+    (
+        "gated-refused",
+        "hf-internal-testing/dummy-gated-model",
+        "9a039e123af345a94ba89c5e4cc3a0f6dac50bd9",
+        "gated_file.txt",
+    ),
+)
+RANGE_HEADERS = ("content-type", "content-range", "content-length", "x-repo-commit", "x-error-code")
+
+
+def _hop(url: str, wanted: str) -> tuple[int, dict[str, str], bytes, str | None]:
+    """One request with ``Range``, no redirect followed; at most the lead is read."""
+    from model_dependabot.sources.fetcher import open_without_redirects
+
+    request = urllib.request.Request(
+        url, headers={"User-Agent": DEFAULT_USER_AGENT, "Range": wanted}
+    )
+    try:
+        raw = open_without_redirects(request, 60)
+    except urllib.error.HTTPError as error:  # urllib.request imports urllib.error
+        raw = error
+    with raw:
+        status = raw.status if hasattr(raw, "status") else raw.code
+        headers = {k.lower(): v for k, v in raw.headers.items()}
+        body = raw.read(FORMAT_CHECK_LEAD)
+    location = headers.get("location")
+    return status, headers, body, location
+
+
+def _without_query(url: str) -> str:
+    """A storage host's signed URL without its query: the signature expires and is not needed."""
+    return url.split("?", 1)[0]
+
+
+def _write_hop(out: Path, name: str, url: str, wanted: str, hop: tuple[Any, ...]) -> None:
+    status, headers, body, location = hop
+    if location:  # the redirect's text names the signed target too
+        body = body.replace(location.encode("utf-8"), _without_query(location).encode("utf-8"))
+        headers = {k: v for k, v in headers.items() if k != "content-length"}
+    body_file = f"{name}.bin"
+    (out / body_file).write_bytes(body)
+    meta: dict[str, Any] = {"method": "GET", "url": url, "range": wanted, "status": status}
+    meta["headers"] = {k: headers[k] for k in RANGE_HEADERS if k in headers}
+    meta["retrieved_at"] = utc_text(datetime.now(UTC))
+    meta["body_file"] = body_file
+    if location:
+        meta["redirected_to"] = _without_query(location)
+        meta["trimmed"] = "query string of the redirect target removed"
+    (out / f"{name}.meta.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+    print(f"{name}: HTTP {status}, {len(body)} bytes {meta['headers'].get('content-range', '')}")
+
+
+def record_format_check() -> None:
+    """Trees at the pinned commits and the first 1 MiB of each file, hop by hop (research A4)."""
+    from model_dependabot.sources.fetcher import range_header
+
+    out = ROOT / "tests" / "fixtures" / "format_check"
+    out.mkdir(parents=True, exist_ok=True)
+    fetcher = UrlFetcher()
+    wanted = range_header(FORMAT_CHECK_LEAD)
+    trees: set[tuple[str, str]] = set()
+    for name, repo, commit, file in FORMAT_CHECK_FILES:
+        if (repo, commit) not in trees:
+            trees.add((repo, commit))
+            tree = fetcher.get(f"{HF_API}/{repo}/tree/{commit}")
+            _write(out, f"{repo.replace('/', '--')}-tree", tree, tree.body, None)
+        url = f"https://huggingface.co/{repo}/resolve/{commit}/{file}"
+        hop = _hop(url, wanted)
+        _write_hop(out, f"{name}-range", url, wanted, hop)
+        hops = 0
+        while 300 <= hop[0] < 400 and hop[3]:
+            hops += 1
+            target = hop[3]
+            hop = _hop(target, wanted)
+            _write_hop(out, f"{name}-range-{hops}", _without_query(target), wanted, hop)
+
+
 RECORDERS = {
+    "format-check": record_format_check,
     "hf": record_hf,
     "osv": record_osv,
     "hf-scan": record_hf_scan,

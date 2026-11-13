@@ -58,6 +58,16 @@ from urllib.parse import unquote
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
+from model_dependabot.assurance import format_check
+from model_dependabot.assurance.trust import (
+    CODE_FREE,
+    IDENTITY,
+    LEGACY,
+    counts_as_code_free,
+    latest_check,
+    measured_entries,
+    needs_confirmation,
+)
 from model_dependabot.inventory.build import HUB_DATASET_PREFIX, hash_stream, huggingface_purl
 from model_dependabot.matching.severity import severity_of, severity_rank
 from model_dependabot.matching.versions import (
@@ -122,7 +132,12 @@ ABSENT_REASON = (
 
 PICKLESCAN = "picklescan"
 HF_SCAN = "hf-scan"
-WEIGHT_SOURCES = (PICKLESCAN, HF_SCAN)
+FORMAT_CHECK = format_check.SOURCE
+WEIGHT_SOURCES = (PICKLESCAN, HF_SCAN, FORMAT_CHECK)
+# Feature 003 (data-model.md, Watch event and Alert).
+FORMAT_CLAIM_CONTRADICTED = "format_claim_contradicted"
+FORMAT_CLAIM_UNREADABLE = "format_claim_unreadable"
+TRUST_RULE = "imported code-free claims count only once confirmed"
 FORMAT_RULE_SOURCE = "format-rule"
 FORMAT_POLICY_SOURCE = "format-policy"
 
@@ -164,6 +179,7 @@ class _Target:
     summary: dict[str, Any]
     base_dir: str | None = None
     record_sha256: str | None = None
+    origin: str | None = None  # how the version was registered (feature 003); None is legacy
 
 
 @dataclass
@@ -208,6 +224,7 @@ def run_check(
         with contextlib.suppress(Exception):  # the original error is the one to report
             store.finish_check_run(run_id, final)
         raise
+    statuses = {source: statuses[source] for source in sources if source in statuses}
     store.finish_check_run(run_id, statuses)
     return CheckOutcome(run_id, statuses, [target.summary for target in targets])
 
@@ -237,6 +254,7 @@ def _check(
         }
         record = store.get_version(model_id, version) or {}
         entries = store.entries(model_id, version)
+        store.add_check_run_target(run_id, model_id, version)  # what the audit credits (G1)
         targets.append(
             _Target(
                 model_id,
@@ -245,12 +263,18 @@ def _check(
                 summary,
                 record.get("base_dir"),
                 record.get("registration_record_sha256"),
+                record.get("origin"),
             )
         )
+        if FORMAT_CHECK in sources:
+            summary["claim_checks"] = []
 
     wanted = [source for source in sources if source in UPSTREAM_SOURCES]
     upstream = _read_upstream(store, fetcher, targets, wanted) if wanted else None
-    for source in sources:
+    # format-check runs before picklescan, so a code-free claim it contradicts is scanned as the
+    # pickle its bytes show in the same run (review F3); statuses keep the order asked for.
+    ordered = sorted(sources, key=lambda source: source != FORMAT_CHECK)
+    for source in ordered:
         if upstream is not None and source in UPSTREAM_SOURCES:
             statuses[source] = upstream.statuses[source]
             continue
@@ -269,6 +293,9 @@ def _check(
             for target in targets:
                 _apply_hub(store, run_id, target, verdicts)
             statuses[source] = "ok"
+            continue
+        if source == FORMAT_CHECK:
+            statuses[source] = _run_format_check(store, fetcher, run_id, targets)
             continue
         if source != "osv":
             statuses[source] = "skipped"
@@ -768,17 +795,68 @@ def _code_capable(entries: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any
     ]
 
 
-def _code_free(entries: Sequence[Mapping[str, Any]]) -> list[str]:
-    """Identifiers of pinned code-free weight files (FR-021).
+def _code_free(
+    entries: Sequence[Mapping[str, Any]],
+    origin: str | None = "manifest",
+    checks: Sequence[Mapping[str, Any]] = (),
+) -> list[str]:
+    """Identifiers of pinned code-free weight files that count beside the others (FR-021).
 
     A gap is not one: an unpinned ``model.safetensors`` is a name with no file proven behind it,
-    so it never suppresses or clears a ``format_policy`` alert.
+    so it never suppresses or clears a ``format_policy`` alert. Nor is an imported or legacy
+    code-free claim until ``format-check`` confirms it (feature 003, FR-004): ``origin`` is the
+    version's and ``checks`` its claim checks, oldest first.
     """
     return [
         entry["identifier"]
         for entry in entries
-        if entry["kind"] == "weight_file" and entry["pinned"] and entry["can_run_code"] is False
+        if counts_as_code_free(entry, origin, latest_check(checks, entry["identifier"], CODE_FREE))
     ]
+
+
+def _measured(
+    entries: Sequence[Mapping[str, Any]], checks: Sequence[Mapping[str, Any]]
+) -> list[Mapping[str, Any]]:
+    """The entries as their bytes showed them (``trust.measured_entries``): a contradicted
+    code-free file gets the ``pickle_format`` watch event and, under the strict policy, a
+    ``format_policy`` alert of its own, and picklescan scans it (review F3)."""
+    return measured_entries(entries, checks)
+
+
+def _measured_target(store: Store, target: _Target) -> list[Mapping[str, Any]]:
+    return _measured(target.entries, store.claim_checks(target.model_id, target.version))
+
+
+def _unconfirmed_claims(
+    target: _Target, checks: Sequence[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    """Code-free claims in the version that need confirmation and do not have it (FR-005)."""
+    claims = []
+    for entry in target.entries:
+        if not (entry["pinned"] and entry["can_run_code"] is False):
+            continue
+        if not needs_confirmation(entry, target.origin):
+            continue
+        identifier = entry["identifier"]
+        identity = latest_check(checks, identifier, IDENTITY)
+        code_free = latest_check(checks, identifier, CODE_FREE)
+        if code_free is not None and code_free["outcome"] == "confirmed":
+            continue
+        if identity is not None and identity["outcome"] == "contradicted":
+            outcome = "contradicted"
+        elif code_free is None:
+            outcome = "unverified"
+        else:
+            outcome = code_free["outcome"]
+        claims.append(
+            {
+                "identifier": identifier,
+                "location": _where(entry),
+                "outcome": outcome,
+                "origin": entry.get("format_origin") or target.origin or LEGACY,
+            }
+        )
+    return claims
 
 
 def _json_body(record: Mapping[str, Any]) -> bytes:
@@ -909,7 +987,9 @@ def _where(entry: Mapping[str, Any]) -> str | None:
 
 
 def _apply_format_rules(store: Store, run_id: int, target: _Target) -> None:
-    capable = _code_capable(target.entries)
+    checks = store.claim_checks(target.model_id, target.version)
+    entries = _measured(target.entries, checks)
+    capable = _code_capable(entries)
     now = store.now()
     for entry in capable:
         detail = {
@@ -926,8 +1006,20 @@ def _apply_format_rules(store: Store, run_id: int, target: _Target) -> None:
     if model.get("format_policy") != "strict":
         _clear_format_policy(store, run_id, target, model, now)
         return
-    if _code_free(target.entries):
-        return  # FR-021: a code-free file beside it suppresses the policy alert
+    code_free = _code_free(entries, target.origin, checks)
+    if code_free:
+        # FR-021: a code-free file beside it suppresses the policy alert. One that counts only
+        # because format-check confirmed it clears an alert it no longer supports (FR-005).
+        _clear_on_confirmation(store, target, entries, code_free, checks)
+        return
+    unconfirmed = _unconfirmed_claims(target, checks)
+    trust = {"unconfirmed_claims": unconfirmed, "rule": TRUST_RULE} if unconfirmed else {}
+    claim_evidence = [
+        int(check["evidence_id"])
+        for claim in unconfirmed
+        for check in [latest_check(checks, claim["identifier"], CODE_FREE)]
+        if check is not None
+    ]
     policy = {
         "model_id": target.model_id,
         "format_policy": "strict",
@@ -943,9 +1035,108 @@ def _apply_format_rules(store: Store, run_id: int, target: _Target) -> None:
             "set_at": policy["set_at"],
             "location": _where(entry),
         }
-        cause = {"identifier": entry["identifier"], **detail, "suggestion": SUGGESTION}
+        cause = {"identifier": entry["identifier"], **detail, "suggestion": SUGGESTION, **trust}
         observation = _Observation(FORMAT_POLICY_SOURCE, "", now, body, detail)
         _weight_alert(store, run_id, target, FORMAT_POLICY_ALERT, entry, cause, [observation])
+        alert = store.find_open_alert(
+            target.model_id, weight_cause_key(FORMAT_POLICY_ALERT, entry["identifier"])
+        )
+        for evidence_id in claim_evidence if alert is not None else []:
+            store.link_alert_evidence(alert["alert_id"], evidence_id)
+
+
+def _clear_on_confirmation(
+    store: Store,
+    target: _Target,
+    entries: Sequence[Mapping[str, Any]],
+    code_free: Sequence[str],
+    checks: Sequence[Mapping[str, Any]],
+) -> None:
+    """Close the version's open ``format_policy`` alerts once a confirmation makes a code-free
+    file count, with the confirming claim checks as evidence (data-model.md, Alert).
+
+    Only a file that counts because ``format-check`` confirmed it clears anything, so versions
+    whose code-free files are the owner's behave exactly as before (FR-007).
+    """
+    confirming = []
+    for entry in entries:
+        if entry["identifier"] in code_free and needs_confirmation(entry, target.origin):
+            check = latest_check(checks, entry["identifier"], CODE_FREE)
+            if check is not None:
+                confirming.append(int(check["evidence_id"]))
+    if not confirming:
+        return
+    capable = {entry["identifier"] for entry in _code_capable(entries)}
+    for alert in store.alerts_for(target.model_id, ["open"]):
+        if alert["kind"] != FORMAT_POLICY_ALERT or alert["cause"]["identifier"] not in capable:
+            continue
+        if alert["current_version"] != target.version:
+            continue
+        _close(store, target, alert, "cleared", confirming)
+
+
+def _run_format_check(store: Store, fetcher: Fetcher, run_id: int, targets: list[_Target]) -> str:
+    """Read then record ``format-check`` (research A3); its status for the run.
+
+    A hub failure fails the source and records no hub claim check; local files read in the same
+    run are still recorded, since they need no source.
+    """
+    versions = [
+        format_check.VersionTarget(t.model_id, t.version, t.origin, t.base_dir, t.entries)
+        for t in targets
+    ]
+    status = "ok"
+    try:
+        reads = format_check.read_claims(store, fetcher, versions)
+    except format_check.ClaimReadFailedError as error:
+        reads, status = error.reads, f"failed: {error.reason}"
+    by_version = {(t.model_id, t.version): t for t in targets}
+    for applied in format_check.apply_claims(store, run_id, reads):
+        target = by_version[(applied.read.model_id, applied.read.version)]
+        _claim_watch(store, target, applied)
+        target.summary["claim_checks"].append(
+            {
+                "identifier": applied.read.identifier,
+                "outcome": applied.read.outcome,
+                "measured_format": applied.read.measured_format,
+                "reason": applied.read.reason,
+            }
+        )
+    return status
+
+
+def _claim_watch(store: Store, target: _Target, applied: format_check.AppliedClaim) -> None:
+    """A watch event for a contradicted or unreadable claim; a confirmation needs none."""
+    read = applied.read
+    if read.outcome == "confirmed":
+        return
+    entry = read.entry
+    detail: dict[str, Any] = {
+        "claim": read.claim,
+        "reason": read.reason,
+        "origin": entry.get("format_origin") or target.origin or LEGACY,
+        "location": _where(entry),
+    }
+    if read.outcome == "contradicted":
+        kind = FORMAT_CLAIM_CONTRADICTED
+        detail |= {
+            "claimed_format": entry.get("format"),
+            "claimed_can_run_code": entry.get("can_run_code"),
+            "measured_format": read.measured_format,
+            "measured_can_run_code": read.measured_can_run_code,
+        }
+    else:
+        kind = FORMAT_CLAIM_UNREADABLE
+    watch_event_id = store.record_watch_event(
+        model_id=target.model_id,
+        version=target.version,
+        entry_identifier=read.identifier,
+        kind=kind,
+        detail=detail,
+        evidence_ids=[applied.evidence_id],
+    )
+    if watch_event_id not in target.summary["watch_events"]:
+        target.summary["watch_events"].append(watch_event_id)
 
 
 def _clear_format_policy(
@@ -1008,7 +1199,7 @@ def _read_local_scans(
     """Scan every local code-capable file before anything changes; a file is never loaded."""
     scans: dict[tuple[str, int, str], _LocalScan] = {}
     for target in targets:
-        for entry in _code_capable(target.entries):
+        for entry in _code_capable(_measured_target(store, target)):
             if entry.get("hub_repo") or not entry.get("location"):
                 continue
             path = _local_path(target, entry["location"])
@@ -1040,7 +1231,7 @@ def _read_local_scans(
 def _apply_local_scans(
     store: Store, run_id: int, target: _Target, scans: Mapping[tuple[str, int, str], _LocalScan]
 ) -> None:
-    for entry in _code_capable(target.entries):
+    for entry in _code_capable(_measured_target(store, target)):
         identifier = entry["identifier"]
         scan = scans.get((target.model_id, target.version, identifier))
         if scan is None:
@@ -1438,7 +1629,8 @@ def reevaluate_version(store: Store, model_id: str, version: int) -> dict[str, l
         return result
     entries = store.entries(model_id, version)
     weights = {entry["identifier"]: entry for entry in entries if entry["kind"] == "weight_file"}
-    code_free = _code_free(entries)
+    # Feature 003: an imported code-free claim counts only once confirmed (FR-004).
+    code_free = _code_free(entries, record.get("origin"), store.claim_checks(model_id, version))
     for alert in store.alerts_for(model_id, ["open"]):
         if alert["current_version"] >= version:
             continue

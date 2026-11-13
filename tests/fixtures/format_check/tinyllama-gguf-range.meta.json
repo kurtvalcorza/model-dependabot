@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "url": "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/52e7645ba7c309695bec7ac98f4f005b139cf465/tinyllama-1.1b-chat-v1.0.Q2_K.gguf",
+  "range": "bytes=0-1048575",
+  "status": 302,
+  "headers": {
+    "content-type": "text/plain; charset=utf-8",
+    "x-repo-commit": "52e7645ba7c309695bec7ac98f4f005b139cf465"
+  },
+  "retrieved_at": "2026-11-12T16:20:27Z",
+  "body_file": "tinyllama-gguf-range.bin",
+  "redirected_to": "https://us.aws.cdn.hf.co/xet-bridge-us/6591d4d754f88261730df832/f43c1b180b32a59ade7014bcc836b9b86cb8fec5eebd3eb262d302ce4653335c",
+  "trimmed": "query string of the redirect target removed"
+}

@@ -42,25 +42,33 @@ class LockEntry:
         return f"pkg:pypi/{self.name}@{quote(self.version, safe='.!-_~')}"
 
 
-def _logical_lines(text: str) -> list[str]:
-    """Join backslash continuations and drop comments and blank lines."""
-    lines: list[str] = []
+def numbered_lines(text: str) -> list[tuple[int, str]]:
+    """Join backslash continuations and drop comments and blank lines; each logical line comes
+    with the number of the physical line it starts on (feature 003 discovery reports it)."""
+    lines: list[tuple[int, str]] = []
     current = ""
-    for raw in text.splitlines():
+    start = 0
+    for number, raw in enumerate(text.splitlines(), start=1):
         stripped = raw.strip()
         if not current and (not stripped or stripped.startswith("#")):
             continue
         if stripped.startswith("#"):
             continue
+        if not current:
+            start = number
         if stripped.endswith("\\"):
             current += stripped[:-1] + " "
             continue
         current += stripped
-        lines.append(current.strip())
+        lines.append((start, current.strip()))
         current = ""
     if current.strip():
-        lines.append(current.strip())
+        lines.append((start, current.strip()))
     return lines
+
+
+def _logical_lines(text: str) -> list[str]:
+    return [line for _, line in numbered_lines(text)]
 
 
 def _exact_version(requirement: Requirement) -> str | None:
@@ -71,6 +79,11 @@ def _exact_version(requirement: Requirement) -> str | None:
     if specifier.operator != "==" or "*" in specifier.version:
         return None
     return specifier.version
+
+
+def parse_line(line: str) -> LockEntry | None:
+    """One logical line's requirement, or ``None`` for a global option such as ``-r``."""
+    return _entry(line)
 
 
 def _entry(line: str) -> LockEntry | None:

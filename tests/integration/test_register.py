@@ -63,8 +63,14 @@ def test_register_show_export_import(run, tmp_path: Path) -> None:
     assert code == EXIT_OK
     assert (imported["model_id"], imported["version"]) == ("example-copy", 1)
     code, copy_shown = run("inventory", "show", "example-copy")
-    assert copy_shown["entries"] == shown["entries"]
-    assert copy_shown["gaps"] == shown["gaps"]
+    # The same entries; only where each format claim came from differs (feature 003): the copy's
+    # claims are imported, so they are no longer the owner's.
+    assert _without_origin(copy_shown["entries"]) == _without_origin(shown["entries"])
+    assert _without_origin(copy_shown["gaps"]) == _without_origin(shown["gaps"])
+
+
+def _without_origin(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{k: v for k, v in entry.items() if k != "format_origin"} for entry in entries]
 
 
 def test_an_inventory_that_fails_validation_is_invalid_input(
@@ -124,3 +130,28 @@ def test_show_prints_gaps_with_their_reasons_for_people(
     assert "pkg:pypi/attrs@26.1.0" in text
     assert "no revision" in text
     assert "gap" in text.lower()
+
+
+# --- feature 003: where each claim came from (T008, FR-001, FR-007) -----------------------------
+
+
+def test_register_records_the_origin_of_the_version_and_of_each_format_claim(run) -> None:
+    assert run("register", str(EXAMPLE))[0] == EXIT_OK
+    with Store(run.db) as store:
+        assert store.get_version("example-detector", 1)["origin"] == "manifest"
+        entries = store.entries("example-detector", 1)
+    origins = {
+        (entry["location"] or entry["hub_file"]): entry["format_origin"]
+        for entry in entries
+        if entry["kind"] == "weight_file"
+    }
+    # Local files are classified from their bytes, hub files by the name the owner gave.
+    assert origins == {
+        "weights/tiny.pt": "bytes",
+        "weights/tiny.safetensors": "bytes",
+        "weights/tiny.onnx": "bytes",
+        "https://huggingface.co/openai-community/gpt2/resolve/"
+        "607a30d783dfa663caf39e06633721c8d4cfcd7e/model.safetensors": "name",
+        "pytorch_model.bin": "name",
+    }
+    assert {entry["format_origin"] for entry in entries if entry["kind"] != "weight_file"} == {None}

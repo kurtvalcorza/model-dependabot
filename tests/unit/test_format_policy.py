@@ -41,7 +41,8 @@ def store(tmp_path: Path) -> Store:
 
 
 def check(store: Store, tmp_path: Path, entries: list[dict[str, Any]]) -> None:
-    store.add_version("m", {}, "0" * 64, entries, base_dir=tmp_path)
+    # A manifest registration: its format claims are the owner's (feature 003, FR-007).
+    store.add_version("m", {}, "0" * 64, entries, base_dir=tmp_path, origin="manifest")
     run_check(store, RecordedFetcher(tmp_path / "none"), ["m"], ["picklescan", "hf-scan"])
 
 
@@ -123,7 +124,9 @@ def test_an_unpinned_code_free_name_does_not_fix_the_policy_alert(
     pickled = weight(tmp_path, "model.pkl", craft.innocuous(), "pickle", True)
     check(store, tmp_path, [pickled])
     [alert] = store.alerts_for("m")
-    store.add_version("m", {}, "1" * 64, [pickled, unpinned_safetensors()], base_dir=tmp_path)
+    store.add_version(
+        "m", {}, "1" * 64, [pickled, unpinned_safetensors()], base_dir=tmp_path, origin="manifest"
+    )
     result = reevaluate_version(store, "m", 2)
     assert result == {"fixed": [], "carried_forward": [alert["alert_id"]]}
     assert [a["state"] for a in store.alerts_for("m")] == ["open"]

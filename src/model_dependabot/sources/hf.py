@@ -15,10 +15,12 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from posixpath import dirname
+from typing import Any
 from urllib.parse import quote, unquote, urlsplit
 
-from model_dependabot.sources.fetcher import Fetcher, Response, SourceFailedError
+from model_dependabot.sources.fetcher import Fetcher, Response, SourceFailedError, source_of
 from model_dependabot.upstream.licences import join_licences
 
 HF_ENDPOINT = "https://huggingface.co"
@@ -77,6 +79,101 @@ class HubFileResult:
     gap_reason: str | None = None
 
 
+# Feature 003, research A4 (published in contracts/cli.md): the first range of a header read, and
+# the most a safetensors header may take with its 8-byte length.
+HEADER_LEAD = 1 << 20
+HEADER_LIMIT = 16 << 20
+
+
+def tree_url(repo: str, revision: str, directory: str = "", endpoint: str = HF_ENDPOINT) -> str:
+    """The tree API URL of one directory of a repository at a revision."""
+    url = f"{endpoint}/api/models/{_path(repo)}/tree/{quote(revision, safe='')}"
+    return f"{url}/{_path(directory)}" if directory else url
+
+
+def _parse_tree(body: bytes) -> TreeResult:
+    try:
+        items = json.loads(body)
+    except ValueError:
+        return TreeResult(gap_reason="hub tree response is not JSON")
+    files: dict[str, HubFile] = {}
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict) or item.get("type") != "file" or "path" not in item:
+            continue
+        lfs = item.get("lfs") if isinstance(item.get("lfs"), dict) else {}
+        oid = str(lfs.get("oid", "")).lower()
+        size = lfs.get("size", item.get("size"))
+        files[item["path"]] = HubFile(
+            path=item["path"],
+            size=size if isinstance(size, int) else None,
+            sha256=oid if _SHA256.match(oid) else None,
+            git_oid=item.get("oid"),
+        )
+    return TreeResult(files=files)
+
+
+def _fail_on_server_error(response: Response) -> None:
+    """A server error the fetcher handed back (a recorded one) fails the source, as live ones do."""
+    if response.status >= 500:
+        raise SourceFailedError(source_of(response.url), f"HTTP {response.status}")
+
+
+def _total_size(response: Response) -> int | None:
+    """The file's size: from ``Content-Range`` for a 206, ``Content-Length`` for a 200."""
+    if response.status == 206:
+        value = response.headers.get("Content-Range") or ""
+        total = value.rpartition("/")[2]
+    else:
+        total = response.headers.get("Content-Length") or ""
+    return int(total) if total.isdigit() else None
+
+
+@dataclass(frozen=True)
+class HeaderRead:
+    """What a header read of one hub file found (feature 003, research A4).
+
+    ``identity`` is ``confirmed`` when the tree lists the pinned hash, ``contradicted`` when it
+    lists another and ``unreadable`` when it cannot say. ``format`` and ``can_run_code`` are the
+    measured class when the header was read and classified; otherwise ``reason`` says why not.
+    """
+
+    repo: str
+    commit: str
+    file: str
+    url: str
+    tree_url: str
+    identity: str = "unreadable"
+    hub_sha256: str | None = None
+    format: str | None = None
+    can_run_code: bool | None = None
+    reason: str | None = None
+    status: int | None = None
+    content_range: str | None = None
+    total_size: int | None = None
+    lead_sha256: str | None = None
+    lead_length: int | None = None
+    retrieved_at: datetime | None = None
+
+    def summary(self) -> dict[str, Any]:
+        """The evidence body: what was asked and seen, never the file's bytes."""
+        return {
+            "url": self.url,
+            "tree_url": self.tree_url,
+            "commit": self.commit,
+            "file": self.file,
+            "hub_sha256": self.hub_sha256,
+            "status": self.status,
+            "content_range": self.content_range,
+            "total_size": self.total_size,
+            "lead_sha256": self.lead_sha256,
+            "lead_length": self.lead_length,
+            "measured_format": self.format,
+            "measured_can_run_code": self.can_run_code,
+            "identity": self.identity,
+            "reason": self.reason,
+        }
+
+
 def answered_for(repo: str, info: object) -> str | None:
     """Why an answer is for another repository, or ``None`` when it is for ``repo`` or names none.
 
@@ -126,30 +223,79 @@ class HuggingFace:
 
     def tree(self, repo: str, revision: str, directory: str = "") -> TreeResult:
         """The files in one directory of a repository at a revision."""
-        url = f"{self.endpoint}/api/models/{_path(repo)}/tree/{quote(revision, safe='')}"
-        if directory:
-            url += f"/{_path(directory)}"
-        response, gap = self._get(url)
+        response, gap = self._get(tree_url(repo, revision, directory, self.endpoint))
         if response is None or gap is not None:
             return TreeResult(gap_reason=gap)
-        try:
-            items = json.loads(response.body)
-        except ValueError:
-            return TreeResult(gap_reason="hub tree response is not JSON")
-        files: dict[str, HubFile] = {}
-        for item in items if isinstance(items, list) else []:
-            if not isinstance(item, dict) or item.get("type") != "file" or "path" not in item:
-                continue
-            lfs = item.get("lfs") if isinstance(item.get("lfs"), dict) else {}
-            oid = str(lfs.get("oid", "")).lower()
-            size = lfs.get("size", item.get("size"))
-            files[item["path"]] = HubFile(
-                path=item["path"],
-                size=size if isinstance(size, int) else None,
-                sha256=oid if _SHA256.match(oid) else None,
-                git_oid=item.get("oid"),
+        return _parse_tree(response.body)
+
+    def read_header(
+        self, repo: str, commit: str, file: str, expected_sha256: str, *, header: bool = True
+    ) -> HeaderRead:
+        """Confirm a pinned hub file's identity and read its format from a bounded header read.
+
+        The tree at ``commit`` must list ``file`` with ``expected_sha256`` (64 hex digits, no
+        prefix): a different hash contradicts the identity, and the header is then not read; a
+        missing file, no hub SHA-256 or a refusal is ``unreadable``. With ``header``, the first
+        ``HEADER_LEAD`` bytes are read by range at ``commit`` and classified with the rules for
+        local files (``classify_lead``); a safetensors header longer than that is read with one
+        more range of up to ``HEADER_LIMIT`` bytes, and a longer one is unreadable. A refusal
+        (401, 403, 404) is a reason, never a failure; a network error, a server error after the
+        fetcher's retries or an answer cut off mid-read raises ``SourceFailedError``
+        (FR-002a, FR-002b, research A4). Nothing of the file but the lead is read, and only a
+        summary of it is kept.
+        """
+        listing = tree_url(repo, commit, dirname(file), self.endpoint)
+        url = resolve_url(repo, commit, file, self.endpoint)
+        result = HeaderRead(repo=repo, commit=commit, file=file, url=url, tree_url=listing)
+        tree = self.fetcher.get(listing)
+        _fail_on_server_error(tree)
+        if tree.status != 200:
+            return replace(result, identity="unreadable", reason=_refusal(tree))
+        found = _parse_tree(tree.body)
+        hub_file = found.files.get(file)
+        if found.gap_reason is not None or hub_file is None:
+            return replace(result, identity="unreadable", reason=found.gap_reason or FILE_NOT_FOUND)
+        if hub_file.sha256 is None:
+            return replace(result, identity="unreadable", reason=NO_HUB_SHA256)
+        result = replace(result, hub_sha256=hub_file.sha256, retrieved_at=tree.retrieved_at)
+        if hub_file.sha256 != expected_sha256.lower():
+            reason = f"the hub lists {hub_file.sha256}, the inventory pins {expected_sha256}"
+            return replace(result, identity="contradicted", reason=reason)
+        result = replace(result, identity="confirmed")
+        return self._read_lead(result, file) if header else result
+
+    def _read_lead(self, result: HeaderRead, file: str) -> HeaderRead:
+        # build.py imports this module, so the classification rules are imported when used.
+        from model_dependabot.inventory.build import NO_ONNX_STRUCTURE, classify_lead, shows_onnx
+
+        length = HEADER_LEAD
+        while True:
+            response = self.fetcher.get_range(result.url, length)
+            _fail_on_server_error(response)
+            result = replace(
+                result,
+                status=response.status,
+                content_range=response.headers.get("Content-Range"),
+                lead_sha256=hashlib.sha256(response.body).hexdigest(),
+                lead_length=len(response.body),
+                retrieved_at=response.retrieved_at,
             )
-        return TreeResult(files=files)
+            if response.status not in (200, 206):
+                return replace(result, reason=_refusal(response))
+            total = _total_size(response)
+            if total is None:
+                return replace(result, reason="the hub gave no size for the file")
+            result = replace(result, total_size=total)
+            answer = classify_lead(file, response.body, total)
+            if answer == ("onnx", False) and not shows_onnx(response.body, total):
+                # Only imported claims are read here; the name alone never confirms them (R5).
+                return replace(result, reason=NO_ONNX_STRUCTURE)
+            if isinstance(answer, tuple):
+                return replace(result, format=answer[0], can_run_code=answer[1])
+            if answer.length > HEADER_LIMIT or length != HEADER_LEAD:
+                reason = f"the safetensors header is longer than {HEADER_LIMIT} bytes"
+                return replace(result, reason=reason)
+            length = answer.length
 
     def revision(self, repo: str, revision: str) -> RevisionResult:
         """The commit a revision names: ``X-Repo-Commit`` if sent, else the model-info ``sha``."""

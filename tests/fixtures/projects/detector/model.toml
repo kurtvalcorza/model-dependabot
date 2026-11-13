@@ -1,0 +1,8 @@
+[model]
+id = "detector"
+
+[[weights]]
+path = "runs/best.safetensors"
+
+[base_model]
+hub = "hf:example-org/other-base"

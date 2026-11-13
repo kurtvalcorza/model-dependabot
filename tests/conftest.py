@@ -252,3 +252,164 @@ def fixture_json(name: str) -> Any:
     """The parsed body of a recording under ``tests/fixtures`` (``crossref/retracted``)."""
     meta = json.loads((FIXTURES / f"{name}.meta.json").read_text("utf-8"))
     return json.loads((FIXTURES / name).parent.joinpath(meta["body_file"]).read_text("utf-8"))
+
+
+# --- feature 003: recorded hub trees and ranged reads (tests/fixtures/format_check/NOTES.md) ------
+
+FORMAT_CHECK_FIXTURES = FIXTURES / "format_check"
+LEAD_RANGE = "bytes=0-1048575"
+GPT2_REPO = "openai-community/gpt2"
+GPT2_COMMIT = "607a30d783dfa663caf39e06633721c8d4cfcd7e"
+GPT2_SAFETENSORS = "248dfc3911869ec493c76e65bf2fcf7f615828b0254c12b473182f0f81d3a707"
+GPT2_PICKLE = "7c5d3f4b8b76583b422fcb9189ad6c89d5d97a094541ce8932dce3ecabde1421"
+GGUF_REPO = "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF"
+GGUF_COMMIT = "52e7645ba7c309695bec7ac98f4f005b139cf465"
+GGUF_FILE = "tinyllama-1.1b-chat-v1.0.Q2_K.gguf"
+GGUF_SHA256 = "030a469a63576d59f601ef5608846b7718eaa884dd820e9aa7493efec1788afa"
+ZIP_REPO = "hf-internal-testing/tiny-random-bert"
+ZIP_COMMIT = "f171d7baecaf37b5da5a3616d8833b9969753535"
+ZIP_SHA256 = "9922e8996d0c7e24c7f4e7a5d9c5b7303549f4ee94de0f1138b103014b51be13"
+GATED_REPO = "hf-internal-testing/dummy-gated-model"
+GATED_COMMIT = "9a039e123af345a94ba89c5e4cc3a0f6dac50bd9"
+# A repository that exists only in derived recordings: its ``model.safetensors`` is listed with the
+# hash of gpt2's pickle and serves that pickle's recorded first bytes (a forged code-free claim).
+FORGED_REPO = "model-dependabot-fixture/forged"
+FORGED_COMMIT = "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+
+
+def resolve(repo: str, commit: str, file: str) -> str:
+    return f"https://huggingface.co/{repo}/resolve/{commit}/{file}"
+
+
+def tree_url(repo: str, commit: str) -> str:
+    return f"https://huggingface.co/api/models/{repo}/tree/{commit}"
+
+
+def recorded_body(name: str) -> bytes:
+    """The body of a recording in ``tests/fixtures/format_check``."""
+    meta = json.loads((FORMAT_CHECK_FIXTURES / f"{name}.meta.json").read_text("utf-8"))
+    return (FORMAT_CHECK_FIXTURES / meta["body_file"]).read_bytes()
+
+
+def tree_item(path: str, sha256: str | None, size: int) -> dict[str, Any]:
+    item: dict[str, Any] = {"type": "file", "oid": "0" * 40, "size": size, "path": path}
+    if sha256 is not None:
+        item["lfs"] = {"oid": sha256, "size": size, "pointerSize": 134}
+    return item
+
+
+@pytest.fixture
+def derive_format_check(tmp_path: Path) -> Callable[..., Path]:
+    """The recorded ``format_check`` answers plus derived ones, written out by the test.
+
+    ``extra`` maps a name to ``{"url", "status", "body"}`` with optional ``headers``, ``range``
+    (default the 1 MiB lead; ``None`` for an unranged request such as a tree), ``redirected_to``
+    and ``error`` (a failed request, replayed as ``SourceFailedError``). An extra recording
+    replaces a copied one with the same URL and range. ``forged`` adds the forged repository: a
+    tree listing ``model.safetensors`` with gpt2's pickle hash, and that pickle's recorded lead
+    served for it.
+    """
+    counter = iter(range(1000))
+
+    def derive(extra: dict[str, dict[str, Any]] | None = None, *, forged: bool = True) -> Path:
+        root = tmp_path / f"format-check-{next(counter)}"
+        shutil.copytree(FORMAT_CHECK_FIXTURES, root, ignore=shutil.ignore_patterns("*.md"))
+        specs = dict(extra or {})
+        if forged:
+            pickle = json.loads(
+                (FORMAT_CHECK_FIXTURES / "gpt2-pickle-range-1.meta.json").read_text()
+            )
+            forged_specs = {
+                "forged-tree": {
+                    "url": tree_url(FORGED_REPO, FORGED_COMMIT),
+                    "status": 200,
+                    "range": None,
+                    "body": json.dumps([tree_item("model.safetensors", GPT2_PICKLE, 548_118_077)]),
+                },
+                "forged-range": {
+                    "url": resolve(FORGED_REPO, FORGED_COMMIT, "model.safetensors"),
+                    "status": 206,
+                    "headers": pickle["headers"],
+                    "body": recorded_body("gpt2-pickle-range-1"),
+                },
+            }
+            specs = forged_specs | specs
+        replaced = {(spec["url"], spec.get("range", LEAD_RANGE)) for spec in specs.values()}
+        for meta_path in list(root.glob("*.meta.json")):
+            meta = json.loads(meta_path.read_text("utf-8"))
+            if (meta["url"], meta.get("range")) in replaced:
+                (root / meta["body_file"]).unlink()
+                meta_path.unlink()
+        for name, spec in specs.items():
+            meta: dict[str, Any] = {"method": "GET", "url": spec["url"]}
+            wanted = spec.get("range", LEAD_RANGE)
+            if wanted is not None:
+                meta["range"] = wanted
+            if "error" in spec:
+                meta |= {"error": spec["error"], "retrieved_at": UPSTREAM_TIME}
+            else:
+                body = spec["body"]
+                raw = body.encode("utf-8") if isinstance(body, str) else body
+                (root / f"{name}.body").write_bytes(raw)
+                meta |= {"status": spec["status"], "headers": spec.get("headers", {})}
+                meta |= {"retrieved_at": spec.get("retrieved_at", UPSTREAM_TIME)}
+                meta["body_file"] = f"{name}.body"
+                if spec.get("redirected_to"):
+                    meta["redirected_to"] = spec["redirected_to"]
+            (root / f"{name}.meta.json").write_text(json.dumps(meta), "utf-8")
+        return root
+
+    return derive
+
+
+# --- feature 003 discovery (T033) -----------------------------------------------------------------
+
+PROJECT_FIXTURE = FIXTURES / "projects" / "detector"
+DEEP_LEVELS = 26
+
+
+def make_directory_link(link: Path, target: Path) -> str:
+    """A link from ``link`` to the directory ``target``: a symbolic link where the platform
+    allows one, else (Windows without the privilege) a junction. Returns which it made."""
+    try:
+        link.symlink_to(target, target_is_directory=True)
+        return "symlink"
+    except OSError:
+        import _winapi  # Windows only; a junction needs no privilege
+
+        _winapi.CreateJunction(str(target), str(link))
+        return "junction"
+
+
+@pytest.fixture
+def detector_project(tmp_path: Path) -> Path:
+    """The ``detector`` project, copied into ``tmp_path`` with the parts git cannot hold.
+
+    ``work/detector`` gets a link ``link-out`` to ``work/outside-dir`` (a directory outside the
+    project holding a weight file), a requirements file over 1 MiB, a tree deeper than 24 levels
+    with a weight file at the bottom and a ``.venv/`` with a weight file in it.
+    ``work/outside.txt``, which ``requirements-dev.txt`` includes, exists and is hash-locked, so
+    reading it would show.
+    """
+    work = tmp_path / "work"
+    project = work / "detector"
+    shutil.copytree(PROJECT_FIXTURE, project)
+    outside = work / "outside-dir"
+    outside.mkdir()
+    (outside / "secret.safetensors").write_bytes(b"\x80\x04K\x01.")
+    (work / "outside.txt").write_text(
+        "leaked==1.0 --hash=sha256:" + "9" * 64 + "\n", encoding="utf-8"
+    )
+    make_directory_link(project / "link-out", outside)
+    (project / "big-requirements.txt").write_text(
+        "# padding\n" * ((1 << 20) // 10 + 1) + "huge==1.0\n", encoding="utf-8"
+    )
+    deep = project / "deep"
+    for level in range(DEEP_LEVELS):
+        deep = deep / f"d{level}"
+    deep.mkdir(parents=True)
+    (deep / "buried.safetensors").write_bytes(b"\x80\x04K\x02.")
+    venv = project / ".venv" / "lib"
+    venv.mkdir(parents=True)
+    (venv / "inside-venv.safetensors").write_bytes(b"\x80\x04K\x03.")
+    return project

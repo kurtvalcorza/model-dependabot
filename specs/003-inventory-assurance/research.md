@@ -85,8 +85,17 @@ SHA-256 the inventory pins; a different hash is `contradicted` (identity), a mis
 Classification reuses `inventory/build.py`'s rules through a new `classify_lead(name, lead, total_size)`,
 which runs the same safetensors, GGUF, pickle and zip tests on a lead plus the true size (the existing
 tests need the size to check that offsets and counts fit). A lead that starts like a zip is never confirmed
-code-free (the central directory is at the end, out of reach). ONNX keeps its known limit: a protocol 0 or
-1 pickle named `.onnx` passes, as for local files.
+code-free (the central directory is at the end, out of reach). ONNX has no magic number, so for an
+imported claim the name never confirms it (review F2 of PR #15, owner ruling "unverified unless proven"):
+`shows_onnx` must read the lead as an ONNX `ModelProto`, starting with its `ir_version` field, with every
+top-level field one the message has, of its wire type and with a length that fits the file. A lead that
+does not is recorded `unreadable` with that reason, so the claim stays unverified and never counts under
+the strict policy; import leaves such a file's claim for `format-check` instead of taking it as measured.
+No pickle passes, as none starts with the byte `0x08`. A zip may carry leading bytes and is read from its
+end, so a lead or a local file's last 64 KiB holding a zip signature is refused too (PR #15 round 2, G2);
+a hub file's end is not read, so a zip lying wholly past the lead is the case left. A file the owner
+registers from a manifest
+keeps the documented limit of local files: a protocol 0 or 1 pickle named `.onnx` passes there.
 
 Evidence is a JSON body holding the URL, commit, file, status, `Content-Range`, the lead's SHA-256 and
 length, and the measured class; the weight bytes themselves are not stored.

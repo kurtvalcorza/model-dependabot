@@ -1,0 +1,111 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.7.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "version": 1,
+  "metadata": {
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "name": "model-dependabot",
+          "version": "0.1.0"
+        }
+      ]
+    },
+    "component": {
+      "type": "machine-learning-model",
+      "bom-ref": "model:honest-detector@1",
+      "name": "honest-detector",
+      "version": "1"
+    }
+  },
+  "components": [
+    {
+      "type": "file",
+      "bom-ref": "file:0",
+      "name": "model.safetensors",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "248dfc3911869ec493c76e65bf2fcf7f615828b0254c12b473182f0f81d3a707"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://huggingface.co/openai-community/gpt2/resolve/607a30d783dfa663caf39e06633721c8d4cfcd7e/model.safetensors"
+        }
+      ],
+      "properties": [
+        {
+          "name": "model-dependabot:format",
+          "value": "safetensors"
+        },
+        {
+          "name": "model-dependabot:can-run-code",
+          "value": "false"
+        },
+        {
+          "name": "model-dependabot:size",
+          "value": "548105171"
+        },
+        {
+          "name": "model-dependabot:hub-repo",
+          "value": "openai-community/gpt2"
+        },
+        {
+          "name": "model-dependabot:hub-revision",
+          "value": "607a30d783dfa663caf39e06633721c8d4cfcd7e"
+        },
+        {
+          "name": "model-dependabot:hub-file",
+          "value": "model.safetensors"
+        }
+      ]
+    },
+    {
+      "type": "file",
+      "bom-ref": "file:1",
+      "name": "pytorch_model.bin",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7c5d3f4b8b76583b422fcb9189ad6c89d5d97a094541ce8932dce3ecabde1421"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://huggingface.co/openai-community/gpt2/resolve/607a30d783dfa663caf39e06633721c8d4cfcd7e/pytorch_model.bin"
+        }
+      ],
+      "properties": [
+        {
+          "name": "model-dependabot:format",
+          "value": "pickle"
+        },
+        {
+          "name": "model-dependabot:can-run-code",
+          "value": "true"
+        },
+        {
+          "name": "model-dependabot:size",
+          "value": "548118077"
+        },
+        {
+          "name": "model-dependabot:hub-repo",
+          "value": "openai-community/gpt2"
+        },
+        {
+          "name": "model-dependabot:hub-revision",
+          "value": "607a30d783dfa663caf39e06633721c8d4cfcd7e"
+        },
+        {
+          "name": "model-dependabot:hub-file",
+          "value": "pytorch_model.bin"
+        }
+      ]
+    }
+  ]
+}

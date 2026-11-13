@@ -16,10 +16,17 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from model_dependabot.assurance.trust import (
+    CODE_FREE,
+    IDENTITY,
+    LEGACY,
+    latest_check,
+    needs_confirmation,
+)
 from model_dependabot.matching.severity import severity_rank
+from model_dependabot.store import SCOPE_ALL as SCOPE_ALL  # moved to the store (feature 003)
 from model_dependabot.store import Store
 
-SCOPE_ALL = "all"
 CLOSED_STATES = ("fixed", "dismissed", "withdrawn", "cleared")
 EVIDENCE_FIELDS = (
     "source",
@@ -143,7 +150,16 @@ def _cause_text(kind: str, cause: Mapping[str, Any]) -> str:
         package = f"{cause['package']}=={cause['version']}"
         return f"{cause['advisory_id']}{also} {package} (fixed: {fixed})"
     if cause.get("location") is not None:
-        return f"{kind} {cause['location']} ({cause.get('identifier')})"
+        text = f"{kind} {cause['location']} ({cause.get('identifier')})"
+        if kind == "format_policy" and cause.get("rule"):
+            # Feature 003 (FR-005): say the alert follows the trust rule and name the claims.
+            claims = "; ".join(
+                f"{claim.get('location') or claim['identifier']} {claim['outcome']}"
+                f" (origin {claim['origin']})"
+                for claim in cause.get("unconfirmed_claims") or []
+            )
+            text += f"; {cause['rule']}: {claims}"
+        return text
     # The upstream kinds (feature 002) name a base model or dataset, not a file.
     text = f"{kind} {cause.get('identifier')}"
     if kind == "licence_changed":
@@ -153,6 +169,29 @@ def _cause_text(kind: str, cause: Mapping[str, Any]) -> str:
     if cause.get("paper_doi"):
         text += f" (paper {cause['paper_doi']})"
     return text
+
+
+def claim_note(
+    entry: Mapping[str, Any], origin: str | None, checks: list[dict[str, Any]]
+) -> str | None:
+    """How far a weight file's code-free claim is established, for people (US1 scenario 2).
+
+    ``None`` when the claim is the owner's or the file is not claimed code-free.
+    """
+    if entry.get("kind") != "weight_file" or entry.get("can_run_code") is not False:
+        return None
+    if not entry.get("pinned") or not needs_confirmation(entry, origin):
+        return None
+    source = entry.get("format_origin") or origin or LEGACY
+    latest = latest_check(checks, entry.get("identifier"), CODE_FREE)
+    identity = latest_check(checks, entry.get("identifier"), IDENTITY)
+    if identity is not None and identity["outcome"] == "contradicted":
+        return f"identity contradicted (origin {source}): {identity['reason']}"
+    if latest is None or latest["outcome"] == "unreadable":
+        return f"code-free claimed, unverified (origin {source})"
+    if latest["outcome"] == "contradicted":
+        return f"code-free claim contradicted (origin {source}): {latest['reason']}"
+    return f"code-free claim confirmed (origin {source})"
 
 
 def _one_line(licence: object) -> str:
@@ -211,4 +250,145 @@ def history_text(payload: Mapping[str, Any]) -> str:
         )
         if item["evidence"]:
             lines.append(f"      evidence: {evidence_line(item['evidence'][-1])}")
+    return "\n".join(lines)
+
+
+# --- inventory audit (feature 003, US2) ---------------------------------------------------------
+
+
+def _summary_line(summary: Mapping[str, Any]) -> str:
+    return (
+        f"Summary: {summary['alerts_open']} open alerts, {summary['watch_events']} watch events;"
+        f" {summary['entries']} entries: {summary['verified']} verified,"
+        f" {summary['declared_but_unverified']} declared but unverified,"
+        f" {summary['conflicting']} conflicting, {summary['unavailable']} unavailable;"
+        f" {summary['gaps']} gaps, {summary['uncheckable']} uncheckable; sources:"
+        f" {summary['sources_failed']} failed, {summary['sources_stale']} stale,"
+        f" {summary['sources_not_checked']} not checked"
+    )
+
+
+def _coverage_line(item: Mapping[str, Any]) -> str:
+    entries = len(item["relevant_entries"])
+    if item["last_run_id"] is None:
+        return f"  {item['source']}: not checked since registration ({entries} entries)"
+    stale = ", stale" if item["stale"] else ""
+    return (
+        f"  {item['source']}: {item['status']} in run {item['last_run_id']} at"
+        f" {item['last_finished_at']} ({item['age_hours']} h ago{stale}; {entries} entries;"
+        f" last ok {item['last_ok_at'] or 'never'})"
+    )
+
+
+def audit_text(payload: Mapping[str, Any]) -> str:
+    """The audit for people: the summary first, then findings, assurance and coverage."""
+    findings = payload["findings"]
+    lines = [
+        f"{payload['model_id']} v{payload['version']} audit at {payload['produced_at']}",
+        _summary_line(payload["summary"]),
+        payload["statement"],
+    ]
+    sources = payload["coverage"]["sources"]
+    if findings["state"] == "not_yet_checked":
+        lines.append(
+            "Findings: not yet checked"
+            " (no relevant source has succeeded in a check of this version)"
+        )
+    else:
+        partly = ""
+        if findings["state"] == "partly_checked":
+            partly = (
+                f" (partly checked: {sum(bool(item['last_ok_at']) for item in sources)} of"
+                f" {len(sources)} relevant sources have succeeded)"
+            )
+        lines.append(
+            f"Findings: {len(findings['alerts'])} open alerts,"
+            f" {len(findings['watch_events'])} watch events{partly}"
+        )
+    lines += [alert_line(alert) for alert in findings["alerts"]]
+    lines += [f"  {event['kind']} {event['identifier']}" for event in findings["watch_events"]]
+    assurance = payload["assurance"]
+    lines.append(f"Assurance ({len(assurance['entries'])} entries):")
+    for entry in assurance["entries"]:
+        where = entry["location"] or ""
+        reason = f": {entry['gap_reason']}" if entry["gap_reason"] else ""
+        lines.append(
+            f"  {entry['status']:<24} {entry['kind']:<12} {entry['identifier'] or ''} {where}"
+            f"{reason}".rstrip()
+        )
+        for claim in entry["claims"]:
+            if claim["verification"] in ("unverified", "contradicted"):
+                why = f": {claim['reason']}" if claim.get("reason") else ""
+                lines.append(
+                    f"      {claim['claim']} {claim['verification']}"
+                    f" (origin {claim['origin']}){why}"
+                )
+    undeclared = ", ".join(assurance["undeclared_kinds"]) or "none"
+    lines.append(f"  Not declared at all: {undeclared}")
+    coverage = payload["coverage"]
+    lines.append(f"Coverage ({len(coverage['sources'])} relevant sources):")
+    lines += [_coverage_line(item) for item in coverage["sources"]]
+    lines.append(f"  Uncheckable ({len(coverage['uncheckable'])}):")
+    for item in coverage["uncheckable"]:
+        where = item["location"] or item["identifier"] or ""
+        lines.append(f"    {item['kind']} {where}: {item['reason']}".replace("  :", " :"))
+    return "\n".join(lines)
+
+
+def _identity_text(item: Mapping[str, Any]) -> str:
+    identity = item["identity"]
+    kind = item["kind"]
+    if kind == "weight_file":
+        if "sha256" not in identity:
+            return str(identity.get("path"))
+        runs = "can run code" if identity.get("can_run_code") else "code-free"
+        if identity.get("can_run_code") is None:
+            runs = "may run code"
+        return f"{identity['path']} sha256:{identity['sha256']} {identity['format']} ({runs})"
+    if kind == "package":
+        if identity.get("requirement"):
+            return str(identity["requirement"])
+        return f"{identity.get('name')}=={identity.get('version')}"
+    if kind == "environment":
+        return f"{identity['lock']} ({identity.get('packages')} packages, hash-locked)"
+    if kind == "licence":
+        spdx = identity.get("spdx")
+        return str(identity.get("licence")) + (f" (SPDX {spdx})" if spdx else "")
+    return str(identity.get("hub_repo") or identity.get("doi") or identity)
+
+
+def discover_text(payload: Mapping[str, Any]) -> str:
+    """Discovery for people: the statement first, then candidates, comparison and skips."""
+    lookups = "with hub lookups" if payload["upstream"] else "no network requests"
+    candidates = payload["candidates"]
+    lines = [
+        f"Discovery of {payload['project']} at {payload['observed_at']} ({lookups})",
+        payload["statement"],
+        f"Candidates ({len(candidates)}):",
+    ]
+    for item in candidates:
+        extra = [f"gaps: {', '.join(item['gaps'])}"] if item["gaps"] else []
+        if item.get("manifest"):
+            value = item.get("manifest_value") if item["manifest"] == "conflicts" else None
+            shown = ", ".join(str(v) for v in (value or {}).values() if v is not None)
+            extra.append(f"manifest: {item['manifest']}" + (f" ({shown})" if shown else ""))
+        if item.get("note"):
+            extra.append(item["note"])
+        if item.get("proposed_revision"):
+            revision = item["proposed_revision"]
+            extra.append(f"hub head {revision['revision']} ({revision['label']})")
+        tail = f" [{'; '.join(extra)}]" if extra else ""
+        lines.append(f"  {item['status']:<24} {item['kind']:<12} {_identity_text(item)}{tail}")
+    if payload["declared_not_seen"]:
+        lines.append(f"Declared in the manifest, not seen ({len(payload['declared_not_seen'])}):")
+        for item in payload["declared_not_seen"]:
+            identity = ", ".join(f"{k} {v}" for k, v in item["identity"].items() if v is not None)
+            reason = f": {item['reason']}" if item.get("reason") else ""
+            lines.append(f"  {item['kind']} {identity}{reason}")
+    lines.append(f"Skipped ({len(payload['skipped'])}):")
+    for item in payload["skipped"]:
+        keys = f" ({', '.join(item['keys'])})" if item.get("keys") else ""
+        lines.append(f"  {item['path']}: {item['reason']}{keys}")
+    if payload.get("output"):
+        lines.append(f"Proposed manifest written to {payload['output']['path']}")
     return "\n".join(lines)
