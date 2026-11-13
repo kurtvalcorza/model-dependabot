@@ -16,6 +16,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from model_dependabot.assurance.audit import relevant_sources
+from model_dependabot.matching.severity import SEVERITIES, severity_rank
+from model_dependabot.rules import rule_for
 from model_dependabot.store import Store
 
 POLICY = "policy"
@@ -212,3 +214,79 @@ def text(run_id: int, scope: str, overview: Mapping[str, Any]) -> str:
         else:
             lines.append(f"{model['model_id']} v{model['version']}: not checked: {model['reason']}")
     return "\n".join(lines)
+
+
+# --- the gate (US5, research S5, owner's ruling D8, FR-021) -------------------------------------
+
+
+def gate(
+    store: Store,
+    model_ids: Sequence[str],
+    fail_on: str,
+    covered: Mapping[str, Any],
+    *,
+    sources_failed: bool,
+) -> dict[str, Any]:
+    """The gate of ``check --fail-on``: what trips it and whether it decided the exit code.
+
+    Every alert of every model in scope that is open, not excepted and at or above ``fail_on``
+    (whichever run raised it), every overview row in the ``incomplete`` state, every model that
+    reads ``checked: false`` and an empty scope trip it. With a failed source exit 2 decides.
+    """
+    if fail_on not in SEVERITIES:
+        raise ValueError(f"--fail-on must be one of {', '.join(SEVERITIES)}, got {fail_on!r}")
+    alerts = []
+    for model_id in model_ids:
+        for alert in store.alerts_for(model_id, ["open"]):
+            if alert["excepted_at"] or severity_rank(alert["severity"]) > severity_rank(fail_on):
+                continue
+            alerts.append(
+                {
+                    "alert_id": alert["alert_id"],
+                    "model_id": model_id,
+                    "rule_id": rule_for(alert["kind"]).rule_id,
+                    "kind": alert["kind"],
+                    "severity": alert["severity"],
+                }
+            )
+    incomplete = [
+        {"model_id": model["model_id"], "source": row["source"]}
+        for model in covered["models"]
+        for row in model["sources"]
+        if row["state"] == "incomplete"
+    ]
+    unchecked = [model["model_id"] for model in covered["models"] if not model["checked"]]
+    empty_scope = not covered["models"]
+    tripped = bool(alerts or incomplete or unchecked or empty_scope)
+    return {
+        "fail_on": fail_on,
+        "tripped": tripped,
+        "decided_exit": not sources_failed,
+        "alerts": alerts,
+        "incomplete": incomplete,
+        "unchecked": unchecked,
+        "empty_scope": empty_scope,
+    }
+
+
+def gate_text(found: Mapping[str, Any]) -> str:
+    """The gate for people: one line per tripping alert, incomplete source and unchecked model."""
+    verdict = "tripped" if found["tripped"] else "passed"
+    if found["tripped"] and not found["decided_exit"]:
+        verdict += " (a source failed: exit 2 decides)"
+    lines = [f"Gate --fail-on {found['fail_on']}: {verdict}"]
+    for alert in found["alerts"]:
+        lines.append(
+            f"  alert #{alert['alert_id']} {alert['rule_id']} {alert['severity']}"
+            f" {alert['kind']} ({alert['model_id']})"
+        )
+    for item in found["incomplete"]:
+        lines.append(f"  incomplete: {item['model_id']} {item['source']}")
+    for model_id in found["unchecked"]:
+        lines.append(f"  not checked: {model_id}")
+    if found["empty_scope"]:
+        lines.append("  the scope matched no model")
+    return NEWLINE.join(lines)
+
+
+NEWLINE = chr(10)

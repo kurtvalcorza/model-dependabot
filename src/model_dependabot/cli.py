@@ -42,6 +42,7 @@ from model_dependabot.lifecycle import (
     run_check,
 )
 from model_dependabot.manifest import ManifestError, load_manifest
+from model_dependabot.matching.severity import SEVERITIES
 from model_dependabot.reports import (
     SCOPE_ALL,
     alert_line,
@@ -64,6 +65,7 @@ EXIT_OK = 0
 EXIT_INVALID_INPUT = 1
 EXIT_SOURCE_FAILED = 2
 EXIT_UNEXPECTED = 3
+EXIT_GATE = 4  # feature 004: check --fail-on tripped; 3 and 2 take precedence (research S5)
 
 DEFAULT_DB = "./model-dependabot.db"
 UPSTREAM_SOURCES = ("hf-hub", "hf-takedowns", "crossref", "datacite", "zenodo", "figshare")
@@ -93,6 +95,7 @@ class CommandResult:
     payload: Mapping[str, Any]
     text: str
     sources_failed: bool = False
+    gate_tripped: bool = False
 
 
 class InvalidInputError(Exception):
@@ -123,6 +126,14 @@ def _sources(text: str) -> list[str]:
             f"sources must be from {', '.join(CHECK_SOURCES)}; got {text!r}"
         )
     return names
+
+
+def _severity(text: str) -> str:
+    """A ``--fail-on`` severity, case-insensitive on input, upper case after (research S5)."""
+    value = text.strip().upper()
+    if value not in SEVERITIES:
+        raise argparse.ArgumentTypeError(f"must be one of {', '.join(SEVERITIES)}, got {text!r}")
+    return value
 
 
 def _hours(text: str) -> float:
@@ -243,6 +254,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=list(CHECK_SOURCES),
         metavar=",".join(CHECK_SOURCES),
     )
+    check.add_argument(
+        "--fail-on",
+        type=_severity,
+        metavar="SEVERITY",
+        help="exit 4 when an open, not excepted alert is at or above SEVERITY, or coverage is"
+        " missing (CRITICAL, HIGH, MODERATE, LOW or UNKNOWN)",
+    )
 
     policy = leaf(commands, "policy", "policy", "set a model's format or globals policy")
     policy.add_argument("model_id", metavar="ID")
@@ -351,7 +369,9 @@ def main(
         print(json.dumps(result.payload, indent=2, sort_keys=False))
     elif result.text:
         print(result.text)
-    return EXIT_SOURCE_FAILED if result.sources_failed else EXIT_OK
+    if result.sources_failed:
+        return EXIT_SOURCE_FAILED
+    return EXIT_GATE if result.gate_tripped else EXIT_OK
 
 
 # --- inventory commands (US1) ------------------------------------------------------------------
@@ -744,6 +764,11 @@ def make_handlers(
             # Research U13: keep the ETag cache bounded; bodies evidence refers to stay.
             store.prune_etag_cache()
             covered = overview.payload(store, outcome.run_id)
+            found = None
+            if args.fail_on is not None:
+                found = overview.gate(
+                    store, model_ids, args.fail_on, covered, sources_failed=outcome.failed
+                )
         payload = {
             "run_id": outcome.run_id,
             "scope": scope,
@@ -752,8 +777,17 @@ def make_handlers(
             "models": outcome.models,
             "overview": covered,
         }
+        if found is not None:
+            payload["gate"] = found
         text = _check_text(payload) + "\n" + overview.text(outcome.run_id, scope, covered)
-        return CommandResult(payload, text, sources_failed=outcome.failed)
+        if found is not None:
+            text += "\n" + overview.gate_text(found)
+        return CommandResult(
+            payload,
+            text,
+            sources_failed=outcome.failed,
+            gate_tripped=bool(found and found["tripped"]),
+        )
 
     def run_show(args: argparse.Namespace) -> CommandResult:
         with _open(args.db) as store:
