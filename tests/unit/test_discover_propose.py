@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from conftest import make_directory_link
 from model_dependabot.discover.candidate import candidate
+from model_dependabot.discover.project import discover, write_proposal
 from model_dependabot.discover.propose import (
     SEVERAL_LOCKS,
     OutputExistsError,
@@ -169,4 +172,39 @@ def test_the_lock_packages_are_not_commented_again(project: Path, tmp_path: Path
     assert (
         "# package: declared-but-unverified, from requirements-dev.txt line 1: pytest==1.0;"
         " gaps: not locked" in comments
+    )
+
+
+def _other_spelling(folder: Path) -> Path:
+    """``folder`` spelled differently from its resolved path: its 8.3 short name on Windows,
+    else through a link to it."""
+    if os.name == "nt":
+        import ctypes
+
+        buffer = ctypes.create_unicode_buffer(32768)
+        size = ctypes.windll.kernel32.GetShortPathNameW(str(folder), buffer, len(buffer))
+        if size and Path(buffer.value) != folder.resolve():
+            return Path(buffer.value)
+        pytest.skip("the volume gives this folder no short name")
+    link = folder.parent / f"{folder.name}-link"
+    make_directory_link(link, folder)
+    return link
+
+
+def test_paths_are_relative_to_where_the_output_really_is(tmp_path: Path) -> None:
+    """Review F9: an output spelled differently from the project folder (a short name or a link)
+    gets paths relative to the folder it resolves to, never a climb out through the other one."""
+    real = tmp_path / "real"
+    project = real / "proj"
+    project.mkdir(parents=True)
+    (project / "requirements.lock.txt").write_text(
+        "torch==2.5.1 --hash=sha256:" + "1" * 64 + "\n", encoding="utf-8"
+    )
+    output = _other_spelling(real) / "proposed.toml"
+    write_proposal(discover(project), output, model_id="m", force=False)
+    proposal = tomllib.loads(output.read_text(encoding="utf-8"))
+    assert proposal["environment"]["lock"] == "proj/requirements.lock.txt"
+    assert (
+        load_manifest(output, weights_present=False).lock
+        == (project / "requirements.lock.txt").resolve()
     )

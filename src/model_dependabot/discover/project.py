@@ -60,9 +60,13 @@ def discover(
 def write_proposal(
     result: dict[str, Any], output: Path, *, model_id: str, force: bool
 ) -> dict[str, Any]:
-    """Write the proposed manifest for ``result`` to ``output`` and record it in the result."""
-    root = Path(result["project"])
-    text = propose.render(result, model_id, root, output.absolute())
+    """Write the proposed manifest for ``result`` to ``output`` and record it in the result.
+
+    The paths in it are relative to where ``output`` resolves to, as the project root is
+    resolved, so a link or short name in either spelling never makes them climb out (review F9).
+    """
+    root = Path(result["project"]).resolve()
+    text = propose.render(result, model_id, root, output.resolve())
     propose.write(text, output, force=force)
     result["output"] = {"path": str(output), "written": True}
     return result
