@@ -58,7 +58,7 @@ from urllib.parse import unquote
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
-from model_dependabot.assurance import format_check
+from model_dependabot.assurance import format_check, globals_policy
 from model_dependabot.assurance.exceptions import covering
 from model_dependabot.assurance.trust import (
     CODE_FREE,
@@ -125,6 +125,8 @@ GONE = "advisory_gone"
 WEIGHT_SCAN_ALERT = "weight_file_scan"
 HUB_SCAN_ALERT = "hub_scan"
 FORMAT_POLICY_ALERT = "format_policy"
+GLOBALS_POLICY_ALERT = "globals_policy"
+GLOBALS_POLICY_SOURCE = "globals-policy"
 PICKLE_FORMAT = "pickle_format"
 SCAN_SUSPICIOUS = "scan_suspicious"
 SCAN_INCOMPLETE = "scan_incomplete"
@@ -153,6 +155,7 @@ WEIGHT_SEVERITY = {
     WEIGHT_SCAN_ALERT: "HIGH",
     HUB_SCAN_ALERT: "HIGH",
     FORMAT_POLICY_ALERT: "MODERATE",
+    GLOBALS_POLICY_ALERT: "MODERATE",  # feature 004 (spec, Assumptions)
 }
 POLICY_ORIGIN = "policy"
 PICKLE_REASON = "the format can run code when loaded"
@@ -949,7 +952,11 @@ def _weight_alert(
     for evidence_id in _store_observations(store, run_id, identifier, observations, linked):
         store.link_alert_evidence(alert_id, evidence_id)
     # Feature 004: what exceptions covered and released stays with the alert (research S8).
-    kept = {key: existing["cause"][key] for key in EXCEPTION_KEYS if key in existing["cause"]}
+    kept = {
+        key: existing["cause"][key]
+        for key in EXCEPTION_KEYS
+        if key in existing["cause"] and key not in cause
+    }
     cause = {**cause, **kept}
     store.update_open_alert(
         alert_id,
@@ -1081,7 +1088,6 @@ def _apply_globals_rules(store: Store, run_id: int, target: _Target) -> None:
     alert counts as open again, on the same id, its cause recording the release under
     ``released`` with the revocation as evidence.
     """
-    del run_id  # exceptions are applied, not observed: they add no evidence of this run
     now = store.now()
     stamp = utc_text(now)
     for alert in store.alerts_for(target.model_id, ["open"]):
@@ -1133,6 +1139,111 @@ def _apply_globals_rules(store: Store, run_id: int, target: _Target) -> None:
         excepted_at = (alert["excepted_at"] or stamp) if whole else None
         if cause != alert["cause"] or excepted_at != alert["excepted_at"]:
             store.set_alert_exception(alert["alert_id"], excepted_at=excepted_at, cause=cause)
+    _apply_globals_policy(store, run_id, target)
+
+
+def _exception_item(record: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "global": f"{record['module']}.{record['name']}",
+        "exception_id": record["exception_id"],
+        "accepted_by": record["accepted_by"],
+        "recorded_at": record["recorded_at"],
+        "expires_on": record["expires_on"],
+    }
+
+
+def _apply_globals_policy(store: Store, run_id: int, target: _Target) -> None:
+    """The ``globals_policy`` alerts of the version's local pickle files (US2, research S7).
+
+    Under ``strict``, a file whose latest scan has globals neither on the safe list nor excepted, or
+    whose scan did not complete, opens (or carries forward) one MODERATE alert naming them; its
+    evidence is the scan's evidence row, the exceptions applied and a ``globals-policy`` record
+    with the sorted ``unlisted`` and ``excepted`` lists. An open alert closes as ``cleared`` when
+    the policy is no longer ``strict`` (note ``cleared: policy``) or nothing is left unlisted (the
+    note names ``safe_list`` and/or ``exception``, whichever took the last globals off). A file with
+    no scan raises nothing.
+    """
+    model = store.get_model(target.model_id) or {}
+    policy = model.get("globals_policy") or "default"
+    now = store.now()
+    safe = globals_policy.current_safe_list() if policy == "strict" else None
+    for entry in _code_capable(_measured_target(store, target)):
+        if entry.get("hub_repo") or not entry.get("location") or not entry.get("identifier"):
+            continue
+        identifier = entry["identifier"]
+        sha256 = identifier.removeprefix("sha256:")
+        open_alert = store.find_open_alert(
+            target.model_id, weight_cause_key(GLOBALS_POLICY_ALERT, identifier)
+        )
+        scan = store.latest_file_scan(sha256)
+        record: dict[str, Any] = {
+            "model_id": target.model_id,
+            "identifier": identifier,
+            "globals_policy": policy,
+            "set_by": model.get("globals_policy_set_by"),
+            "set_at": model.get("globals_policy_set_at"),
+        }
+        if safe is None:
+            if open_alert is not None:
+                body = _json_body(record)
+                observation = _Observation(GLOBALS_POLICY_SOURCE, "", now, body, record)
+                linked = store.alert_evidence(open_alert["alert_id"])
+                ids = _store_observations(store, run_id, identifier, [observation], linked)
+                _close(store, target, open_alert, "cleared", ids, note="cleared: policy")
+            continue
+        if scan is None:
+            continue
+        active = store.exceptions(sha256)
+        listed = globals_policy.unlisted(scan, safe, active)
+        covered = globals_policy.excepted(scan, safe, active)
+        record |= {
+            "safe_list_version": safe.version,
+            "safe_list_sha256": safe.sha256,
+            "unlisted": listed,
+            "excepted": sorted(f"{e['module']}.{e['name']}" for e in covered),
+        }
+        observation = _Observation(GLOBALS_POLICY_SOURCE, "", now, _json_body(record), record)
+        exception_ids = [int(e["evidence_id"]) for e in covered]
+        if not listed and scan["complete"]:
+            if open_alert is None:
+                continue
+            before = set(open_alert["cause"].get("unlisted") or [])
+            excepted_now = set(record["excepted"])
+            why = []
+            if before - excepted_now:
+                why.append("safe_list")
+            if before & excepted_now:
+                why.append("exception")
+            linked = store.alert_evidence(open_alert["alert_id"])
+            ids = _store_observations(store, run_id, identifier, [observation], linked)
+            note = "cleared: " + (" and ".join(why) if why else "safe_list")
+            _close(store, target, open_alert, "cleared", [*ids, *exception_ids], note=note)
+            continue
+        cause = {
+            "identifier": identifier,
+            "location": entry["location"],
+            "format": entry.get("format"),
+            "unlisted": listed,
+            "excepted": [_exception_item(e) for e in covered],
+            "safe_list_version": safe.version,
+            "safe_list_sha256": safe.sha256,
+            "policy": "strict",
+            "set_by": record["set_by"],
+            "set_at": record["set_at"],
+            "scan": {
+                "scanner": scan["scanner"],
+                "scanner_version": scan["scanner_version"],
+                "complete": scan["complete"],
+                "scanned_at": scan["scanned_at"],
+            },
+        }
+        _weight_alert(store, run_id, target, GLOBALS_POLICY_ALERT, entry, cause, [observation])
+        alert = store.find_open_alert(
+            target.model_id, weight_cause_key(GLOBALS_POLICY_ALERT, identifier)
+        )
+        if alert is not None:
+            for evidence_id in [int(scan["evidence_id"]), *exception_ids]:
+                store.link_alert_evidence(alert["alert_id"], evidence_id)
 
 
 def _clear_on_confirmation(

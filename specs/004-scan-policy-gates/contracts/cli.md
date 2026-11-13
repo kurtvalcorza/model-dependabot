@@ -105,7 +105,14 @@ model, each unchecked model and an empty scope (FR-021).
 ```
 
 Text: `  #5 MDB101 HIGH     excepted  …` (the rule ID after the alert id). The `alerts` payload gains
-`"excepted": [...]`; its `alerts` array holds only open alerts that are not excepted.
+`"excepted": [...]`. The `alerts` array never holds an excepted alert: with `--state open` (the default) it
+holds the open alerts that are not excepted, with `--state closed` the closed ones and with `--state all`
+both; the excepted alerts are in `excepted` for `open`, `excepted` and `all`, and `excepted` is empty for
+`closed`. `--state excepted` gives `"alerts": []` and the excepted alerts in `excepted` (owner's ruling,
+2026-11-14).
+
+`exception record --json` and `exception revoke --json` print one exception in the shape of an
+`exception list` item below (after a revocation, `state` is `revoked` and `revoked` is set).
 
 `exception list --json`:
 

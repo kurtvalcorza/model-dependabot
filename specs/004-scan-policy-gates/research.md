@@ -145,12 +145,13 @@ framework's logging class. Neither file was loaded or scanned here; the lists ar
 
 1. the 23 globals of picklescan 1.0.5's `_safe_globals`, `why = "picklescan 1.0.5 innocuous list"`;
 2. tensor rebuilding and plain containers common in PyTorch checkpoints: `torch._utils._rebuild_parameter`,
-   `torch._utils._rebuild_parameter_with_state`, `torch.Size`, `builtins.set`, `__builtin__.set`,
-   `builtins.frozenset`, `__builtin__.frozenset`;
+   `torch._utils._rebuild_parameter_with_state`, `torch.Size`, `builtins.set`, `__builtin__.set`
+   (`builtins.frozenset` and `__builtin__.frozenset` were dropped by the owner on 2026-11-14: they are
+   not on PyTorch's default list, see the check below);
 3. by the owner's ruling (D2): `_codecs.encode` and `numpy.core.multiarray.scalar`, each with
    `why = "owner ruling 2026-11-13: common in real checkpoints"`.
 
-That is 32 entries. Group 3's rationale: both appear in ordinary checkpoints (protocol-2 pickles rebuild
+That is 30 entries. Group 3's rationale: both appear in ordinary checkpoints (protocol-2 pickles rebuild
 every `bytes` value through `_codecs.encode`, and numpy scalars such as a saved metric go through
 `numpy.core.multiarray.scalar`), so leaving them off would make strict raise on nearly every such file
 and push owners to except them file by file. The trade-off, recorded in the file's `why` and in the
@@ -181,15 +182,14 @@ come from `IMPORT_MAPPING` in the same release's `torch/_utils.py` (SHA-256
 | `torch.Size` | 2 | yes |
 | `builtins.set` | 2 | yes |
 | `__builtin__.set` | 2 | yes, read as `builtins.set` through `IMPORT_MAPPING` |
-| `builtins.frozenset` | 2 | **no**: flagged for the owner |
-| `__builtin__.frozenset` | 2 | **no**: flagged for the owner |
+| `builtins.frozenset` | 2 | **no**: dropped from version 1 (owner, 2026-11-14) |
+| `__builtin__.frozenset` | 2 | **no**: dropped from version 1 (owner, 2026-11-14) |
 | `_codecs.encode` | 3 | yes |
 | `numpy.core.multiarray.scalar` | 3 | **no**: PyTorch leaves every numpy global out of its default list; already the owner's ruling D2 |
 
-**Awaiting the owner**: `builtins.frozenset` and `__builtin__.frozenset` are not on PyTorch's default
-list, so group 2's rationale ("from PyTorch's restricted loader") does not hold for them; they rest
-only on the checkpoint samples. Keep them, or drop them from version 1. Until the owner rules, they
-stay as provisional entries.
+**Owner's ruling (2026-11-14): drop.** `builtins.frozenset` and `__builtin__.frozenset` are not on
+PyTorch's default list, so group 2's rationale ("from PyTorch's restricted loader") does not hold for
+them; they rested only on the checkpoint samples. Version 1 holds neither, so it has 30 entries.
 
 The file starts with `version = 1` and a `[[changes]]` table (version, date, what changed). Any change
 to the entries bumps the version by one; a unit test holds the SHA-256 of the entries for each version

@@ -1,0 +1,190 @@
+# The safe list of pickle globals for the strict globals policy (feature 004, FR-009).
+# Every entry is one exact global (module and name); no prefixes, no wildcards, no `unknown`.
+# Any change to the entries bumps `version` and adds a [[changes]] row; see README.md here.
+
+version = 1
+
+[[entries]]
+module = "collections"
+name = "OrderedDict"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "torch"
+name = "BFloat16Storage"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "torch"
+name = "BoolStorage"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "torch"
+name = "ByteStorage"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "torch"
+name = "CharStorage"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "torch"
+name = "ComplexDoubleStorage"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "torch"
+name = "ComplexFloatStorage"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "torch"
+name = "DoubleStorage"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "torch"
+name = "FloatStorage"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "torch"
+name = "HalfStorage"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "torch"
+name = "IntStorage"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "torch"
+name = "LongStorage"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "torch"
+name = "QInt32Storage"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "torch"
+name = "QInt8Storage"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "torch"
+name = "QUInt2x4Storage"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "torch"
+name = "QUInt4x2Storage"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "torch"
+name = "QUInt8Storage"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "torch"
+name = "ShortStorage"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "numpy"
+name = "dtype"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "numpy"
+name = "ndarray"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "numpy._core.multiarray"
+name = "_reconstruct"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "numpy.core.multiarray"
+name = "_reconstruct"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "torch._utils"
+name = "_rebuild_tensor_v2"
+why = "picklescan 1.0.5 innocuous list (_safe_globals)"
+added_in = 1
+
+[[entries]]
+module = "torch._utils"
+name = "_rebuild_parameter"
+why = "on the default allow-list of PyTorch 2.15.0 torch/_weights_only_unpickler.py (research S3)"
+added_in = 1
+
+[[entries]]
+module = "torch._utils"
+name = "_rebuild_parameter_with_state"
+why = "on the default allow-list of PyTorch 2.15.0 torch/_weights_only_unpickler.py (research S3)"
+added_in = 1
+
+[[entries]]
+module = "torch"
+name = "Size"
+why = "on the default allow-list of PyTorch 2.15.0 torch/_weights_only_unpickler.py (research S3)"
+added_in = 1
+
+[[entries]]
+module = "builtins"
+name = "set"
+why = "on the default allow-list of PyTorch 2.15.0 torch/_weights_only_unpickler.py (research S3)"
+added_in = 1
+
+[[entries]]
+module = "__builtin__"
+name = "set"
+why = "read as builtins.set through IMPORT_MAPPING of PyTorch 2.15.0 torch/_utils.py; on the default allow-list (research S3)"
+added_in = 1
+
+[[entries]]
+module = "_codecs"
+name = "encode"
+why = "owner ruling 2026-11-13: common in real checkpoints (protocol 2 bytes); can rebuild arbitrary bytes, see README.md; on PyTorch 2.15.0's default allow-list"
+added_in = 1
+
+[[entries]]
+module = "numpy.core.multiarray"
+name = "scalar"
+why = "owner ruling 2026-11-13: common in real checkpoints (numpy scalars); with an object dtype it can carry an arbitrary object, see README.md; not on PyTorch 2.15.0's default allow-list"
+added_in = 1
+
+[[changes]]
+version = 1
+date = "2026-11-14"
+summary = "First list: picklescan 1.0.5's 23 innocuous globals, 5 tensor-rebuild and container globals PyTorch 2.15.0 accepts, and _codecs.encode and numpy.core.multiarray.scalar by the owner's ruling (30 entries)"

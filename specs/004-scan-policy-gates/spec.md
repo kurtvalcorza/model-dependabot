@@ -83,6 +83,15 @@ Rulings by the owner on the plan's open decisions (research.md, Decisions on the
   stays as it is. Such a model trips `--fail-on` on every run unless `--source` leaves that source out
   (Edge Cases).
 
+### Session 2026-11-14 (implementation review)
+
+- Q: Do `builtins.frozenset` and `__builtin__.frozenset` stay on safe list version 1? → A: No. They are not on
+  PyTorch's default allow-list (research S3), so they are dropped and version 1 holds 30 entries.
+- Q: Which fields are ignored when deciding whether evidence is new for a held dismissal? → A: The listed
+  counters and re-indexing times of every source, nested ones included, given as dotted paths (research S13).
+- Q: Where does an excepted alert appear in the `alerts` JSON? → A: Only in `excepted`; `alerts` never holds an
+  excepted alert, and `--state excepted` gives `alerts: []` and the list (contracts/cli.md).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Accept a reviewed global in one exact file (Priority: P1)
@@ -361,7 +370,7 @@ the gate code.
 
 - Exceptions key on the SHA-256 the inventory already pins, so files without a pinned SHA-256 cannot be excepted.
 - The safe list starts from the scanner's own innocuous set, plus the standard tensor-rebuild and container
-  globals found in common PyTorch checkpoints, plus `_codecs.encode` and `numpy.core.multiarray.scalar` (owner's
+  globals found in common PyTorch checkpoints that PyTorch's own restricted loader accepts, plus `_codecs.encode` and `numpy.core.multiarray.scalar` (owner's
   ruling; `_codecs.encode` can rebuild arbitrary bytes, a trade-off recorded in research S3). It is reviewed and
   versioned in the repository.
 - `globals_policy` alerts are MODERATE, matching the existing format policy alert.

@@ -23,7 +23,7 @@ FR-002).
 | `recorded_at` | timestamp | |
 | `expires_on` | date (`YYYY-MM-DD`) \| null | optional; not before today (UTC) when recorded |
 | `revoked_at`, `revoked_by`, `revoke_reason` | timestamp, text, text \| null | all set together, once; reason and name required |
-| `evidence_id` | integer | evidence row (source `exception`, URL `exception:<id>`): the record above as canonical JSON, the evidence linked to alerts it covers |
+| `evidence_id` | integer | evidence row (source `exception`, URL `exception:<id>`): the record above as canonical JSON, the evidence linked to alerts it covers. A revocation adds a second evidence row with the same source and URL (the revocation as canonical JSON); a release links it to the alert |
 
 **State** (derived at a time *t*, never stored):
 
@@ -60,7 +60,7 @@ at any later check without reading the file (research S2, S11).
 | `globals` | JSON | `[{module, name, safety}]`, `safety` the scanner's label: `innocuous`, `suspicious` or `dangerous` |
 | `scanned_at` | timestamp | the scan time (a recorded scan's own time for a registration record) |
 | `run_id` | integer \| null | the check run; null for a scan recorded at registration |
-| `evidence_id` | integer | the scan's evidence row (the report as JSON) |
+| `evidence_id` | integer | the scan's evidence row (the report as JSON, source `picklescan`). Every applied scan has one, a clean scan included; the row of the hash's latest file scan is reused when the new scan is the same evidence (`same_evidence`: source, URL and content) |
 
 The latest row per `sha256` (by `file_scan_id`) decides. A scan that stopped on a hash mismatch or a
 read error writes no row.

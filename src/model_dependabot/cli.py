@@ -244,9 +244,10 @@ def build_parser() -> argparse.ArgumentParser:
         metavar=",".join(CHECK_SOURCES),
     )
 
-    policy = leaf(commands, "policy", "policy", "set a model's format policy")
+    policy = leaf(commands, "policy", "policy", "set a model's format or globals policy")
     policy.add_argument("model_id", metavar="ID")
-    policy.add_argument("--format", choices=("default", "strict"), required=True)
+    policy.add_argument("--format", choices=("default", "strict"))
+    policy.add_argument("--globals", dest="globals_policy", choices=("default", "strict"))
     policy.add_argument("--by", metavar="NAME", required=True)
 
     alerts = leaf(commands, "alerts", "alerts", "list alerts, then watch events")
@@ -748,10 +749,18 @@ def make_handlers(
 
     def policy(args: argparse.Namespace) -> CommandResult:
         with _open(args.db) as store:
-            if store.get_model(args.model_id) is None:
+            if args.format is None and args.globals_policy is None:
+                raise InvalidInputError("policy needs --format, --globals or both")
+            model = store.get_model(args.model_id)
+            if model is None:
                 raise InvalidInputError(f"no model {args.model_id!r}")
             try:
-                model = store.set_format_policy(args.model_id, args.format, set_by=args.by)
+                if args.format is not None:
+                    model = store.set_format_policy(args.model_id, args.format, set_by=args.by)
+                if args.globals_policy is not None:
+                    model = store.set_globals_policy(
+                        args.model_id, args.globals_policy, set_by=args.by
+                    )
             except ValueError as error:
                 raise InvalidInputError(str(error)) from None
         payload = {
@@ -759,10 +768,14 @@ def make_handlers(
             "format_policy": model["format_policy"],
             "set_by": model["format_policy_set_by"],
             "set_at": model["format_policy_set_at"],
+            "globals_policy": model["globals_policy"],
+            "globals_set_by": model["globals_policy_set_by"],
+            "globals_set_at": model["globals_policy_set_at"],
         }
         text = (
-            f"{args.model_id}: format policy {payload['format_policy']}, set by"
-            f" {payload['set_by']} at {payload['set_at']}; takes effect at the next check"
+            f"{args.model_id}: format policy {payload['format_policy']}, globals policy"
+            f" {payload['globals_policy']}, set by {args.by.strip()}; takes effect at the next"
+            " check that asks a weight source"
         )
         return CommandResult(payload, text)
 

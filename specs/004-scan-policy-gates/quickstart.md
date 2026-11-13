@@ -192,3 +192,41 @@ naming the dismissed one, and `--fail-on HIGH` exits 4. For a weight file the sa
 report, so only another scanner version (a recorded scan with another `scanner_version`) reopens it;
 other bytes are another cause with its own key. Every row of the README exit-code table, run without
 `--fail-on`, returns the same code as before this feature (SC-005).
+
+## 8. Real-file acceptance check (T036)
+
+Run once on 2026-11-14 on two real checkpoints supplied by the maintainer in an isolated folder outside
+the repository: a pose-detection checkpoint (about 6 MB) and a change-detection checkpoint (about
+300 MB). Neither file was loaded: each was scanned only through
+`model_dependabot.sources.pickle_scan.scan_path` (static disassembly), and each was registered from a
+manifest in a scratch folder outside the repository, with a database there. No copy, name or hash of
+either file is kept in the repository.
+
+```bash
+$MD register SCRATCH/pose/model.toml
+$MD policy pose --globals strict --by Owner
+$MD check pose --source picklescan
+$MD exception record --global __builtin__:getattr --sha256 HEX --reason "reviewed: attribute lookup" --by Owner
+$MD check pose --source picklescan
+# the same five commands for the change-detection checkpoint
+```
+
+Every command exited 0. What the static scans reported, and what the check showed (safe list version 1,
+30 entries):
+
+| | Pose detection | Change detection |
+| :-- | :-- | :-- |
+| globals reported (complete scan) | 31: 1 dangerous, 25 suspicious, 5 innocuous | 11: 1 dangerous, 3 suspicious, 7 innocuous |
+| dangerous global | `__builtin__.getattr` | `__builtin__.getattr` |
+| safe-listed globals seen | 8, among them `__builtin__.set`, `torch.Size` and `torch._utils._rebuild_parameter` | 9, among them `_codecs.encode` and `numpy.core.multiarray.scalar` |
+| `weight_file_scan` alert before the exception | open (HIGH) | open (HIGH) |
+| `globals_policy` unlisted before the exception | 23 | 2 |
+| `weight_file_scan` alert after the exception | excepted | excepted |
+| `globals_policy` unlisted after the exception | 22: framework layer and model classes | 1: a training framework's logging class |
+
+Outcome: as expected. The exception for `__builtin__.getattr` in each file's hash made the HIGH alert
+excepted and took the global off the `globals_policy` alert; no safe-listed global appeared in either
+alert's list; the remaining framework classes stayed listed, as the strict policy intends. The safe-listed
+globals the task names (`__builtin__.set`, `torch.Size`, `torch._utils._rebuild_parameter`,
+`_codecs.encode`, `numpy.core.multiarray.scalar`) were each seen in one of the two files and were absent
+from both lists.

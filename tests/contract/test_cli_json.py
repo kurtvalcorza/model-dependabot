@@ -193,3 +193,27 @@ def test_history_of_an_unknown_model_is_invalid_input(
     code, payload = cli("history", "no-such-model")
     assert code == EXIT_INVALID_INPUT
     assert payload["error"]["exit_code"] == EXIT_INVALID_INPUT
+
+
+# --- feature 004: policy --globals (T031, contracts/cli.md of 004) ------------------------------
+
+
+def test_policy_globals_strict_json(checked: Callable[..., tuple[int, Any]]) -> None:
+    code, payload = checked("policy", MODEL, "--globals", "strict", "--by", "Owner")
+    assert code == EXIT_OK
+    assert payload["globals_policy"] == "strict"
+    assert payload["globals_set_by"] == "Owner"
+    assert payload["globals_set_at"].endswith("Z")
+    assert payload["format_policy"] == "default"  # unchanged, separate (FR-006)
+    code, both = checked(
+        "policy", MODEL, "--format", "strict", "--globals", "default", "--by", "Owner"
+    )
+    assert code == EXIT_OK
+    assert (both["format_policy"], both["globals_policy"]) == ("strict", "default")
+
+
+def test_policy_needs_format_or_globals(checked: Callable[..., tuple[int, Any]]) -> None:
+    code, payload = checked("policy", MODEL, "--by", "Owner")
+    assert code == EXIT_INVALID_INPUT
+    assert "--format" in payload["error"]["message"]
+    assert checked("policy", MODEL, "--globals", "lenient", "--by", "O")[0] == EXIT_INVALID_INPUT

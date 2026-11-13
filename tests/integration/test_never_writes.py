@@ -92,6 +92,7 @@ def test_no_command_writes_to_a_model_or_its_repository(
     assert _state(watched) == before
 
     assert cli("policy", MODEL, "--format", "strict", "--by", "Owner")[0] == EXIT_OK
+    assert cli("policy", MODEL, "--globals", "strict", "--by", "Owner")[0] == EXIT_OK
     _, listed = cli("alerts", MODEL)
     assert listed["alerts"], "the affected pillow raises an alert to dismiss"
     first = listed["alerts"][0]["alert_id"]

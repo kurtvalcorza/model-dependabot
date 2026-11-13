@@ -76,7 +76,7 @@ unchanged (FR-007, FR-018, SC-002, SC-005); migrations additive and atomic; the 
 (`store.py:441-471`) reads the new tables' defaults when they are absent
 
 **Scale/Scope**: as 001: tens to hundreds of models; exceptions in the tens to low hundreds; a safe list
-of 32 entries
+of 30 entries
 
 No open NEEDS CLARIFICATION: the spec's five questions were answered on 2026-11-13, and the planning-time
 choices are settled in research S1 to S14, with the owner's rulings D1 to D9.
