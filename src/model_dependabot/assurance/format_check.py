@@ -33,7 +33,7 @@ from model_dependabot.assurance.trust import (
     latest_check,
     needs_confirmation,
 )
-from model_dependabot.inventory.build import classify, hash_file
+from model_dependabot.inventory.build import NO_ONNX_STRUCTURE, classify, hash_file, shows_onnx
 from model_dependabot.sources.fetcher import Fetcher, SourceFailedError
 from model_dependabot.sources.hf import HEADER_LEAD, HuggingFace, is_commit
 from model_dependabot.store import Store
@@ -123,6 +123,17 @@ def pending(
         if want is not None:
             found.append((entry, want))
     return found
+
+
+def _unproven_onnx(
+    file_format: str | None, can_run_code: bool | None, lead: bytes, size: int
+) -> bool:
+    """An ``.onnx`` file classified code-free by its name whose bytes show no ONNX model.
+
+    Its imported code-free claim stays unverified (review F2, PR #15 R5): the claim check is
+    ``unreadable`` with ``NO_ONNX_STRUCTURE``, so the claim never counts under the strict policy.
+    """
+    return file_format == "onnx" and can_run_code is False and not shows_onnx(lead, size)
 
 
 def _code_free_outcome(
@@ -241,6 +252,8 @@ def measure_imported(
             file_format, can_run_code = classify(path.name, path)
         except OSError:
             continue
+        if _unproven_onnx(file_format, can_run_code, lead, size):
+            continue  # the name alone confirms nothing: format-check reads it as unverified
         claimed = (entry["format"], entry["can_run_code"])
         contradicted = claimed[1] is False and can_run_code is not False
         entry.update(format=file_format, can_run_code=can_run_code, format_origin="bytes")
@@ -342,14 +355,15 @@ def read_local(
         identity, identity_reason = "contradicted", reason
     else:
         identity, identity_reason = "confirmed", None
+    unproven = _unproven_onnx(file_format, can_run_code, lead, size)
     return _rows(
         target,
         entry,
         want,
         identity=identity,
         identity_reason=identity_reason,
-        measured=(file_format, can_run_code),
-        reason=None,
+        measured=None if unproven else (file_format, can_run_code),
+        reason=NO_ONNX_STRUCTURE if unproven else None,
         url=path.as_uri(),
         retrieved_at=now,
         summary=summary,

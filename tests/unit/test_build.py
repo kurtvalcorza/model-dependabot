@@ -16,6 +16,7 @@ from model_dependabot.inventory.build import (
     classify,
     merge_datasets,
     new_entry,
+    shows_onnx,
 )
 from model_dependabot.manifest import load_manifest
 from model_dependabot.sources.fetcher import RecordedFetcher
@@ -345,3 +346,32 @@ def test_a_safetensors_header_longer_than_the_lead_asks_for_more_bytes() -> None
         "safetensors",
         False,
     )
+
+
+# --- review F2 (PR #15 R5): positive ONNX structure ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("lead", "total", "shown"),
+    [
+        (FIXTURES / "manifests" / "weights" / "tiny.onnx", None, True),
+        (
+            b"\x08\x08\x12\x04test\x3a\xff\xff\x03" + b"\x0a" * 100,
+            70_000,
+            True,
+        ),  # graph read in part
+        (b"cos\nsystem\n(S'echo hi'\ntR.", None, False),  # a protocol 0 pickle
+        (b"(dp0\nS'a'\np1\nI1\ns.", None, False),  # protocol 0 again
+        (b"\x80\x02}q\x00.", None, False),  # protocol 2
+        (b"PK\x03\x04" + bytes(30), None, False),
+        (b"just some text", None, False),
+        (b"", None, False),
+        (b"\x08\x00", None, False),  # ir_version 0
+        (b"\x08\x07\x48\x01", None, False),  # field 9 is not a ModelProto field
+        (b"\x08\x07\x12\x05ab", None, False),  # a string longer than the file
+        (b"\x08\x07\x3a\xff\xff\x03", 100, False),  # a graph longer than the file
+    ],
+)
+def test_shows_onnx_needs_a_model_proto(lead: bytes | Path, total: int | None, shown: bool) -> None:
+    data = lead.read_bytes() if isinstance(lead, Path) else lead
+    assert shows_onnx(data, len(data) if total is None else total) is shown

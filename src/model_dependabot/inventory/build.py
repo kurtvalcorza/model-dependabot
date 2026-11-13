@@ -197,6 +197,62 @@ def _is_code_free(suffix: str, read: Read, size: int) -> bool:
     return not (starts_like_pickle or _starts_like_zip(read))
 
 
+# ONNX ModelProto's top-level fields (onnx.proto): field number -> protobuf wire type.
+_ONNX_FIELDS = {1: 0, 2: 2, 3: 2, 4: 2, 5: 0, 6: 2, 7: 2, 8: 2, 14: 2, 20: 2, 25: 2, 26: 2}
+_ONNX_IR_VERSIONS = range(1, 65)
+NO_ONNX_STRUCTURE = (
+    "the bytes do not show an ONNX model, and ONNX has no magic number, so a claim that it"
+    " cannot run code is not confirmed by its name"
+)
+
+
+def _varint(data: bytes, at: int) -> tuple[int, int] | None:
+    value = shift = 0
+    while at < len(data) and shift < 64:
+        byte = data[at]
+        at += 1
+        value |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return value, at
+        shift += 7
+    return None
+
+
+def shows_onnx(lead: bytes, total_size: int) -> bool:
+    """Whether the first bytes of a file read as an ONNX ``ModelProto`` (review F2, PR #15 R5).
+
+    A positive test, used where an imported claim that an ``.onnx`` file cannot run code is to be
+    confirmed: the name alone never confirms it. The file must start with the ``ir_version``
+    field, which serialisers write first, with a plausible value, and every top-level field read
+    from ``lead`` must be one ``ModelProto`` has, with its wire type and a length that fits
+    ``total_size``; a file read whole must end exactly at a field's end. A pickle of any protocol
+    or a zip cannot pass: none starts with the byte ``0x08``.
+    """
+    if not lead.startswith(b"\x08"):
+        return False
+    at = 0
+    limit = min(len(lead), total_size)
+    while at < limit:
+        key = _varint(lead, at)
+        if key is None:
+            return False
+        tag, at = key
+        number, wire = tag >> 3, tag & 0x07
+        if _ONNX_FIELDS.get(number) != wire:
+            return False
+        value = _varint(lead, at)
+        if value is None:
+            return False
+        size, at = value
+        if number == 1 and size not in _ONNX_IR_VERSIONS:
+            return False
+        if wire == 2:
+            at += size
+            if at > total_size:
+                return False
+    return at <= total_size if len(lead) < total_size else at == total_size
+
+
 def _is_pytorch_zip(content: bytes | Path) -> bool:
     # A path is opened by zipfile itself, which reads only the central directory, never the
     # whole file.

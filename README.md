@@ -212,8 +212,10 @@ pinned to a commit it compares the hub's SHA-256 at that commit and reads only t
 (1 MiB, or a safetensors header of at most 16 MiB). A confirmed claim counts and clears a
 `format_policy` alert it no longer supports. A contradicted claim is treated as what the bytes show and
 raises a `format_claim_contradicted` watch event. An unreadable one (refused, missing or too long) keeps
-the alert open, raises `format_claim_unreadable` and is tried again at the next check. Claims recorded
-by `register` from your manifest are yours and are trusted as before.
+the alert open, raises `format_claim_unreadable` and is tried again at the next check. ONNX files have
+no magic number, so an imported claim that an `.onnx` file cannot run code is confirmed only when its
+bytes read as an ONNX model; otherwise it stays unverified. Claims recorded by `register` from your
+manifest are yours and are trusted as before.
 
 Each inventory entry records where its format claim came from (`bytes`, `name`, `record` or `import`),
 and an exported inventory carries it as the property `model-dependabot:format-origin`; an imported

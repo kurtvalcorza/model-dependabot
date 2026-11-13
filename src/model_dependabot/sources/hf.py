@@ -266,7 +266,7 @@ class HuggingFace:
 
     def _read_lead(self, result: HeaderRead, file: str) -> HeaderRead:
         # build.py imports this module, so the classification rules are imported when used.
-        from model_dependabot.inventory.build import classify_lead
+        from model_dependabot.inventory.build import NO_ONNX_STRUCTURE, classify_lead, shows_onnx
 
         length = HEADER_LEAD
         while True:
@@ -287,6 +287,9 @@ class HuggingFace:
                 return replace(result, reason="the hub gave no size for the file")
             result = replace(result, total_size=total)
             answer = classify_lead(file, response.body, total)
+            if answer == ("onnx", False) and not shows_onnx(response.body, total):
+                # Only imported claims are read here; the name alone never confirms them (R5).
+                return replace(result, reason=NO_ONNX_STRUCTURE)
             if isinstance(answer, tuple):
                 return replace(result, format=answer[0], can_run_code=answer[1])
             if answer.length > HEADER_LIMIT or length != HEADER_LEAD:

@@ -26,13 +26,17 @@ from conftest import (
     GPT2_REPO,
     GPT2_SAFETENSORS,
     resolve,
+    tree_item,
+    tree_url,
 )
 from model_dependabot.assurance.format_check import (
     SOURCE,
     VersionTarget,
     apply_claims,
+    measure_imported,
     read_claims,
 )
+from model_dependabot.inventory.build import NO_ONNX_STRUCTURE
 from model_dependabot.sources.fetcher import RecordedFetcher, SourceFailedError
 from model_dependabot.store import Store
 
@@ -318,3 +322,84 @@ def test_each_outcome_stores_one_evidence_summary_without_weight_bytes(store: St
             "measured_format",
         } <= set(summary)
         assert summary["commit"] == GPT2_COMMIT and summary["status"] == 206
+
+
+# --- review F2 (PR #15 R5): an imported .onnx claim needs ONNX in the bytes -----------------------
+
+PICKLE_0 = b"cos\nsystem\n(S'echo hi'\ntR."  # a protocol 0 pickle: it starts with no 0x80
+WEIGHTS = Path(__file__).resolve().parent.parent / "fixtures" / "manifests" / "weights"
+TINY_ONNX = WEIGHTS / "tiny.onnx"
+
+
+def _onnx(location: str, content: bytes) -> dict[str, Any]:
+    return _local(location, content, format="onnx")
+
+
+def test_an_onnx_claim_on_bytes_with_no_onnx_model_stays_unverified(
+    store: Store, tmp_path: Path
+) -> None:
+    (tmp_path / "bom").mkdir()
+    (tmp_path / "bom" / "decoy.onnx").write_bytes(PICKLE_0)
+    target = _target(store, [_onnx("decoy.onnx", PICKLE_0)], base_dir=tmp_path / "bom")
+    _run(store, NoNetwork(), [target])
+    assert _outcomes(store, target) == [
+        ("identity", "confirmed", None),
+        ("code_free", "unreadable", None),
+    ]
+    [check] = [c for c in store.claim_checks(target.model_id, target.version) if c["reason"]]
+    assert check["reason"] == NO_ONNX_STRUCTURE
+
+
+def test_an_onnx_claim_on_an_onnx_model_is_confirmed(store: Store, tmp_path: Path) -> None:
+    content = TINY_ONNX.read_bytes()
+    (tmp_path / "bom").mkdir()
+    (tmp_path / "bom" / "model.onnx").write_bytes(content)
+    target = _target(store, [_onnx("model.onnx", content)], base_dir=tmp_path / "bom")
+    _run(store, NoNetwork(), [target])
+    assert _outcomes(store, target) == [
+        ("identity", "confirmed", None),
+        ("code_free", "confirmed", "onnx"),
+    ]
+
+
+def test_a_hub_onnx_claim_on_bytes_with_no_onnx_model_stays_unverified(
+    store: Store, derive_format_check: Callable
+) -> None:
+    sha256 = hashlib.sha256(PICKLE_0).hexdigest()
+    fetcher = RecordedFetcher(
+        derive_format_check(
+            {
+                "decoy-tree": {
+                    "url": tree_url(FORGED_REPO, FORGED_COMMIT),
+                    "status": 200,
+                    "range": None,
+                    "body": json.dumps([tree_item("decoy.onnx", sha256, len(PICKLE_0))]),
+                },
+                "decoy-range": {
+                    "url": resolve(FORGED_REPO, FORGED_COMMIT, "decoy.onnx"),
+                    "status": 206,
+                    "headers": {"Content-Range": f"bytes 0-{len(PICKLE_0) - 1}/{len(PICKLE_0)}"},
+                    "body": PICKLE_0,
+                },
+            },
+            forged=False,
+        )
+    )
+    entry = _hub("decoy.onnx", sha256, repo=FORGED_REPO, commit=FORGED_COMMIT)
+    target = _target(store, [entry | {"format": "onnx", "can_run_code": False}])
+    _run(store, fetcher, [target])
+    assert _outcomes(store, target) == [
+        ("identity", "confirmed", None),
+        ("code_free", "unreadable", None),
+    ]
+
+
+def test_import_does_not_take_an_onnx_name_for_a_measured_class(tmp_path: Path) -> None:
+    (tmp_path / "decoy.onnx").write_bytes(PICKLE_0)
+    (tmp_path / "model.onnx").write_bytes(TINY_ONNX.read_bytes())
+    decoy = _onnx("decoy.onnx", PICKLE_0)
+    honest = _onnx("model.onnx", TINY_ONNX.read_bytes())
+    measures = measure_imported([decoy, honest], tmp_path, NOW)
+    assert [measure.entry["location"] for measure in measures] == ["model.onnx"]
+    assert decoy["format_origin"] == "import"  # the claim is left for format-check
+    assert honest["format_origin"] == "bytes"
