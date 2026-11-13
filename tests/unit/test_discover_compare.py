@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from model_dependabot.discover.candidate import candidate
 from model_dependabot.discover.compare import compare, mark_version_conflicts
 from model_dependabot.manifest import load_manifest
@@ -152,3 +154,39 @@ def test_a_manifest_path_outside_the_project_is_not_seen(tmp_path: Path) -> None
     root.mkdir()
     not_seen = compare([], manifest(root, '[[weights]]\npath = "../elsewhere.pt"\n'), root)
     assert not_seen[0]["reason"] == "outside the project"
+
+
+def _ranged(requirement: str) -> dict[str, Any]:
+    name = requirement.split(">")[0].split("<")[0].split("=")[0].split("~")[0].split("!")[0]
+    item = package(name.strip(), None, "pyproject.toml", ["not locked"])
+    item["identity"]["requirement"] = requirement
+    return item
+
+
+def test_a_range_is_compared_with_the_locked_version(tmp_path: Path) -> None:
+    """Review C3: ``torch>=2.6`` cannot match a lock pinning ``torch==2.5.1``."""
+    locked = package("torch", "2.5.1", "requirements.lock.txt")
+    excluded = [_ranged(text) for text in ("torch>=2.6", "torch<2.5", "torch!=2.5.1")]
+    admitted = [_ranged(text) for text in ("torch>=2.5", "torch~=2.5.0", "torch")]
+    items = [locked, *excluded, *admitted]
+    (tmp_path / "requirements.lock.txt").write_text("", encoding="utf-8")
+    compare(items, manifest(tmp_path, '[environment]\nlock = "requirements.lock.txt"\n'), tmp_path)
+    assert [item["manifest"] for item in excluded] == ["conflicts"] * 3
+    assert [item["manifest"] for item in admitted] == ["matches"] * 3
+    assert excluded[0]["manifest_value"] == {"name": "torch", "version": "2.5.1"}
+
+
+def test_a_linked_weight_file_matches_the_manifest_path_of_its_target(tmp_path: Path) -> None:
+    """Review C4: the manifest's paths are resolved, so a discovered link is compared resolved
+    too, and keeps the path it was found at."""
+    (tmp_path / "weights").mkdir()
+    (tmp_path / "weights" / "real.pt").write_bytes(b"x")
+    try:
+        (tmp_path / "best.pt").symlink_to(tmp_path / "weights" / "real.pt")
+    except OSError:
+        pytest.skip("this platform does not let the test create a symbolic link to a file")
+    item = weight("best.pt")
+    not_seen = compare([item], manifest(tmp_path, '[[weights]]\npath = "best.pt"\n'), tmp_path)
+    assert item["manifest"] == "matches"
+    assert item["identity"]["path"] == "best.pt"
+    assert not_seen == []

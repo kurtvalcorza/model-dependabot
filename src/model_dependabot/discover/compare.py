@@ -13,6 +13,9 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.version import InvalidVersion, Version
+
 from model_dependabot.discover.candidate import CONFLICTING, NO_REVISION
 from model_dependabot.discover.walk import OUTSIDE
 from model_dependabot.manifest import Manifest
@@ -45,6 +48,30 @@ def _project_path(root: Path, path: Path | None) -> str | None:
     if not resolved.is_relative_to(root):
         return None
     return resolved.relative_to(root).as_posix()
+
+
+def _weight_key(root: Path, path: str) -> str:
+    """How a discovered weight file is compared with the manifest's: by where it resolves to,
+    as the manifest's paths are, so a link inside the project matches its target (review C4).
+    The candidate keeps the path it was found at."""
+    return _project_path(root, root / path) or path
+
+
+def _agrees(identity: dict[str, Any], locked: str) -> bool:
+    """Whether a declared requirement admits the version the manifest's lock pins (review C3).
+
+    An exact version must equal it; a range (``torch>=2.6``) must contain it. A requirement
+    with no version constraint, or one that names a URL rather than versions, constrains nothing
+    to compare and agrees.
+    """
+    version = identity.get("version")
+    if version is not None:
+        return str(version) == locked
+    try:
+        specifier = Requirement(str(identity.get("requirement") or "")).specifier
+        return specifier.contains(Version(locked), prereleases=True)
+    except (InvalidRequirement, InvalidVersion):
+        return True
 
 
 def _mark(item: dict[str, Any], state: str, value: dict[str, Any] | None = None) -> None:
@@ -83,9 +110,9 @@ def compare(
             declared[relative] = index
     seen: set[str] = set()
     for item in by_kind["weight_file"]:
-        path = item["identity"]["path"]
-        _mark(item, MATCHES if path in declared else MISSING)
-        seen.add(path)
+        key = _weight_key(root, item["identity"]["path"])
+        _mark(item, MATCHES if key in declared else MISSING)
+        seen.add(key)
     for path, index in declared.items():
         if path not in seen:
             not_seen.append(_not_seen("weight_file", {"path": path}, f"weights[{index}]"))
@@ -114,7 +141,7 @@ def compare(
         name = item["identity"].get("name")
         if name not in locked:
             _mark(item, MISSING)
-        elif item["identity"].get("version") in (None, locked[name]):
+        elif _agrees(item["identity"], locked[name]):
             _mark(item, MATCHES)
         else:
             _mark(item, CONFLICTS, {"name": name, "version": locked[name]})
