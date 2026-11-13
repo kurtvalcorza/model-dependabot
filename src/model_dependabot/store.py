@@ -1206,6 +1206,36 @@ class Store:
             for row in rows
         ]
 
+    def add_overview_rows(self, run_id: int, rows: Iterable[Mapping[str, Any]]) -> None:
+        """Store a run's overview; a run-wide row (``model_id`` ``None``) is stored as ``''``."""
+        columns = (
+            "version", "source", "state", "reason", "entries", "incomplete", "alerts_open",
+            "alerts_excepted", "watch_events", "dismissals_held",
+        )  # fmt: skip
+        with self.conn:
+            self.conn.executemany(
+                "INSERT OR REPLACE INTO check_run_overview (run_id, model_id,"
+                f" {', '.join(columns)}) VALUES (?, ?, {', '.join('?' for _ in columns)})",
+                [
+                    (run_id, row["model_id"] or "", *(row.get(key) for key in columns))
+                    for row in rows
+                ],
+            )
+
+    def check_run_target_versions(self, run_id: int) -> list[tuple[str, int]]:
+        """The models and versions a run checked, in model order."""
+        rows = self.conn.execute(
+            "SELECT model_id, version FROM check_run_targets WHERE run_id = ? ORDER BY model_id",
+            (run_id,),
+        )
+        return [(row["model_id"], int(row["version"])) for row in rows]
+
+    def check_run_source_order(self, run_id: int) -> list[str]:
+        """The sources a run asked, in the order asked, then ``policy``."""
+        run = self.get_check_run(run_id)
+        sources = list((run or {}).get("sources") or {})
+        return [*sources, "policy"]
+
     def check_run_overview(self, run_id: int) -> list[dict[str, Any]]:
         """The overview rows of a run; the run-wide rows read ``model_id`` as ``None``."""
         if "check_run_overview" not in self.tables():

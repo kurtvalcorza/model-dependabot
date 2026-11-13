@@ -87,8 +87,10 @@ def test_no_command_writes_to_a_model_or_its_repository(
     assert cli("register", str(manifest))[0] == EXIT_OK
     assert _state(watched) == before
 
-    code, _ = cli("check", MODEL)
+    code, checked = cli("check", MODEL)
     assert code == EXIT_OK
+    assert _state(watched) == before
+    assert cli("run", "show", str(checked["run_id"]))[0] == EXIT_OK  # feature 004, T039
     assert _state(watched) == before
 
     assert cli("policy", MODEL, "--format", "strict", "--by", "Owner")[0] == EXIT_OK

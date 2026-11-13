@@ -58,7 +58,7 @@ from urllib.parse import unquote
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
-from model_dependabot.assurance import format_check, globals_policy
+from model_dependabot.assurance import format_check, globals_policy, overview
 from model_dependabot.assurance.exceptions import covering
 from model_dependabot.assurance.trust import (
     CODE_FREE,
@@ -176,6 +176,67 @@ class CheckOutcome:
         return any(status.startswith("failed") for status in self.sources.values())
 
 
+# Feature 004 (research S6): watch kinds that mean an entry could not be finished this run.
+INCOMPLETE_KINDS = frozenset(
+    {
+        "scan_incomplete",
+        "hash_mismatch",
+        "weight_file_absent",
+        "hub_scan_unknown",
+        "format_claim_unreadable",
+        "dataset_unreachable",
+        "paper_not_found",
+        "base_model_refused",
+    }
+)
+POLICY_ROW = "policy"
+UPSTREAM_PASS = "upstream"
+# The check source of an upstream evidence row, by the row's stored ``source``.
+_EVIDENCE_SOURCES = {
+    "crossref": "crossref",
+    "datacite": "datacite",
+    "zenodo": "zenodo",
+    "figshare": "figshare",
+    "hf-takedowns": "hf-takedowns",
+    "hf-hub": "hf-hub",
+    "huggingface.co": "hf-hub",
+}
+
+
+def _note(
+    store: Store,
+    target: Any,
+    what: str,
+    item: int,
+    evidence_ids: Sequence[int] = (),
+    *,
+    kind: str | None = None,
+    identifier: str | None = None,
+) -> None:
+    """Tally an alert, a closed alert or a watch event to the check source being applied.
+
+    The upstream pass applies several sources at once, so its items are tallied to the source of
+    their evidence. Outside a check run (registration) nothing is tallied.
+    """
+    source = target.source
+    if source == UPSTREAM_PASS:
+        source = ""
+        for evidence_id in evidence_ids:
+            evidence = store.get_evidence(int(evidence_id))
+            found = _EVIDENCE_SOURCES.get(evidence["source"]) if evidence else None
+            if found is not None:
+                source = found
+                break
+    if not source:
+        return
+    tally = target.tally.setdefault(
+        source, {"alerts": set(), "closed": set(), "watch_events": set(), "incomplete": set()}
+    )
+    tally[what].add(item)
+    if what == "watch_events" and kind in INCOMPLETE_KINDS and identifier is not None:
+        tally["incomplete"].add(identifier)
+
+
 def package_cause_key(advisory_id: str, package: str) -> str:
     """``kind`` plus advisory id plus normalised package name (data-model.md, Alert)."""
     return f"{PACKAGE_ALERT}:{advisory_id}:{canonicalize_name(package)}"
@@ -190,6 +251,10 @@ class _Target:
     base_dir: str | None = None
     record_sha256: str | None = None
     origin: str | None = None  # how the version was registered (feature 003); None is legacy
+    # Feature 004 (research S6): the check source being applied, and per source what it did.
+    source: str = ""
+    tally: dict[str, dict[str, set[Any]]] = field(default_factory=dict)
+    held: dict[str, list[int]] = field(default_factory=dict)  # held dismissals by source (FR-020)
 
 
 @dataclass
@@ -218,8 +283,9 @@ def run_check(
     run_id = store.start_check_run(scope=scope or ",".join(model_ids), trigger=trigger)
     statuses: dict[str, str] = {}
     completed: set[str] = set()
+    targets: list[_Target] = []
     try:
-        targets = _check(store, fetcher, model_ids, sources, run_id, statuses, completed)
+        _check(store, fetcher, model_ids, sources, run_id, statuses, completed, targets)
     except Exception as error:
         # Review F7 (amended 2026-10-31): the run is never left unfinished. Each store call
         # commits on its own, so what was applied before the error is kept; a source that had
@@ -233,10 +299,36 @@ def run_check(
         }
         with contextlib.suppress(Exception):  # the original error is the one to report
             store.finish_check_run(run_id, final)
+            _store_overview(store, run_id, targets, sources, final)
         raise
     statuses = {source: statuses[source] for source in sources if source in statuses}
     store.finish_check_run(run_id, statuses)
+    _store_overview(store, run_id, targets, sources, statuses)
     return CheckOutcome(run_id, statuses, [target.summary for target in targets])
+
+
+def _store_overview(
+    store: Store,
+    run_id: int,
+    targets: Sequence[_Target],
+    sources: Sequence[str],
+    statuses: Mapping[str, str],
+) -> None:
+    """Write the run's check overview from what was tallied (feature 004, research S6)."""
+    rows: list[dict[str, Any]] = []
+    for target in targets:
+        rows += overview.model_rows(
+            store,
+            model_id=target.model_id,
+            version=target.version,
+            entries=target.entries,
+            origin=target.origin,
+            tally=target.tally,
+            held=target.held,
+            sources=sources,
+            statuses=statuses,
+        )
+    store.add_overview_rows(run_id, [*overview.run_rows(rows, sources, statuses), *rows])
 
 
 def _check(
@@ -247,9 +339,9 @@ def _check(
     run_id: int,
     statuses: dict[str, str],
     completed: set[str],
+    targets: list[_Target],
 ) -> list[_Target]:
-    """The body of ``run_check``: fills ``statuses`` and ``completed`` as each source is done."""
-    targets = []
+    """The body of ``run_check``: fills ``statuses``, ``completed`` and ``targets`` as it goes."""
     for model_id in model_ids:
         version = store.latest_version(model_id)
         if version is None:
@@ -285,6 +377,8 @@ def _check(
     # pickle its bytes show in the same run (review F3); statuses keep the order asked for.
     ordered = sorted(sources, key=lambda source: source != FORMAT_CHECK)
     for source in ordered:
+        for target in targets:
+            target.source = source
         if upstream is not None and source in UPSTREAM_SOURCES:
             statuses[source] = upstream.statuses[source]
             continue
@@ -321,12 +415,14 @@ def _check(
         completed.add(source)
     if any(source in WEIGHT_SOURCES for source in sources):
         for target in targets:
+            target.source = POLICY_ROW
             _apply_format_rules(store, run_id, target)
             _apply_globals_rules(store, run_id, target)
     completed.update(WEIGHT_SOURCES)
     if upstream is not None:
         observed = _Observed(store, run_id)
         for target in targets:
+            target.source = UPSTREAM_PASS
             _apply_upstream(store, target, observed, upstream)
     completed.update(UPSTREAM_SOURCES)
     return targets
@@ -599,6 +695,7 @@ def _gone(run: _OsvApply, identifier: str, gone: GoneRecord) -> None:
     )
     if watch_event_id not in target.summary["watch_events"]:
         target.summary["watch_events"].append(watch_event_id)
+    _note(store, target, "watch_events", watch_event_id, kind=GONE, identifier=identifier)
 
 
 def _withdrawal(run: _OsvApply, alert: Mapping[str, Any], record: VulnRecord) -> int:
@@ -625,6 +722,7 @@ def _close(
         store.link_alert_evidence(alert["alert_id"], evidence_id)
     store.close_alert(alert["alert_id"], state=state, note=note)
     target.summary["closed"].append(alert["alert_id"])
+    _note(store, target, "closed", alert["alert_id"], evidence_ids)
 
 
 def _group_cause(entry: Mapping[str, Any], group: Sequence[VulnRecord]) -> dict[str, Any]:
@@ -717,6 +815,7 @@ def _raise_or_carry(
             evidence_ids=evidence_ids,
         )
         target.summary["opened"].append(alert_id)
+        _note(store, target, "alerts", alert_id)
     else:
         alert_id = keeper["alert_id"]
         for evidence_id in evidence_ids:
@@ -735,6 +834,7 @@ def _raise_or_carry(
         )
         if alert_id not in target.summary["carried_forward"]:
             target.summary["carried_forward"].append(alert_id)
+        _note(store, target, "alerts", alert_id)
     run.claimed.update(alert["alert_id"] for alert in related)
     run.claimed.add(alert_id)
     for record, evidence_id in zip(group, evidence_ids, strict=True):
@@ -787,6 +887,7 @@ def _unmatched(
     _cache(store, record, evidence_id)
     if watch_event_id not in target.summary["watch_events"]:
         target.summary["watch_events"].append(watch_event_id)
+    _note(store, target, "watch_events", watch_event_id, kind=UNMATCHED, identifier=identifier)
 
 
 # --- weight files (US3) --------------------------------------------------------------------------
@@ -946,6 +1047,7 @@ def _weight_alert(
             evidence_ids=evidence_ids,
         )
         target.summary["opened"].append(alert_id)
+        _note(store, target, "alerts", alert_id)
         return
     alert_id = existing["alert_id"]
     linked = store.alert_evidence(alert_id)
@@ -967,6 +1069,7 @@ def _weight_alert(
     )
     if alert_id not in target.summary["carried_forward"]:
         target.summary["carried_forward"].append(alert_id)
+    _note(store, target, "alerts", alert_id)
 
 
 def _watch(
@@ -991,6 +1094,7 @@ def _watch(
     )
     if watch_event_id not in target.summary["watch_events"]:
         target.summary["watch_events"].append(watch_event_id)
+    _note(store, target, "watch_events", watch_event_id, kind=kind, identifier=identifier)
 
 
 def _where(entry: Mapping[str, Any]) -> str | None:
@@ -1338,6 +1442,7 @@ def _claim_watch(store: Store, target: _Target, applied: format_check.AppliedCla
     )
     if watch_event_id not in target.summary["watch_events"]:
         target.summary["watch_events"].append(watch_event_id)
+    _note(store, target, "watch_events", watch_event_id, kind=kind, identifier=read.identifier)
 
 
 def _clear_format_policy(
@@ -2286,6 +2391,7 @@ def _upstream_alert(
             evidence_ids=list(dict.fromkeys(evidence_ids)),
         )
         target.summary["opened"].append(alert_id)
+        _note(store, target, "alerts", alert_id, evidence_ids)
         return
     alert_id = existing["alert_id"]
     if each:
@@ -2304,6 +2410,7 @@ def _upstream_alert(
     )
     if alert_id not in target.summary["carried_forward"]:
         target.summary["carried_forward"].append(alert_id)
+    _note(store, target, "alerts", alert_id, evidence_ids)
 
 
 def _upstream_watch(
@@ -2324,6 +2431,15 @@ def _upstream_watch(
     )
     if watch_event_id not in target.summary["watch_events"]:
         target.summary["watch_events"].append(watch_event_id)
+    _note(
+        store,
+        target,
+        "watch_events",
+        watch_event_id,
+        evidence_ids,
+        kind=kind,
+        identifier=identifier,
+    )
 
 
 def _apply_crossref(
@@ -2948,6 +3064,7 @@ def _apply_licence(
         )
         if existing["alert_id"] not in target.summary["carried_forward"]:
             target.summary["carried_forward"].append(existing["alert_id"])
+        _note(store, target, "alerts", existing["alert_id"], evidence_ids)
 
 
 def _reporting_sources(alert: Mapping[str, Any] | None) -> list[str]:

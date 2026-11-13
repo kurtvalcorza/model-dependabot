@@ -312,6 +312,13 @@ def audit_report(
         for source in SOURCE_ORDER
         if source in relevant
     ]
+    # Feature 004: the overview state of each source in its latest run for the version.
+    for item in coverage:
+        item["last_state"] = None
+        if item["last_run_id"] is not None:
+            for row in store.check_run_overview(int(item["last_run_id"])):
+                if row["model_id"] == model_id and row["source"] == item["source"]:
+                    item["last_state"] = row["state"]
     live = store.alerts_for(model_id, ["open"])
     # Feature 004: an excepted alert is stored open but not counted as open (research S4).
     alerts = [alert_view(store, alert) for alert in live if not is_excepted(alert)]

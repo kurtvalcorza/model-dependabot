@@ -20,7 +20,7 @@ from typing import Any
 
 from jsonschema import ValidationError
 
-from model_dependabot.assurance import exceptions
+from model_dependabot.assurance import exceptions, overview
 from model_dependabot.assurance.audit import DEFAULT_STALE_AFTER_HOURS, audit_report
 from model_dependabot.assurance.format_check import measure_imported, record_import_contradictions
 from model_dependabot.discover.project import discover, write_proposal
@@ -288,6 +288,11 @@ def build_parser() -> argparse.ArgumentParser:
     exception_revoke.add_argument("exception_id", metavar="EXCEPTION_ID", type=int)
     exception_revoke.add_argument("--reason", metavar="TEXT", required=True)
     exception_revoke.add_argument("--by", metavar="NAME", required=True)
+
+    run = commands.add_parser("run", help="show a stored check run")
+    run_commands = run.add_subparsers(dest="run_command", required=True)
+    run_show = leaf(run_commands, "show", "run show", "one check run with its overview")
+    run_show.add_argument("run_id", metavar="RUN_ID", type=int)
 
     history = leaf(commands, "history", "history", "closed alerts and how they closed")
     history.add_argument("model_id", metavar="ID")
@@ -738,14 +743,37 @@ def make_handlers(
             )
             # Research U13: keep the ETag cache bounded; bodies evidence refers to stay.
             store.prune_etag_cache()
+            covered = overview.payload(store, outcome.run_id)
         payload = {
             "run_id": outcome.run_id,
             "scope": scope,
             "trigger": trigger,
             "sources": outcome.sources,
             "models": outcome.models,
+            "overview": covered,
         }
-        return CommandResult(payload, _check_text(payload), sources_failed=outcome.failed)
+        text = _check_text(payload) + "\n" + overview.text(outcome.run_id, scope, covered)
+        return CommandResult(payload, text, sources_failed=outcome.failed)
+
+    def run_show(args: argparse.Namespace) -> CommandResult:
+        with _open(args.db) as store:
+            run = store.get_check_run(args.run_id)
+            if run is None:
+                raise InvalidInputError(f"no check run {args.run_id}")
+            covered = overview.payload(store, args.run_id)
+        payload = {
+            "run_id": run["run_id"],
+            "scope": run["scope"],
+            "trigger": run["trigger"],
+            "started_at": run["started_at"],
+            "finished_at": run["finished_at"],
+            "sources": run["sources"],
+            "overview": covered,
+        }
+        lines = [f"Check run {run['run_id']} ({run['scope']}, {run['trigger']})"]
+        lines += [f"  {source}: {status}" for source, status in (run["sources"] or {}).items()]
+        text = "\n".join(lines) + "\n" + overview.text(run["run_id"], run["scope"], covered)
+        return CommandResult(payload, text)
 
     def policy(args: argparse.Namespace) -> CommandResult:
         with _open(args.db) as store:
@@ -872,6 +900,7 @@ def make_handlers(
         "alerts": alerts,
         "alert show": alert_show,
         "alert dismiss": alert_dismiss,
+        "run show": run_show,
         "exception record": exception_record,
         "exception list": exception_list,
         "exception revoke": exception_revoke,

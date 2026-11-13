@@ -171,3 +171,30 @@ def test_an_excepted_alert_is_counted_apart_from_the_open_ones(
     assert open_alert["cause"]["location"] == "dangerous.pkl"
     [excepted] = report["findings"]["excepted"]
     assert (excepted["state"], excepted["cause"]["location"]) == ("excepted", "reviewed.pkl")
+
+
+def test_coverage_items_carry_the_last_overview_state(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Feature 004 (T040): ``last_state`` is the source's overview state in its latest run."""
+    db = tmp_path / "md.db"
+    handlers = make_handlers(fetcher=RecordedFetcher(tmp_path / "none"), now=lambda: NOW)
+    model = tmp_path / "model"
+    model.mkdir()
+    pickles = Path(__file__).resolve().parent.parent / "fixtures" / "pickles"
+    (model / "i.pkl").write_bytes((pickles / "innocuous.pkl").read_bytes())
+    manifest = '[model]\nid = "m"\n\n[[weights]]\npath = "i.pkl"\n'
+    (model / "model.toml").write_text(manifest, "utf-8")
+
+    def cli(*argv: str) -> Any:
+        main([*argv, "--db", str(db), "--json"], handlers=handlers)
+        out = capsys.readouterr().out
+        return json.loads(out) if out.strip() else None
+
+    cli("register", str(model / "model.toml"))
+    before = cli("inventory", "audit", "m")
+    assert [item["last_state"] for item in before["coverage"]["sources"]] == [None]
+    cli("check", "m", "--source", "picklescan")
+    after = cli("inventory", "audit", "m")
+    [scan] = after["coverage"]["sources"]
+    assert (scan["source"], scan["last_state"]) == ("picklescan", "passed")
