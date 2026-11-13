@@ -64,9 +64,13 @@ def write_proposal(
 
     The paths in it are relative to where ``output`` resolves to, as the project root is
     resolved, so a link or short name in either spelling never makes them climb out (review F9).
+    The file is written where ``output`` resolves to as well: a link given as ``output`` is
+    written through, and kept, so the paths are checked and used beside the file they belong to
+    (PR #15 round 2, S1).
     """
     root = Path(result["project"]).resolve()
-    text = propose.render(result, model_id, root, output.resolve())
-    propose.write(text, output, force=force)
+    destination = output.resolve()
+    text = propose.render(result, model_id, root, destination)
+    propose.write(text, destination, force=force)
     result["output"] = {"path": str(output), "written": True}
     return result

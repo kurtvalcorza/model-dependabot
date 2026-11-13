@@ -208,3 +208,28 @@ def test_paths_are_relative_to_where_the_output_really_is(tmp_path: Path) -> Non
         load_manifest(output, weights_present=False).lock
         == (project / "requirements.lock.txt").resolve()
     )
+
+
+def test_an_output_link_into_another_folder_is_written_through(tmp_path: Path) -> None:
+    """PR #15 round 2, S1: rendering, checking and replacing use one destination."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / "requirements.lock.txt").write_text(
+        "torch==2.5.1 --hash=sha256:" + "1" * 64 + "\n", encoding="utf-8"
+    )
+    (tmp_path / "elsewhere" / "deep").mkdir(parents=True)
+    target = tmp_path / "elsewhere" / "deep" / "out.toml"
+    target.write_text("old\n", encoding="utf-8")
+    link = tmp_path / "out.toml"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("this platform does not let the test create a symbolic link to a file")
+    write_proposal(discover(project), link, model_id="m", force=True)
+    assert link.is_symlink()
+    proposal = tomllib.loads(target.read_text(encoding="utf-8"))
+    assert proposal["environment"]["lock"] == "../../proj/requirements.lock.txt"
+    assert (
+        load_manifest(link, weights_present=False).lock
+        == (project / "requirements.lock.txt").resolve()
+    )
