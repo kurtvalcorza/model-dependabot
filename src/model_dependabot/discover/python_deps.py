@@ -37,7 +37,8 @@ REQUIREMENT_PATTERNS = ("*requirements*.txt", "*constraints*.txt", "*.lock.txt")
 UNREAD_LOCKS = ("uv.lock", "poetry.lock", "Pipfile.lock", "pylock.toml")
 LOCK_NOT_READ = "lock format not read in this version"
 
-_INCLUDE = re.compile(r"^(-r|--requirement|-c|--constraint)(?:[=\s]+)(\S+)")
+# pip accepts the short options with no separator too (``-rother.txt``, review F8).
+_INCLUDE = re.compile(r"^(?:-[rc][=\s]*|--(?:requirement|constraint)[=\s]+)(?P<target>[^\s=]\S*)")
 _OPTION = re.compile(r"^-")
 _URL = re.compile(r"^(?:[a-z]+\+)?[a-z][a-z0-9+.-]*://|^(?:git|hg|svn|bzr)\+", re.IGNORECASE)
 _EDITABLE = re.compile(r"^(?:-e|--editable)(?:[=\s]+)(\S+)")
@@ -96,10 +97,10 @@ def _requirements(
     for number, line in numbered_lines(text):
         include = _INCLUDE.match(line)
         if include:
-            target = inside(found.root, relative, include.group(2))
+            target = inside(found.root, relative, include["target"])
             if target is None:
                 where = {"named_in": {"file": relative, "line": number}}
-                skipped.append(skip(include.group(2), OUTSIDE, **where))
+                skipped.append(skip(include["target"], OUTSIDE, **where))
             else:
                 queue(target)
             continue

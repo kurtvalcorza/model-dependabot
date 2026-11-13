@@ -149,3 +149,25 @@ def test_an_oversized_requirements_file_is_skipped(tmp_path: Path) -> None:
     candidates, skipped = run(tmp_path, Limits(text_bytes=1024))
     assert candidates == []
     assert skipped == [{"path": "requirements.txt", "reason": "larger than 1 KiB"}]
+
+
+@pytest.mark.parametrize("line", ["-rinner.txt", "-r=inner.txt", "--requirement=inner.txt"])
+def test_an_include_written_without_a_space_is_followed(tmp_path: Path, line: str) -> None:
+    """Review F8: pip accepts ``-rinner.txt``; it is followed, not silently dropped."""
+    write(tmp_path, "requirements.txt", f"{line}\n")
+    write(tmp_path, "inner.txt", "inner==1.0\n")
+    candidates, skipped = run(tmp_path)
+    assert [item["identity"]["name"] for item in candidates] == ["inner"]
+    assert skipped == []
+
+
+def test_an_include_outside_written_without_a_space_is_listed(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    write(tmp_path, "outside.txt", "leaked==1.0\n")
+    write(root, "requirements.txt", "-r../outside.txt\n-c../outside.txt\n")
+    candidates, skipped = run(root)
+    assert candidates == []
+    assert [(item["path"], item["reason"]) for item in skipped] == [
+        ("../outside.txt", "outside the project"),
+        ("../outside.txt", "outside the project"),
+    ]
