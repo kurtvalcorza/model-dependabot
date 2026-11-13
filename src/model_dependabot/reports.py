@@ -290,7 +290,10 @@ def audit_text(payload: Mapping[str, Any]) -> str:
     ]
     sources = payload["coverage"]["sources"]
     if findings["state"] == "not_yet_checked":
-        lines.append("Findings: not yet checked (no check has covered this version)")
+        lines.append(
+            "Findings: not yet checked"
+            " (no relevant source has succeeded in a check of this version)"
+        )
     else:
         partly = ""
         if findings["state"] == "partly_checked":

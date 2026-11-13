@@ -61,6 +61,13 @@ it is pinned, `can_run_code` is false, and its claim is owner-trusted or its lat
 No new column. `format-check` is one more source name in `sources`, with status `ok`, `failed: reason` or
 `skipped`, as for the existing sources.
 
+Two tables are added (PR #15 rounds 2 and 3), created when the database is opened:
+
+| Table | Fields | Rule |
+| :-- | :-- | :-- |
+| `check_run_targets` | `run_id`, `model_id`, `version`; key `(run_id, model_id)` | one row per model a run checked, with the version it checked (always the latest at the time); the audit counts a run for that version only |
+| `store_marks` | `name`, `value`; the row `first_linked_run` | the first run that records its targets; a run before it is legacy and the audit counts it by its start time (from the version's registration to the next one's), while a later run with no target row for a model did not check it |
+
 ## Watch event (extended)
 
 | Kind | When | Detail |

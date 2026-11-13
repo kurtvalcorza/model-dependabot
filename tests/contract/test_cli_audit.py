@@ -101,3 +101,31 @@ def test_stale_after_changes_only_staleness(audit) -> None:
         return copy
 
     assert without_staleness(default) == without_staleness(longer)
+
+
+def test_the_json_reports_partly_checked_after_a_check_of_some_sources(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """H3: through the command line, a check of one of two relevant sources is partly checked."""
+    import shutil
+
+    weights = Path(__file__).resolve().parent.parent / "fixtures" / "manifests" / "weights"
+    shutil.copy(weights / "tiny.pt", tmp_path / "tiny.pt")
+    manifest = tmp_path / "model.toml"
+    manifest.write_text(
+        '[model]\nid = "m"\n\n[[weights]]\npath = "tiny.pt"\n\n[base_model]\nhub = "hf:o/base"\n'
+        f'revision = "{"c" * 40}"\n',
+        "utf-8",
+    )
+    db = tmp_path / "md.db"
+    handlers = make_handlers(fetcher=RecordedFetcher(tmp_path / "none"), now=lambda: NOW)
+    assert main(["register", str(manifest), "--db", str(db)], handlers=handlers) == EXIT_OK
+    main(["check", "m", "--source", "picklescan", "--db", str(db)], handlers=handlers)
+    capsys.readouterr()
+    code = main(["inventory", "audit", "m", "--db", str(db), "--json"], handlers=handlers)
+    report = json.loads(capsys.readouterr().out)
+    assert code == EXIT_OK
+    assert report["findings"]["state"] == "partly_checked"
+    assert report["summary"]["checked"] is False
+    sources = {item["source"]: item["status"] for item in report["coverage"]["sources"]}
+    assert sources == {"picklescan": "ok", "hf-hub": "not checked"}

@@ -475,3 +475,21 @@ def test_a_run_from_before_runs_recorded_targets_counts_by_its_time(tmp_path: Pa
 
 def test_a_fresh_database_marks_its_first_run_as_linked(store: Store) -> None:
     assert store.first_linked_run() == 1
+
+
+def test_the_text_says_how_partly_the_version_is_checked(store: Store, clock: Clock) -> None:
+    """H3: the text line counts the relevant sources that have succeeded."""
+    from model_dependabot.reports import audit_text
+
+    register(store, [package(), weight(identifier=PICKLE_SHA, format="pickle", can_run_code=True)])
+    run(store, clock, {"osv": "ok", "picklescan": "failed: cannot read the file"})
+    lines = audit_text(audit(store, "m")).splitlines()
+    assert (
+        "Findings: 0 open alerts, 0 watch events"
+        " (partly checked: 1 of 2 relevant sources have succeeded)" in lines
+    )
+    register(store, [package()], model="never")
+    assert (
+        "Findings: not yet checked (no relevant source has succeeded in a check of this version)"
+        in audit_text(audit(store, "never")).splitlines()
+    )

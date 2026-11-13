@@ -56,11 +56,11 @@ it out as for any other source. A version with no claim needing confirmation mak
   "stale_after_hours": 24,
   "statement": "No alerts is not evidence that the inventory is complete or the model is safe.",
   "summary": {
-    "checked": true, "alerts_open": 0, "watch_events": 1, "entries": 9, "verified": 6,
+    "checked": false, "alerts_open": 0, "watch_events": 1, "entries": 9, "verified": 6,
     "declared_but_unverified": 1, "conflicting": 0, "unavailable": 2, "gaps": 2, "uncheckable": 1,
     "sources_failed": 1, "sources_stale": 0, "sources_not_checked": 0
   },
-  "findings": {"state": "checked", "alerts": [], "watch_events": [{"kind": "pickle_format", "...": "..."}]},
+  "findings": {"state": "partly_checked", "alerts": [], "watch_events": [{"kind": "pickle_format", "...": "..."}]},
   "assurance": {
     "entries": [
       {
@@ -84,6 +84,13 @@ it out as for any other source. A version with no claim needing confirmation mak
   }
 }
 ```
+
+`findings.state` is one of three values (PR #15 rounds 2 and 3): `checked` once every source in
+`coverage.sources` has succeeded in a run that checked this version (`summary.checked` is then true),
+`partly_checked` while only some have (above: `osv` succeeded, `format-check` failed), and
+`not_yet_checked` while none has. A version with no relevant source is `checked` after any run that
+checked it. A run counts for the version it recorded checking; a run recorded before runs recorded
+their targets counts by its start time.
 
 `discover --json` ([data-model.md](../data-model.md), Discovery result):
 
