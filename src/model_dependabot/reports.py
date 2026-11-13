@@ -8,6 +8,10 @@ evidence (source, retrieval time and the exact identifier matched), so the evide
 itself and ``alert show`` is one step away. The payloads are the ``--json`` output of ``alerts``
 and ``history`` (contracts/cli.md); the text functions render the same payloads for people.
 
+Feature 004: an alert stored open with ``excepted_at`` set is shown as ``excepted`` and listed
+apart, under ``excepted``; the ``alerts`` list never holds one. Every alert view carries its rule ID
+and page (``rule_id``, ``rule_doc``), and a text alert line shows the ID after the alert id.
+
 Reading only: nothing here writes to the store.
 """
 

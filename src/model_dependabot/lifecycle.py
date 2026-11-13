@@ -43,6 +43,17 @@ consulting no source; a gap for the same dependency leaves it as it was. A check
 evaluation both agree the pinned version is unaffected, the hub gives an explicit ``safe`` verdict
 for the matching hash, or the owner's recorded format policy is no longer ``strict``. A person
 dismisses an alert with a listed reason.
+
+Feature 004: a dismissal holds. Before an alert is opened for a cause whose latest alert was
+dismissed, the run's evidence is compared with the dismissed alert's (``_held_dismissal``): with no
+new evidence nothing is opened and the alert id is listed under ``dismissals_held``; new evidence
+opens a new alert whose cause names the dismissed one under ``reopens``. A ``weight_file_scan``
+alert whose every dangerous global is covered by an active exception for its file's hash stays
+stored open but is marked excepted (``excepted_at``); a revoked or expired exception releases it on
+the same id. Under the strict globals policy each local pickle file whose scan has unlisted globals
+gets one ``globals_policy`` alert, cleared when the policy returns to default or nothing is left
+unlisted. Every applied scan is kept in ``file_scans``, and each run tallies per model and check
+source what it did, for the check overview (``assurance/overview.py``).
 """
 
 from __future__ import annotations

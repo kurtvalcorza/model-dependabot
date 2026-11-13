@@ -158,3 +158,26 @@ Per command:
 
 `check` without `--fail-on` still never exits non-zero just because alerts exist, so a scheduler does
 not mistake findings for failures (SC-005).
+
+## As built (T065, 2026-11-14)
+
+- `run show RUN_ID --json` prints `{run_id, scope, trigger, started_at, finished_at, sources, overview}`;
+  its text is the run's header, each source's status, then the overview block. An unknown run exits 1
+  with "no check run N".
+- `check --fail-on` prints, after the overview, `Gate --fail-on HIGH: tripped` or `passed` (with "(a
+  source failed: exit 2 decides)" when exit 2 decided), then one line per tripping alert
+  (`  alert #7 MDB102 HIGH hub_scan (pose-detector)`), per incomplete source (`  incomplete: MODEL
+  SOURCE`), per unchecked model (`  not checked: MODEL`) and `  the scope matched no model`.
+- `--fail-on` with another value exits 1: "argument --fail-on: must be one of CRITICAL, HIGH, MODERATE,
+  LOW, UNKNOWN".
+- `policy` with neither option exits 1: "policy needs --format, --globals or both". Its text reads
+  `ID: format policy P, globals policy G, set by NAME; takes effect at the next check that asks a weight
+  source`.
+- Refusals of `exception record` (exit 1): "an exception needs a reason", "an exception needs the name of
+  who accepted it", "a global is MODULE.NAME or MODULE:NAME", "a SHA-256 is 64 hexadecimal digits", "...
+  names an import the scanner could not resolve ('unknown'); it cannot be excepted", "the expiry date ...
+  is in the past", "an active exception (N) already covers ...". Of `exception revoke`: "no exception
+  N", "exception N is not active (it is revoked|expired)", "a revocation needs a reason" and "a
+  revocation needs the name of who revoked it".
+- A `globals_policy` alert closes as `cleared` with the note `cleared: policy`, `cleared: safe_list`,
+  `cleared: exception` or `cleared: safe_list and exception`.

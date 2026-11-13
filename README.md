@@ -97,7 +97,7 @@ output; both may go before or after the command name.
 | `inventory export ID [--version N] -o FILE` | Writes the stored CycloneDX 1.7 inventory, validated against the official schema |
 | `inventory audit ID [--version N] [--stale-after HOURS]` | Reports one version's findings, how far each entry is verified and which sources have checked it, from the stored data only; see [Auditing an inventory](#auditing-an-inventory). Opens the database read-only, contacts no source and writes nothing |
 | `discover PATH [--manifest FILE] [--model-id ID] [--upstream] [-o FILE [--force]]` | Proposes candidate dependencies for a project folder; see [Discovering dependencies](#discovering-dependencies). Reads nothing outside `PATH` and opens no database. Makes no request unless `--upstream`. Writes nothing unless `-o`, never replaces a file unless `--force` and refuses an `-o` path that is a link |
-| `check (ID \| --all) [--scheduled] [--source ...]` | Runs the checks now and records a check run. Sources: `osv`, `picklescan`, `hf-scan`, `format-check`, `hf-hub`, `hf-takedowns`, `crossref`, `datacite`, `zenodo` and `figshare`; without `--source` every source runs. `--scheduled` marks the run as scheduled and needs `--all` (`check ID --scheduled` exits 1); see [Scheduling](#scheduling) |
+| `check (ID \| --all) [--scheduled] [--source ...] [--fail-on SEVERITY]` | Runs the checks now, records a check run and ends with its [check overview](#the-check-overview). `--fail-on` turns it into a gate; see [Exit codes](#exit-codes). Sources: `osv`, `picklescan`, `hf-scan`, `format-check`, `hf-hub`, `hf-takedowns`, `crossref`, `datacite`, `zenodo` and `figshare`; without `--source` every source runs. `--scheduled` marks the run as scheduled and needs `--all` (`check ID --scheduled` exits 1); see [Scheduling](#scheduling) |
 | `policy ID [--format (default\|strict)] [--globals (default\|strict)] --by NAME` | At least one of the two options. `--format` sets the model's weight-format policy, recording who set it and when. Under `default` a format that can run code when loaded is a watch event; under `strict` a code-capable weight file with no pinned code-free file beside it in the same version raises an alert (an unpinned name proves nothing). Takes effect at the next check. `--globals strict`: any global in a scanned pickle file of the model that is neither on the safe list (`src/model_dependabot/safe_globals/`) nor excepted, dangerous ones included, raises one MODERATE `globals_policy` alert per file; a dangerous global also keeps its HIGH alert |
 | `alerts ID [--state open\|excepted\|closed\|all]` | Lists alerts by severity (`CRITICAL`, `HIGH`, `MODERATE`, `LOW`, `UNKNOWN`), then the excepted alerts in their own list, then the watch events, each with its evidence. The `alerts` list never holds an excepted alert; `--state excepted` lists only the excepted ones |
 | `alert show ALERT_ID` | One alert with all its evidence; for a redacted response, both hashes and the fields removed |
@@ -105,6 +105,7 @@ output; both may go before or after the command name.
 | `exception record --global GLOBAL --sha256 HEX --reason TEXT --by NAME [--expires YYYY-MM-DD]` | Accepts one reviewed global in files with exactly this SHA-256, wherever they are registered; see [Exceptions for globals](#exceptions-for-globals). Changes no alert until the next check that asks a weight source |
 | `exception list [--all] [--sha256 HEX]` | Lists active exceptions (`--all`: also revoked and expired), each with where it applies and whether it is in use |
 | `exception revoke EXCEPTION_ID --reason TEXT --by NAME` | Revokes an active exception, recording who, when and why; the finding returns at the next check |
+| `run show RUN_ID` | A stored check run: its scope, trigger, per-source statuses and check overview. Reads only |
 | `history ID` | Closed alerts with how they closed (`fixed`, `dismissed`, `withdrawn` or `cleared`), when and on what evidence |
 
 Watch events are things worth knowing that are not alerts: a weight file in a format that can run code,
@@ -195,12 +196,20 @@ and [`specs/002-upstream-watch/contracts/cli.md`](specs/002-upstream-watch/contr
 
 | Code | Meaning |
 | :-- | :-- |
-| 0 | Success. For `check`: the check completed, whether or not it found anything |
+| 0 | Success. For `check`: the check completed, whether or not it found anything, unless `--fail-on` tripped (4) |
 | 1 | Invalid input (manifest, inventory or arguments); for `inventory audit` also an unknown model or version or a database older than feature 002; for `discover` a `PATH` that is not a folder, an existing `-o` file without `--force` or an `-o` path that is a link; for `exception record` and `exception revoke` every refusal listed under [Exceptions for globals](#exceptions-for-globals) |
 | 2 | `check` finished but at least one source failed; alerts that depend on it were left unchanged |
-| 3 | Unexpected error |
+| 3 | Unexpected error, including an interrupted run |
+| 4 | Only with `check --fail-on SEVERITY`: no source failed, and a model in the scope has an open alert that is not excepted at or above `SEVERITY` (whichever run raised it), or a source in the `incomplete` state, or no relevant source that checked it, or the scope matched no model |
 
-`check` never exits non-zero just because alerts exist, so a scheduler does not mistake findings for
+Precedence, highest first: 3, 2, 4, 0. With exit 2 the gate is still reported (`gate.decided_exit:
+false`) but does not decide the code. A model whose incomplete state never clears trips `--fail-on` on
+every run unless `--source` leaves that source out: weight files registered from a record whose bytes are
+not on the machine (`weight_file_absent`), a hub file whose verdict stays unknown, a gated base model or a
+paper that stays not found. `SEVERITY` is `CRITICAL`, `HIGH`, `MODERATE`, `LOW` or `UNKNOWN`, in any case;
+`UNKNOWN` counts every alert.
+
+Without `--fail-on`, `check` never exits non-zero just because alerts exist, so a scheduler does not mistake findings for
 failures. Scripts read the `--json` output instead. In the same way `inventory audit` exits 0 whatever it
 reports, and `discover` exits 0 when it completes, even if a hub lookup failed (that candidate is then
 `unavailable`).
@@ -225,6 +234,34 @@ and an exported inventory carries it as the property `model-dependabot:format-or
 inventory is always marked `import`, whatever that property says. A version registered before this
 feature has no origin. It counts as imported unless it was registered from a registration record, so its
 code-free claims also need confirming. `inventory show` notes each claim still unverified.
+
+### The check overview
+
+Every `check` ends with an overview of every source it asked, overall and per model, and stores it with
+the run (`run show RUN_ID` prints it again). Each row is in one state, the first that applies:
+`failed` (the source could not be asked or did not answer, with the reason; its counts are blank),
+`incomplete` (it could not finish some entries: an incomplete scan, a hash mismatch, absent record
+bytes, a hub verdict that is unknown, an unreadable format claim, an unreachable dataset, a paper not
+found or a refused base model), `alerted` (an alert from it is open and not excepted) or `passed`. The
+counts are the relevant entries, the entries not finished, open and excepted alerts, held dismissals
+and watch events. The format rules and the globals policy have their own row, `policy`. A model none of
+whose entries any source asked can check is shown as not checked, so no findings is never read as
+checked.
+
+### Rule IDs
+
+Every alert carries a stable rule ID (`MDB101` to `MDB502`, one per alert kind) and a link to its page
+in [`docs/rules/`](docs/rules/README.md), which says what raises it, what it does not prove, how it
+closes and how to fix or accept it. Text output shows the ID after the alert id. An ID is never reused.
+
+### Dismissals hold
+
+A dismissed alert stays dismissed: a later check that finds the same cause with no new evidence opens no
+new alert and lists the dismissed one under the model's `dismissals_held` (and in the overview's `held`
+column). Evidence is new when its source, URL, matched identifier or content differs from every piece
+linked to the dismissed alert, or the severity is higher; counters that move on every request (download
+and view counts, re-indexing times) are ignored for this comparison only. New evidence opens a new alert
+whose cause names the dismissed one under `reopens`.
 
 ### Exceptions for globals
 
@@ -251,6 +288,16 @@ ones under `excepted`. When an exception is revoked, or its expiry date has pass
 whole day in UTC), the next such check returns the finding on the same alert, recording the release.
 A check with only other sources, `osv` say, does not apply exceptions. Hub weight files are not
 covered: no source reads their globals, so an exception for a hub file's hash is listed as not in use.
+
+Under `policy ID --globals strict` the bar is higher: every global in a scanned local pickle file that is
+neither on the safe list nor excepted, whatever the scanner calls it, is named in one MODERATE
+`globals_policy` alert per file (`MDB104`); a dangerous global keeps its HIGH alert too, and one exception
+covers it in both. The safe list is versioned in
+[`src/model_dependabot/safe_globals/`](src/model_dependabot/safe_globals/README.md). Version 1 holds 30
+exact globals, among them `_codecs.encode` and `numpy.core.multiarray.scalar`, which ordinary checkpoints
+use; the trade-off is that `_codecs.encode` can rebuild arbitrary bytes, as that README explains. Each
+alert cites the list's version and hash, and closes when the policy returns to `default` or nothing is
+left unlisted.
 
 ### Auditing an inventory
 

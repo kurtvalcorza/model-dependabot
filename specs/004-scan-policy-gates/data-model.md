@@ -88,7 +88,7 @@ The loader also computes the SHA-256 of the file as read, which alerts cite.
 | cause `reopens` | on an alert opened for a cause whose latest alert was dismissed, because the check brought new evidence: `{alert_id, dismissed_by, dismissal_reason, closed_at}` (FR-020, research S13) |
 | `weight_file_scan` cause | gains `excepted: [{global, exception_id, accepted_by, recorded_at, expires_on}]` and, after a release, `released: [{global, exception_id, why: "revoked" \| "expired", at}]` |
 
-**`globals_policy` cause** (key `globals_policy:<sha256>`, research S7):
+**`globals_policy` cause** (key `globals_policy:sha256:<hex>`, built like every weight alert's key by `weight_cause_key`, research S7):
 
 ```json
 {
@@ -132,8 +132,8 @@ dismissed ──(cause found again, new evidence)─────▶ dismissed; a
 ```text
 (none) ──(strict, unlisted not empty)─────────────────▶ open
 open   ──(strict, unlisted changed, still not empty)──▶ open, cause and evidence updated
-open   ──(policy default)─────────────────────────────▶ cleared, cause "policy"
-open   ──(unlisted empty: safe list or exceptions)────▶ cleared, cause "safe_list" and/or "exception"
+open   ──(policy default)─────────────────────────────▶ cleared, note "cleared: policy"
+open   ──(unlisted empty: safe list or exceptions)────▶ cleared, note "cleared: safe_list", "cleared: exception" or "cleared: safe_list and exception"
 open   ──(new version without the file)───────────────▶ fixed (existing re-evaluation)
 open   ──(owner dismisses)────────────────────────────▶ dismissed
 ```
@@ -205,3 +205,15 @@ No new column. Each model in the `check` payload gains `dismissals_held` (alert 
 `summary.alerts_open` excludes excepted alerts; `summary.alerts_excepted` counts them;
 `findings.excepted` lists them in the shape `alerts` prints. When the database has overview rows for the
 version, `coverage.sources[]` items gain `last_state` (the row's state in that source's latest run).
+
+## As built (T065, 2026-11-14)
+
+- The `globals-policy` evidence record is `{model_id, identifier, globals_policy, set_by, set_at,
+  safe_list_version, safe_list_sha256, unlisted, excepted}`, with `unlisted` and `excepted` sorted global
+  names; a `globals_policy` alert also links the scan's evidence row and the evidence of each exception
+  that took a global off its list.
+- An incomplete scan keeps a `globals_policy` alert open even when nothing is unlisted (`scan.complete:
+  false` in its cause).
+- A model whose every overview row is `failed` reads `checked: false` with the reason "every source that
+  could check this model failed".
+- The per-model summary of a check (`models[]`) always has `dismissals_held`, empty when nothing held.

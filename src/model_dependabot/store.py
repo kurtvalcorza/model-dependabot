@@ -25,7 +25,9 @@ Feature 004 adds global exceptions (``global_exceptions``, never deleted, only r
 applied scan saw (``file_scans``), the check overview (``check_run_overview``), the globals policy
 columns on ``models`` and ``alerts.excepted_at``. An older database gains them on open, one
 transaction per step; ``alerts`` is rebuilt once, keeping every row and id, so its kind check
-accepts ``globals_policy``.
+accepts ``globals_policy``. An excepted alert keeps the stored state ``open`` (``excepted_at`` is
+set), and a dismissed alert stays dismissed while checks bring no new evidence: ``latest_alert`` and
+``matching_key`` (which drops each source's ``VOLATILE_FIELDS``) serve that comparison only.
 """
 
 from __future__ import annotations
