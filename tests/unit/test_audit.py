@@ -221,7 +221,8 @@ def test_the_latest_run_after_registration_that_asked_the_source_counts(
     assert osv["status"] == "failed: HTTP 503 after 4 attempts"
     assert osv["last_ok_at"] is None
     assert report["summary"]["sources_failed"] == 1
-    assert report["summary"]["checked"] is True
+    # The only relevant source failed, so the version is not checked (review F6).
+    assert report["summary"]["checked"] is False
     assert {before, other, not_asked}.isdisjoint({osv["last_run_id"]})
 
 
@@ -277,3 +278,83 @@ def test_unknown_models_and_versions_are_refused(store: Store) -> None:
         audit(store, "nobody")
     with pytest.raises(LookupError):
         audit(store, "m", version=7)
+
+
+# --- PR #15 round 1 (reviews F1, F3, F6, F7) ------------------------------------------------------
+
+
+def test_an_older_version_is_not_credited_with_runs_that_checked_a_later_one(
+    store: Store, clock: Clock
+) -> None:
+    """Review F1: a check examines the latest version only."""
+    register(store, [package(identifier="pkg:pypi/oldvuln@1.0", name="oldvuln", version="1.0")])
+    clock.now += timedelta(hours=1)
+    register(store, [package()])
+    run(store, clock, {"osv": "ok"})
+    old = audit(store, "m", version=1)
+    assert old["findings"]["state"] == "not_yet_checked"
+    [osv] = old["coverage"]["sources"]
+    assert (osv["status"], osv["last_run_id"]) == ("not checked", None)
+    assert audit(store, "m")["findings"]["state"] == "checked"
+
+
+def test_a_run_that_asked_no_relevant_source_has_not_checked_the_version(
+    store: Store, clock: Clock
+) -> None:
+    """Review F6: findings say checked only once a relevant source succeeded."""
+    register(store, [package()])
+    run(store, clock, {"hf-hub": "failed: HTTP 503 after 4 attempts"})
+    report = audit(store, "m")
+    assert report["findings"]["state"] == "not_yet_checked"
+    assert report["summary"]["checked"] is False
+    run(store, clock, {"osv": "ok"})
+    assert audit(store, "m")["summary"]["checked"] is True
+
+
+def test_a_contradicted_code_free_claim_is_audited_as_the_pickle_it_is(store: Store) -> None:
+    """Review F3: picklescan is relevant to the file the bytes showed, not to the claim."""
+    register(store, [weight(format_origin="import")], origin="import")
+    evidence = store.add_evidence(
+        source="format-check", url="", retrieved_at=START, matched_identifier=SHA, body=b"{}"
+    )
+    store.add_claim_check(
+        model_id="m",
+        version=1,
+        entry_identifier=SHA,
+        claim="code_free",
+        run_id=None,
+        outcome="contradicted",
+        measured_format="pickle",
+        measured_can_run_code=True,
+        reason="the bytes show pickle",
+        evidence_id=evidence,
+    )
+    sources = {item["source"]: item for item in audit(store, "m")["coverage"]["sources"]}
+    assert sources["picklescan"]["relevant_entries"] == [SHA]
+
+
+@pytest.mark.parametrize(
+    ("entry", "reason"),
+    [
+        (
+            weight(
+                location=None,
+                hub_repo="o/n",
+                hub_revision="main",
+                hub_file="model.safetensors",
+                format_origin="import",
+            ),
+            "not pinned to a commit",
+        ),
+        (weight(location=None, format_origin="import"), "no location"),
+    ],
+)
+def test_a_claim_format_check_can_never_read_is_uncheckable(
+    store: Store, entry: dict[str, Any], reason: str
+) -> None:
+    """Review F7: format-check skips these, so it is not listed as covering them."""
+    register(store, [entry], origin="import")
+    report = audit(store, "m")
+    assert "format-check" not in {item["source"] for item in report["coverage"]["sources"]}
+    [item] = report["coverage"]["uncheckable"]
+    assert reason in item["reason"]

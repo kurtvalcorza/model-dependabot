@@ -28,10 +28,12 @@ from model_dependabot.assurance.trust import (
     IDENTITY,
     claim_verification,
     latest_check,
+    measured_entries,
     needs_confirmation,
 )
 from model_dependabot.reports import alert_view, watch_view
 from model_dependabot.sources import crossref, datacite
+from model_dependabot.sources.hf import is_commit
 from model_dependabot.store import Store, utc_text
 
 STATEMENT = "No alerts is not evidence that the inventory is complete or the model is safe."
@@ -53,6 +55,11 @@ UNKNOWN_FORMAT = "the file's format is unknown"
 NO_AGENCY = "the DOI's registration agency is not known, so no source is asked about it"
 NO_SOURCE = "no source checks this entry"
 NOT_CHECKED = "not checked"
+NO_COMMIT = (
+    "format-check never reads a hub file not pinned to a commit, so its format claim cannot be"
+    " confirmed"
+)
+NO_LOCATION = "format-check has no location to read, so the format claim cannot be confirmed"
 KIND_NAMES = {
     "environment": "package",
     "base_model": "base_model",
@@ -122,7 +129,7 @@ def relevant_sources(store: Store, entry: Mapping[str, Any], origin: str | None)
             found.append("hf-scan")
         elif entry.get("can_run_code"):
             found.append("picklescan")
-        if needs_confirmation(entry, origin):
+        if needs_confirmation(entry, origin) and _unconfirmable(entry) is None:
             found.append("format-check")
     elif kind == "base_model":
         found.append("hf-hub")
@@ -131,6 +138,15 @@ def relevant_sources(store: Store, entry: Mapping[str, Any], origin: str | None)
     elif kind == "dataset":
         found += _doi_sources(store, str(entry["identifier"]))
     return found
+
+
+def _unconfirmable(entry: Mapping[str, Any]) -> str | None:
+    """Why ``format-check`` can never read a weight file's claim (as ``pending`` skips it)."""
+    if entry.get("hub_repo") and not is_commit(entry.get("hub_revision")):
+        return NO_COMMIT
+    if not entry.get("hub_repo") and not entry.get("location"):
+        return NO_LOCATION
+    return None
 
 
 def _uncheckable_reason(entry: Mapping[str, Any], sources: Sequence[str]) -> str | None:
@@ -208,12 +224,16 @@ def audit_report(
     origin = record.get("origin")
     entries = store.entries(model_id, chosen)
     checks = store.claim_checks(model_id, chosen)
-    runs = store.check_runs_for(model_id, since=record["registered_at"])
+    # A check run checks the model's latest version, so the runs that checked this one started
+    # after it was registered and before the next version was (review F1).
+    until = store.registered_at(model_id, chosen + 1)
+    runs = store.check_runs_for(model_id, since=record["registered_at"], until=until)
 
     assured: list[dict[str, Any]] = []
     uncheckable: list[dict[str, Any]] = []
     relevant: dict[str, list[str]] = {}
-    for entry in entries:
+    measured = measured_entries(entries, checks)
+    for entry, seen in zip(entries, measured, strict=True):
         claims = claim_verification(entry, origin, checks)
         identifier = entry.get("identifier")
         latest = max(
@@ -238,10 +258,13 @@ def audit_report(
                 "claims": claims,
             }
         )
-        sources = relevant_sources(store, entry, origin)
+        sources = relevant_sources(store, seen, origin)
         for source in sources:
             relevant.setdefault(source, []).append(_label(entry))
-        reason = _uncheckable_reason(entry, sources)
+        reason = _uncheckable_reason(seen, sources)
+        weight = entry["kind"] == "weight_file" and entry.get("pinned")
+        if reason is None and weight and needs_confirmation(entry, origin):
+            reason = _unconfirmable(entry)
         if reason is not None:
             uncheckable.append(
                 {
@@ -260,8 +283,11 @@ def audit_report(
     alerts = [alert_view(store, alert) for alert in store.alerts_for(model_id, ["open"])]
     events = [watch_view(event) for event in store.watch_events(model_id, chosen)]
     counts = {status: sum(item["status"] == status for item in assured) for status in STATUSES}
+    # A run that asked none of the relevant sources, or whose relevant sources all failed, has
+    # not checked the version (review F6); a version with nothing to check counts any run.
+    checked = any(item["last_ok_at"] for item in coverage) if coverage else bool(runs)
     summary = {
-        "checked": bool(runs),
+        "checked": checked,
         "alerts_open": len(alerts),
         "watch_events": len(events),
         "entries": len(entries),
@@ -285,7 +311,7 @@ def audit_report(
         "statement": STATEMENT,
         "summary": summary,
         "findings": {
-            "state": "checked" if runs else "not_yet_checked",
+            "state": "checked" if checked else "not_yet_checked",
             "alerts": alerts,
             "watch_events": events,
         },

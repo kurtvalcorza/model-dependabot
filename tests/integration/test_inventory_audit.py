@@ -119,11 +119,12 @@ def test_audit_before_and_after_a_check_with_a_failed_source(cli: Cli, project: 
     assert code == EXIT_OK
     assert _snapshot(cli.db) == before
     summary = report["summary"]
-    assert summary["checked"] is True
+    # hf-scan, the only relevant source, failed: 0 alerts must not read as checked (review F6).
+    assert summary["checked"] is False
     assert summary["alerts_open"] == 0
     assert summary["gaps"] == 2  # the base model has no revision, the dataset no DOI
     assert summary["sources_failed"] == 1
-    assert report["findings"]["state"] == "checked"
+    assert report["findings"]["state"] == "not_yet_checked"
     assert report["findings"]["alerts"] == []
     assert report["statement"] == STATEMENT
     assert "environment" in report["assurance"]["undeclared_kinds"]

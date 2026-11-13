@@ -65,6 +65,7 @@ from model_dependabot.assurance.trust import (
     LEGACY,
     counts_as_code_free,
     latest_check,
+    measured_entries,
     needs_confirmation,
 )
 from model_dependabot.inventory.build import HUB_DATASET_PREFIX, hash_stream, huggingface_purl
@@ -223,6 +224,7 @@ def run_check(
         with contextlib.suppress(Exception):  # the original error is the one to report
             store.finish_check_run(run_id, final)
         raise
+    statuses = {source: statuses[source] for source in sources if source in statuses}
     store.finish_check_run(run_id, statuses)
     return CheckOutcome(run_id, statuses, [target.summary for target in targets])
 
@@ -268,7 +270,10 @@ def _check(
 
     wanted = [source for source in sources if source in UPSTREAM_SOURCES]
     upstream = _read_upstream(store, fetcher, targets, wanted) if wanted else None
-    for source in sources:
+    # format-check runs before picklescan, so a code-free claim it contradicts is scanned as the
+    # pickle its bytes show in the same run (review F3); statuses keep the order asked for.
+    ordered = sorted(sources, key=lambda source: source != FORMAT_CHECK)
+    for source in ordered:
         if upstream is not None and source in UPSTREAM_SOURCES:
             statuses[source] = upstream.statuses[source]
             continue
@@ -811,27 +816,14 @@ def _code_free(
 def _measured(
     entries: Sequence[Mapping[str, Any]], checks: Sequence[Mapping[str, Any]]
 ) -> list[Mapping[str, Any]]:
-    """The entries with each contradicted code-free claim replaced by what the bytes showed.
+    """The entries as their bytes showed them (``trust.measured_entries``): a contradicted
+    code-free file gets the ``pickle_format`` watch event and, under the strict policy, a
+    ``format_policy`` alert of its own, and picklescan scans it (review F3)."""
+    return measured_entries(entries, checks)
 
-    The stored entry is immutable (FR-005), so a claim that ``format-check`` contradicted is
-    applied here: the file is the code-capable format its bytes show (FR-003), so it gets the
-    ``pickle_format`` watch event and, under the strict policy, a ``format_policy`` alert of its
-    own.
-    """
-    result: list[Mapping[str, Any]] = []
-    for entry in entries:
-        latest = latest_check(checks, entry.get("identifier"), CODE_FREE)
-        if entry["kind"] == "weight_file" and latest and latest["outcome"] == "contradicted":
-            result.append(
-                dict(
-                    entry,
-                    format=latest["measured_format"],
-                    can_run_code=latest["measured_can_run_code"],
-                )
-            )
-        else:
-            result.append(entry)
-    return result
+
+def _measured_target(store: Store, target: _Target) -> list[Mapping[str, Any]]:
+    return _measured(target.entries, store.claim_checks(target.model_id, target.version))
 
 
 def _unconfirmed_claims(
@@ -1206,7 +1198,7 @@ def _read_local_scans(
     """Scan every local code-capable file before anything changes; a file is never loaded."""
     scans: dict[tuple[str, int, str], _LocalScan] = {}
     for target in targets:
-        for entry in _code_capable(target.entries):
+        for entry in _code_capable(_measured_target(store, target)):
             if entry.get("hub_repo") or not entry.get("location"):
                 continue
             path = _local_path(target, entry["location"])
@@ -1238,7 +1230,7 @@ def _read_local_scans(
 def _apply_local_scans(
     store: Store, run_id: int, target: _Target, scans: Mapping[tuple[str, int, str], _LocalScan]
 ) -> None:
-    for entry in _code_capable(target.entries):
+    for entry in _code_capable(_measured_target(store, target)):
         identifier = entry["identifier"]
         scan = scans.get((target.model_id, target.version, identifier))
         if scan is None:

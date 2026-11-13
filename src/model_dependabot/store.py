@@ -1144,17 +1144,21 @@ class Store:
         row = self.conn.execute(query, params).fetchone()
         return None if row["r"] is None else self.get_check_run(row["r"])
 
-    def check_runs_for(self, model_id: str, since: str) -> list[dict[str, Any]]:
-        """Finished runs started at or after ``since`` whose scope covered the model, newest first.
+    def check_runs_for(
+        self, model_id: str, since: str, until: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Finished runs started at or after ``since`` (and before ``until``, if given) whose scope
+        covered the model, newest first.
 
         A run covers the model when its scope is ``all`` or names it (``check ID`` records the
         id; a run over several models records them joined by commas).
         """
-        rows = self.conn.execute(
-            "SELECT * FROM check_runs WHERE finished_at IS NOT NULL AND started_at >= ?"
-            " ORDER BY run_id DESC",
-            (since,),
-        ).fetchall()
+        query = "SELECT * FROM check_runs WHERE finished_at IS NOT NULL AND started_at >= ?"
+        params: tuple[str, ...] = (since,)
+        if until is not None:
+            query += " AND started_at < ?"
+            params += (until,)
+        rows = self.conn.execute(query + " ORDER BY run_id DESC", params).fetchall()
         runs = []
         for row in rows:
             if row["scope"] != SCOPE_ALL and model_id not in str(row["scope"]).split(","):

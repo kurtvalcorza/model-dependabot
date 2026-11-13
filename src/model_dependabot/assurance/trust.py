@@ -149,3 +149,26 @@ def claim_verification(
     if kind == "dataset" and entry.get("hashes"):
         return [_claim("sha256", entry.get("hashes"), origin, verification, reason)]
     return []
+
+
+def measured_entries(entries: Sequence[Entry], checks: Sequence[Check]) -> list[Entry]:
+    """The entries with each contradicted code-free claim replaced by what the bytes showed.
+
+    The stored entry is immutable (FR-005), so a claim that ``format-check`` contradicted is
+    applied where the entries are used: the file is the format its bytes show (FR-003), so it is
+    scanned, ruled on and audited as that format, never as the claim (review F3).
+    """
+    result: list[Entry] = []
+    for entry in entries:
+        latest = latest_check(checks, entry.get("identifier"), CODE_FREE)
+        if entry.get("kind") == "weight_file" and latest and latest["outcome"] == "contradicted":
+            result.append(
+                dict(
+                    entry,
+                    format=latest["measured_format"],
+                    can_run_code=latest["measured_can_run_code"],
+                )
+            )
+        else:
+            result.append(entry)
+    return result
