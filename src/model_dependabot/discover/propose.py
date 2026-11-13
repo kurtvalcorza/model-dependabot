@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from model_dependabot.discover.candidate import (
+    CONFLICTING,
     DECLARED,
     VERIFIED,
     origin_text,
@@ -26,6 +27,10 @@ from model_dependabot.discover.candidate import (
 from model_dependabot.manifest import ManifestError, load_manifest
 
 SEVERAL_LOCKS = "several lock files; choose one"
+LOCK_CONFLICTS = (
+    "the lock file pins a package declared at another version elsewhere; settle the conflict"
+    " before you use it"
+)
 RULE = "# --- not registered as written: uncomment what you accept " + "-" * 38
 
 
@@ -150,6 +155,16 @@ def render(result: Mapping[str, Any], model_id: str, root: Path, output: Path) -
         item for item in candidates if item["kind"] == "environment" and item["status"] == DECLARED
     ]
     lock = locks[0] if len(locks) == 1 else None
+    # A lock pinning a conflicting package is never active: registering the draft would adopt
+    # that pin (FR-022, PR #15 round 3 T4). It and its packages stay comments.
+    conflicted = lock is not None and any(
+        item["kind"] == "package"
+        and item["status"] == CONFLICTING
+        and item["origin"].get("file") == lock["identity"]["lock"]
+        for item in candidates
+    )
+    if conflicted:
+        lock = None
     active = {id(item) for item in [*weights, *([lock] if lock else [])]}
     if lock is not None:
         # The lock's own packages are registered through it, so they are not commented again.
@@ -187,6 +202,8 @@ def render(result: Mapping[str, Any], model_id: str, root: Path, output: Path) -
         lines += ["", RULE]
     if len(locks) > 1:
         lines.append(_comment(SEVERAL_LOCKS))
+    if conflicted:
+        lines.append(_comment(LOCK_CONFLICTS))
     for item in rest:
         lines += _block(item)
     for item in skipped:

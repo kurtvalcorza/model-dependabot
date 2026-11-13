@@ -130,12 +130,13 @@ def test_the_proposed_manifest_registers_only_what_is_measured_or_pinned(
     assert code == EXIT_OK
     with Store(db) as store:
         entries = store.entries("proposed-check", 1)
-    assert sorted({entry["kind"] for entry in entries}) == ["package", "weight_file"]
+    # The lock pins numpy 2.1.0 while requirements-dev.txt pins 2.0.2, so the lock stays a
+    # comment and registering the draft adopts no package (PR #15 round 3, T4).
+    assert sorted({entry["kind"] for entry in entries}) == ["weight_file"]
     assert {e["location"] for e in entries if e["kind"] == "weight_file"} == {
         "../work/detector/runs/best.safetensors",
         "../work/detector/weights/good.safetensors",
     }
-    assert {e["name"] for e in entries if e["kind"] == "package"} == {"numpy", "torch"}
 
     code, _ = invoke("discover", str(detector_project), "-o", str(out))
     assert code == EXIT_INVALID_INPUT

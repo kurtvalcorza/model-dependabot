@@ -13,6 +13,7 @@ from conftest import make_directory_link
 from model_dependabot.discover.candidate import candidate
 from model_dependabot.discover.project import discover, write_proposal
 from model_dependabot.discover.propose import (
+    LOCK_CONFLICTS,
     SEVERAL_LOCKS,
     OutputExistsError,
     OutputLinkError,
@@ -264,3 +265,20 @@ def test_an_output_junction_is_refused(tmp_path: Path) -> None:
     with pytest.raises(OutputLinkError):
         write('[model]\nid = "m"\n', link, force=True)
     assert not (tmp_path / "outside").exists()
+
+
+def test_a_lock_that_pins_a_conflicting_package_is_only_a_comment(
+    project: Path, tmp_path: Path
+) -> None:
+    """PR #15 round 3, T4: registering the draft must not adopt a conflicting pin (FR-022)."""
+    identity = {"name": "numpy", "version": "2.1.0", "hashes": [], "requirement": "numpy==2.1.0"}
+    origin = {"file": "requirements.lock.txt", "line": 2}
+    pinned = candidate("package", identity, origin, "conflicting", NOW)
+    found = result(lock("requirements.lock.txt"), pinned)
+    out = tmp_path / "proposed.toml"
+    text = written(project, out, found)
+    assert "environment" not in tomllib.loads(text)
+    comments = [line for line in text.splitlines() if line.startswith("#")]
+    assert f"# {LOCK_CONFLICTS}" in comments
+    assert any("environment:" in line and "requirements.lock.txt" in line for line in comments)
+    assert any("numpy==2.1.0" in line for line in comments)

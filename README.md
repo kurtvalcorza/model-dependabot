@@ -262,7 +262,8 @@ the manifest declares but discovery did not see is listed. With `--upstream` it 
 models and hub datasets the card names; the hub's current commit is shown as a proposed revision,
 labelled as the head when it was read, never as the training revision. With `-o FILE` it writes a draft
 manifest in the usual format: only the model id, the local weight files and a single hash-locked
-requirements file are active; every other candidate is a comment, so registering the draft as written
+requirements file that pins no conflicting package are active; every other candidate is a comment, so
+registering the draft as written
 registers none of them.
 
 Discovery never runs project code, imports model code or loads weights. It follows no URL and no link
