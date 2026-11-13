@@ -1299,6 +1299,7 @@ def _apply_report(
     """Alerts and watch events from one file's scan, made now or recorded where the file is."""
     identifier = entry["identifier"]
     location = entry["location"]
+    _record_file_scan(store, run_id, identifier, report, url, retrieved_at, body)
     base = {
         "scanner": report.scanner,
         "scanner_version": report.scanner_version,
@@ -1329,6 +1330,54 @@ def _apply_report(
         }
         observation = _Observation(report.scanner, url, retrieved_at, body, detail)
         _watch(store, run_id, target, SCAN_INCOMPLETE, identifier, detail, [observation])
+
+
+def _record_file_scan(
+    store: Store,
+    run_id: int | None,
+    identifier: str,
+    report: pickle_scan.ScanReport,
+    url: str,
+    retrieved_at: Any,
+    body: bytes,
+) -> None:
+    """Keep what the scan saw, so exceptions and the strict globals policy can be applied at any
+    later check without reading the file (feature 004, research S2, S11).
+
+    The scan's evidence is the report as JSON; the evidence of the hash's latest file scan is
+    reused when it is the same report from the same place.
+    """
+    sha256 = identifier.removeprefix("sha256:")
+    latest = store.latest_file_scan(sha256)
+    evidence_id = None
+    if latest is not None:
+        previous = store.get_evidence(int(latest["evidence_id"]))
+        if previous is not None and same_evidence(previous, report.scanner, url, body):
+            evidence_id = int(previous["evidence_id"])
+    if evidence_id is None:
+        evidence_id = store.add_evidence(
+            source=report.scanner,
+            url=url,
+            retrieved_at=retrieved_at,
+            matched_identifier=identifier,
+            body=body,
+            detail={
+                "scanner": report.scanner,
+                "scanner_version": report.scanner_version,
+                "complete": report.complete,
+            },
+            run_id=run_id,
+        )
+    store.add_file_scan(
+        sha256=sha256,
+        scanner=report.scanner,
+        scanner_version=report.scanner_version,
+        complete=report.complete,
+        globals=[{"module": f.module, "name": f.name, "safety": f.safety} for f in report.findings],
+        scanned_at=retrieved_at,
+        run_id=run_id,
+        evidence_id=evidence_id,
+    )
 
 
 def apply_recorded_scans(
