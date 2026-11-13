@@ -25,7 +25,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any
+from typing import Any, BinaryIO
 
 from model_dependabot.assurance.trust import (
     CODE_FREE,
@@ -33,7 +33,13 @@ from model_dependabot.assurance.trust import (
     latest_check,
     needs_confirmation,
 )
-from model_dependabot.inventory.build import NO_ONNX_STRUCTURE, classify, hash_file, shows_onnx
+from model_dependabot.inventory.build import (
+    NO_ONNX_STRUCTURE,
+    ZIP_TAIL,
+    classify,
+    hash_file,
+    shows_onnx,
+)
 from model_dependabot.sources.fetcher import Fetcher, SourceFailedError
 from model_dependabot.sources.hf import HEADER_LEAD, HuggingFace, is_commit
 from model_dependabot.store import Store
@@ -125,15 +131,23 @@ def pending(
     return found
 
 
+def _ends(handle: BinaryIO, size: int) -> tuple[bytes, bytes]:
+    """A local file's first ``HEADER_LEAD`` bytes and its last ``ZIP_TAIL`` bytes."""
+    lead = handle.read(HEADER_LEAD)
+    handle.seek(max(0, size - ZIP_TAIL))
+    return lead, handle.read(ZIP_TAIL)
+
+
 def _unproven_onnx(
-    file_format: str | None, can_run_code: bool | None, lead: bytes, size: int
+    file_format: str | None, can_run_code: bool | None, lead: bytes, size: int, tail: bytes
 ) -> bool:
     """An ``.onnx`` file classified code-free by its name whose bytes show no ONNX model.
 
     Its imported code-free claim stays unverified (review F2, PR #15 R5): the claim check is
     ``unreadable`` with ``NO_ONNX_STRUCTURE``, so the claim never counts under the strict policy.
+    A zip signature in the file's lead or tail refuses it too (PR #15 round 2, G2).
     """
-    return file_format == "onnx" and can_run_code is False and not shows_onnx(lead, size)
+    return file_format == "onnx" and can_run_code is False and not shows_onnx(lead, size, tail)
 
 
 def _code_free_outcome(
@@ -248,11 +262,11 @@ def measure_imported(
             if f"sha256:{sha256}" != entry["identifier"]:
                 continue
             with path.open("rb") as handle:
-                lead = handle.read(HEADER_LEAD)
+                lead, tail = _ends(handle, size)
             file_format, can_run_code = classify(path.name, path)
         except OSError:
             continue
-        if _unproven_onnx(file_format, can_run_code, lead, size):
+        if _unproven_onnx(file_format, can_run_code, lead, size, tail):
             continue  # the name alone confirms nothing: format-check reads it as unverified
         claimed = (entry["format"], entry["can_run_code"])
         contradicted = claimed[1] is False and can_run_code is not False
@@ -338,7 +352,7 @@ def read_local(
     try:
         sha256, size = hash_file(path)
         with path.open("rb") as handle:
-            lead = handle.read(HEADER_LEAD)
+            lead, tail = _ends(handle, size)
         file_format, can_run_code = classify(path.name, path)
     except OSError as error:
         return unreadable(f"cannot read the file: {error.strerror or error}", path.as_uri())
@@ -355,7 +369,7 @@ def read_local(
         identity, identity_reason = "contradicted", reason
     else:
         identity, identity_reason = "confirmed", None
-    unproven = _unproven_onnx(file_format, can_run_code, lead, size)
+    unproven = _unproven_onnx(file_format, can_run_code, lead, size, tail)
     return _rows(
         target,
         entry,

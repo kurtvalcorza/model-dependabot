@@ -403,3 +403,22 @@ def test_import_does_not_take_an_onnx_name_for_a_measured_class(tmp_path: Path) 
     assert [measure.entry["location"] for measure in measures] == ["model.onnx"]
     assert decoy["format_origin"] == "import"  # the claim is left for format-check
     assert honest["format_origin"] == "bytes"
+
+
+def test_an_onnx_prefix_in_front_of_a_zip_is_not_confirmed(store: Store, tmp_path: Path) -> None:
+    """PR #15 round 2, G2: a zip reader finds its directory at the end, past the 1 MiB lead."""
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("archive/data.pkl", b"\x80\x04N.")
+    padding = 2 * 1024 * 1024
+    # ir_version 8, a graph field of 2 MiB (the varint 80 80 80 01) and a zip after it
+    content = b"\x08\x08\x3a\x80\x80\x80\x01" + bytes(padding) + buffer.getvalue()
+    assert b"PK" not in content[: 1024 * 1024]
+    (tmp_path / "bom").mkdir()
+    (tmp_path / "bom" / "model.onnx").write_bytes(content)
+    target = _target(store, [_onnx("model.onnx", content)], base_dir=tmp_path / "bom")
+    _run(store, NoNetwork(), [target])
+    assert ("code_free", "unreadable", None) in _outcomes(store, target)

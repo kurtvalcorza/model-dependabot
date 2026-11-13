@@ -375,3 +375,32 @@ def test_a_safetensors_header_longer_than_the_lead_asks_for_more_bytes() -> None
 def test_shows_onnx_needs_a_model_proto(lead: bytes | Path, total: int | None, shown: bool) -> None:
     data = lead.read_bytes() if isinstance(lead, Path) else lead
     assert shows_onnx(data, len(data) if total is None else total) is shown
+
+
+def _pickle_zip() -> bytes:
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("archive/data.pkl", b"\x80\x04N.")
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("lead", "total", "tail"),
+    [
+        (b"\x08\x07\x10\x01", None, b""),  # field 2 (producer_name) given as a varint
+        (b"\x08\x07\x0a\x00", None, b""),  # field 1 (ir_version) given as a length
+        (b"\x08\x07", 0, b""),  # a lead longer than the file it is said to begin
+        (b"\x08\x07", 1, b""),
+        # a zip inside a field, then a zip at the end of the file, past the lead
+        (b"\x08\x08\x3a" + bytes([len(_pickle_zip())]) + _pickle_zip(), None, b""),
+        (b"\x08\x08\x3a\xff\xff\x7f", 3_000_000, _pickle_zip()),
+    ],
+)
+def test_shows_onnx_refuses_wrong_wire_types_sizes_and_zips(
+    lead: bytes, total: int | None, tail: bytes
+) -> None:
+    """PR #15 round 2, G2 and G3."""
+    assert shows_onnx(lead, len(lead) if total is None else total, tail) is False

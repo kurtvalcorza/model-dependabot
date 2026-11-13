@@ -218,17 +218,30 @@ def _varint(data: bytes, at: int) -> tuple[int, int] | None:
     return None
 
 
-def shows_onnx(lead: bytes, total_size: int) -> bool:
+# A zip's local file header and its end-of-central-directory record (PKWARE APPNOTE 4.3).
+_ZIP_SIGNATURES = (b"PK\x03\x04", b"PK\x05\x06")
+ZIP_TAIL = 22 + 0xFFFF  # the end record and the longest comment it may carry
+
+
+def shows_onnx(lead: bytes, total_size: int, tail: bytes = b"") -> bool:
     """Whether the first bytes of a file read as an ONNX ``ModelProto`` (review F2, PR #15 R5).
 
     A positive test, used where an imported claim that an ``.onnx`` file cannot run code is to be
     confirmed: the name alone never confirms it. The file must start with the ``ir_version``
     field, which serialisers write first, with a plausible value, and every top-level field read
     from ``lead`` must be one ``ModelProto`` has, with its wire type and a length that fits
-    ``total_size``; a file read whole must end exactly at a field's end. A pickle of any protocol
-    or a zip cannot pass: none starts with the byte ``0x08``.
+    ``total_size``; a file read whole must end exactly at a field's end.
+
+    No pickle starts with the byte ``0x08``, so a pickle never passes. A zip may carry leading
+    bytes, though, and a zip reader finds its directory from the end of the file, so a valid
+    ``ModelProto`` prefix can sit in front of an archive (PR #15 round 2, G2). Such a file is
+    refused when a zip signature appears in ``lead`` or in ``tail``, the last ``ZIP_TAIL`` bytes,
+    where a local file's caller passes them. A hub file's tail is not read, so a zip whose
+    entries and directory all lie beyond the lead is the case this test cannot see.
     """
-    if not lead.startswith(b"\x08"):
+    if not lead.startswith(b"\x08") or not 0 < len(lead) <= total_size:
+        return False
+    if any(signature in part for signature in _ZIP_SIGNATURES for part in (lead, tail)):
         return False
     at = 0
     limit = min(len(lead), total_size)
