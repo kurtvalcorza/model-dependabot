@@ -114,7 +114,13 @@ The alert's `globals-policy` evidence record carries the sorted `unlisted` and `
 change in either (an exception released, say) is new evidence for a dismissed alert (research S7, S13).
 A global whose module or name contains the lower-case string `unknown` (compared case-sensitively, as the scanner does) is never excepted or safe-listed (research S14).
 
-**Dismissed alerts of every kind** (FR-020):
+**Dismissed alerts of every kind** (FR-020). New evidence is an observation with no match among the
+dismissed alert's evidence (same source, URL, matched identifier and matching key), or a higher
+severity. The matching key (`store.matching_key`) is the canonical hash of the body after removing the
+source's `VOLATILE_FIELDS`, dotted paths into the JSON object (research S13): `downloads`, `likes` and
+`lastModified` for the hub's answers (stored sources `huggingface.co` and `hf-hub`), `stats` for Zenodo,
+`message.indexed` and `message.is-referenced-by-count` for Crossref and eleven
+`data.attributes.*Count` and `*OverTime` keys for DataCite. Stored evidence stays whole:
 
 ```text
 dismissed ──(cause found again, no new evidence)──▶ dismissed, held (run summary dismissals_held)

@@ -463,10 +463,10 @@ answer that `hf-scan` keeps as evidence (`_hub_observations`, `lifecycle.py:1443
 `downloads`, `likes` and `lastModified`, which move without any change to the scan verdict. For held
 dismissals only, the content key of a JSON body is computed after removing the fields named for its
 source in one table, `VOLATILE_FIELDS`, keyed by the evidence row's `source` exactly as stored (for the
-hub's scan answers that is the host name `source_of` returns, not `hf-scan`); only top-level keys of a
-JSON object are removed, never nested ones (to start: `downloads`, `likes` and `lastModified` for the hub
-answers; any others found by the fixture survey of every folder whose answers become evidence, `hf/`
-and `doi_ra/` included). The stored evidence and its `canonical_sha256` are unchanged; the table is
+hub's scan answers that is the host name `source_of` returns, not `hf-scan`). Each field is a dotted
+path into a JSON object, so nested keys can be named (owner's ruling 2026-11-14, which replaced the
+first rule of top-level keys only); the fields are the table below. The function is
+`store.matching_key(source, body)`. The stored evidence and its `canonical_sha256` are unchanged; the table is
 used only to decide whether evidence is new, so a dismissed `hub_scan` alert holds while only those
 counters move.
 
@@ -478,20 +478,22 @@ that move on requests that change nothing else. The `VOLATILE_FIELDS` table to s
 | :-- | :-- | :-- | :-- |
 | the hub's host (`huggingface.co`) | `downloads`, `likes`, `lastModified` | `hf/eicar-security.json`, `hf/gpt2-security.json`, `hf/gpt2-model-info.json`; `lastModified` also in `hf_upstream/model-*.json` | confirmed (the three named above) |
 
-Proposals, **awaiting the owner's yes** (not in `VOLATILE_FIELDS`):
+Approved by the owner on 2026-11-14 for every source, nested ones included, and in `VOLATILE_FIELDS`
+(the DataCite counters enumerated as the real keys, no wildcards; the hub's three fields also under the
+upstream watch's stored source `hf-hub`):
 
 | Source | Field | Seen in | Note |
 | :-- | :-- | :-- | :-- |
-| Zenodo | `stats` (top level: `downloads`, `views`, `unique_*`, `version_*`) | `zenodo/record-3242074.json`, `zenodo/older-version.json` | usage counters, move on every read; a top-level key, so the S13 rule can remove it |
-| Crossref | `message.indexed`, `message.is-referenced-by-count` | `crossref/*.json` | re-indexing time and citation count; **nested** under `message`, so the top-level-only rule cannot remove them |
-| DataCite | `data.attributes.viewCount`, `viewsOverTime`, `downloadCount`, `downloadsOverTime`, `citationCount`, `citationsOverTime`, `referenceCount`, `partCount`, `partOfCount`, `versionCount`, `versionOfCount` | `datacite/findable.json`, `obsoleted.json`, `previous-version.json` | usage and link counters; **nested** under `data.attributes`, so the same limit applies |
+| Zenodo | `stats` (top level: `downloads`, `views`, `unique_*`, `version_*`) | `zenodo/record-3242074.json`, `zenodo/older-version.json` | usage counters, move on every read |
+| Crossref | `message.indexed`, `message.is-referenced-by-count` | `crossref/*.json` | re-indexing time and citation count, nested under `message` |
+| DataCite | `data.attributes.viewCount`, `viewsOverTime`, `downloadCount`, `downloadsOverTime`, `citationCount`, `citationsOverTime`, `referenceCount`, `partCount`, `partOfCount`, `versionCount`, `versionOfCount` | `datacite/findable.json`, `obsoleted.json`, `previous-version.json` | usage and link counters, nested under `data.attributes` (each listed as `data.attributes.<key>`) |
 
 Not volatile: OSV `modified` (changes only with the advisory, which is new evidence); Crossref
 `created` and `deposited`, DataCite `created` and `updated`, Zenodo `created`, `modified` and
 `updated`, and the hub's `createdAt` and per-file `lastCommit.date` (each changes only with the record
-or the repository); `doi_ra/`, `figshare/` and `hf_takedowns/` carry no counters or request ids. The
-two nested proposals would need the owner to allow a nested path in `VOLATILE_FIELDS`; until then a
-dismissed Crossref or DataCite alert reopens when only those counters move.
+or the repository); `doi_ra/`, `figshare/` and `hf_takedowns/` carry no counters or request ids. A test per
+source (`tests/unit/test_dismissal_hold.py`) shows the matching key unchanged when only these fields
+change, and changed by any other field.
 
 **Decision**: a store method `latest_alert(model_id, cause_key)` returns the most recent alert for the
 key in any state. In each insert path, when there is no open alert and that latest alert is `dismissed`,

@@ -36,7 +36,7 @@ import json
 import os
 import re
 import sqlite3
-from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import TracebackType
@@ -543,6 +543,64 @@ def same_evidence(evidence: Mapping[str, Any], source: str, url: str, body: byte
     if evidence["source"] != source or evidence["url"] != url:
         return False
     return content_key(evidence) == (canonical_sha256(body) or hashlib.sha256(body).hexdigest())
+
+
+_HUB_COUNTERS = ("downloads", "likes", "lastModified")
+_DATACITE_COUNTERS = tuple(
+    f"data.attributes.{name}"
+    for name in (
+        "viewCount",
+        "viewsOverTime",
+        "downloadCount",
+        "downloadsOverTime",
+        "citationCount",
+        "citationsOverTime",
+        "referenceCount",
+        "partCount",
+        "partOfCount",
+        "versionCount",
+        "versionOfCount",
+    )
+)
+# Feature 004 (research S13, owner's ruling 2026-11-14): fields of a source's JSON answer that move
+# on requests that change nothing else, by the evidence row's ``source`` exactly as stored, as
+# dotted paths (nested keys included). Used only to decide whether evidence is new for a held
+# dismissal (``matching_key``); stored evidence and its ``canonical_sha256`` stay whole.
+VOLATILE_FIELDS: dict[str, tuple[str, ...]] = {
+    "huggingface.co": _HUB_COUNTERS,  # the hub's answers kept by hf-scan (``source_of``)
+    "hf-hub": _HUB_COUNTERS,  # the hub's answers kept by the upstream watch
+    "zenodo": ("stats",),
+    "crossref": ("message.indexed", "message.is-referenced-by-count"),
+    "datacite": _DATACITE_COUNTERS,
+}
+
+
+def _drop(value: Any, path: Sequence[str]) -> None:
+    if not isinstance(value, dict) or not path:
+        return
+    if len(path) == 1:
+        value.pop(path[0], None)
+        return
+    _drop(value.get(path[0]), path[1:])
+
+
+def matching_key(source: str, body: bytes) -> str:
+    """The content key of ``body`` from ``source`` with the source's volatile fields removed.
+
+    It serves a stored row (its source and stored body) and an observation not yet stored alike.
+    A body that is not a JSON object keys by its canonical or raw hash, as ``content_key`` does.
+    """
+    paths = VOLATILE_FIELDS.get(source, ())
+    try:
+        parsed = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        return hashlib.sha256(body).hexdigest()
+    if paths and isinstance(parsed, dict):
+        for path in paths:
+            _drop(parsed, path.split("."))
+        canonical = json.dumps(parsed, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return canonical_sha256(body) or hashlib.sha256(body).hexdigest()
 
 
 class OutdatedDatabaseError(ValueError):

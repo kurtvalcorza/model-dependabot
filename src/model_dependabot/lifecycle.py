@@ -103,6 +103,7 @@ from model_dependabot.store import (
     DISMISSAL_REASONS,
     Store,
     content_key,
+    matching_key,
     same_evidence,
     utc_text,
 )
@@ -237,6 +238,80 @@ def _note(
         tally["incomplete"].add(identifier)
 
 
+def _held_dismissal(
+    store: Store,
+    target: Any,
+    cause_key: str,
+    severity: str,
+    *,
+    identifier: str | None = None,
+    observations: Sequence[_Observation] | None = None,
+    evidence_ids: Sequence[int] | None = None,
+) -> tuple[bool, dict[str, Any] | None]:
+    """Whether a dismissal of this cause holds, and if not what the new alert reopens (FR-020).
+
+    Only when the most recent alert for the cause is ``dismissed``. With ``observations`` (the
+    weight path) they are compared before any evidence is stored; with ``evidence_ids`` (the OSV
+    and upstream paths) the rows already stored are compared, and stay stored. An item matches a
+    piece of the dismissed alert's evidence with the same source, URL, matching key
+    (``store.matching_key``, volatile fields removed) and matched identifier. The dismissal holds
+    when every item matches and the severity is not higher; then the alert id is listed under
+    ``dismissals_held`` and nothing is opened or linked.
+    """
+    latest = store.latest_alert(target.model_id, cause_key)
+    if latest is None or latest["state"] != "dismissed":
+        return False, None
+    linked = {
+        (e["source"], e["url"], _row_key(store, e), e["matched_identifier"])
+        for e in store.alert_evidence(latest["alert_id"])
+    }
+    items = [
+        (o.source, o.url, matching_key(o.source, o.body), identifier) for o in observations or ()
+    ]
+    for evidence_id in evidence_ids or ():
+        e = store.get_evidence(int(evidence_id))
+        if e is not None:
+            items.append((e["source"], e["url"], _row_key(store, e), e["matched_identifier"]))
+    new = any(item not in linked for item in items)
+    if not new and severity_rank(severity) >= severity_rank(latest["severity"]):
+        alert_id = int(latest["alert_id"])
+        held = target.summary.setdefault("dismissals_held", [])
+        if alert_id not in held:
+            held.append(alert_id)
+        source = _tally_source(store, target, list(evidence_ids or ()))
+        if source:
+            mine = target.held.setdefault(source, [])
+            if alert_id not in mine:
+                mine.append(alert_id)
+        return True, None
+    return False, {
+        "alert_id": latest["alert_id"],
+        "dismissed_by": latest["dismissed_by"],
+        "dismissal_reason": latest["dismissal_reason"],
+        "closed_at": latest["closed_at"],
+    }
+
+
+def _row_key(store: Store, evidence: Mapping[str, Any]) -> str:
+    """The matching key of a stored evidence row, from its stored body when it is still there."""
+    try:
+        return matching_key(evidence["source"], store.read_body(evidence["body_sha256"]))
+    except (OSError, ValueError):
+        return content_key(evidence)
+
+
+def _tally_source(store: Store, target: Any, evidence_ids: Sequence[int]) -> str:
+    source = target.source
+    if source == UPSTREAM_PASS:
+        source = ""
+        for evidence_id in evidence_ids:
+            evidence = store.get_evidence(int(evidence_id))
+            found = _EVIDENCE_SOURCES.get(evidence["source"]) if evidence else None
+            if found is not None:
+                return found
+    return source
+
+
 def package_cause_key(advisory_id: str, package: str) -> str:
     """``kind`` plus advisory id plus normalised package name (data-model.md, Alert)."""
     return f"{PACKAGE_ALERT}:{advisory_id}:{canonicalize_name(package)}"
@@ -353,6 +428,7 @@ def _check(
             "carried_forward": [],
             "closed": [],
             "watch_events": [],
+            "dismissals_held": [],
         }
         record = store.get_version(model_id, version) or {}
         entries = store.entries(model_id, version)
@@ -804,6 +880,15 @@ def _raise_or_carry(
         )
         _close(store, target, alert, "cleared", evidence_ids, note)
     if keeper is None:
+        held, reopens = _held_dismissal(
+            store, target, cause_key, severity, evidence_ids=evidence_ids
+        )
+        if held:
+            for record, evidence_id in zip(group, evidence_ids, strict=True):
+                _cache(store, record, evidence_id)
+            return
+        if reopens is not None:
+            cause["reopens"] = reopens
         alert_id = store.insert_alert(
             model_id=target.model_id,
             kind=PACKAGE_ALERT,
@@ -1035,6 +1120,13 @@ def _weight_alert(
     severity = WEIGHT_SEVERITY[kind]
     existing = store.find_open_alert(target.model_id, cause_key)
     if existing is None:
+        held, reopens = _held_dismissal(
+            store, target, cause_key, severity, identifier=identifier, observations=observations
+        )
+        if held:
+            return
+        if reopens is not None:
+            cause = {**cause, "reopens": reopens}
         evidence_ids = _store_observations(store, run_id, identifier, observations)
         alert_id = store.insert_alert(
             model_id=target.model_id,
@@ -2380,6 +2472,13 @@ def _upstream_alert(
     """
     existing = store.find_open_alert(target.model_id, cause_key)
     if existing is None:
+        held, reopens = _held_dismissal(
+            store, target, cause_key, severity, evidence_ids=list(evidence_ids)
+        )
+        if held:
+            return
+        if reopens is not None:
+            cause = {**cause, "reopens": reopens}
         alert_id = store.insert_alert(
             model_id=target.model_id,
             kind=kind,
