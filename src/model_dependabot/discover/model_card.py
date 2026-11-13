@@ -90,6 +90,8 @@ def _hub_name(text: str) -> bool:
 
 
 def _texts(value: Any, key: str) -> list[str]:
+    if value is None:  # the key is absent or empty: nothing is declared (review F4)
+        return []
     if isinstance(value, str):
         return [value.strip()] if value.strip() else []
     if isinstance(value, list) and all(isinstance(item, str) for item in value):

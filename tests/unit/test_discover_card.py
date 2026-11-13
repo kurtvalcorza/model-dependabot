@@ -158,3 +158,23 @@ def test_a_name_that_is_not_a_hub_repository(tmp_path: Path) -> None:
     [base] = run(tmp_path)[0]
     assert base["status"] == "unavailable"
     assert "not a hub repository name (owner/name)" in base["gaps"]
+
+
+@pytest.mark.parametrize(
+    ("front", "kinds"),
+    [
+        ("license: mit\n", {"licence"}),
+        ("base_model: org/base\n", {"base_model"}),
+        ("datasets:\n  - org/data\n", {"dataset"}),
+        ("base_model:\ndatasets:\nlicense: mit\n", {"licence"}),  # present but empty
+        ("language: en\n", set()),
+    ],
+)
+def test_a_card_that_omits_a_key_reports_nothing_for_it(
+    tmp_path: Path, front: str, kinds: set[str]
+) -> None:
+    """Review F4: a key the card does not have is no candidate and not "unreadable"."""
+    card(tmp_path, front)
+    candidates, skipped = run(tmp_path)
+    assert {item["kind"] for item in candidates} == kinds
+    assert not [item for item in skipped if "unreadable" in item["reason"]]
