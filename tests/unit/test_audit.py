@@ -108,8 +108,13 @@ def register(
 
 
 def run(store: Store, clock: Clock, sources: dict[str, str], scope: str = "m", hours: float = 1):
+    """A finished check run that records the version it checked of each model, as run_check does."""
     clock.now += timedelta(hours=hours)
     run_id = store.start_check_run(scope=scope)
+    for model_id in store.model_ids() if scope == "all" else scope.split(","):
+        version = store.latest_version(model_id) if store.get_model(model_id) else None
+        if version is not None:
+            store.add_check_run_target(run_id, model_id, version)
     store.finish_check_run(run_id, sources)
     return run_id
 
@@ -412,3 +417,61 @@ def test_a_hub_dataset_paper_at_crossref_makes_crossref_relevant(store: Store) -
     assert set(relevant_sources(store, entry, "manifest")) == {"hf-hub", "hf-takedowns", "crossref"}
     unrouted = hub_dataset() | {"paper_dois": ["10.5555/unknown"]}
     assert "crossref" not in relevant_sources(store, unrouted, "manifest")
+
+
+# --- PR #15 round 3 (T2, T3) ----------------------------------------------------------------------
+
+
+def test_a_linked_run_counts_even_if_it_started_before_the_registration(
+    store: Store, clock: Clock
+) -> None:
+    """T2: a run reads the latest version after it starts, so it can check a version registered
+    just after its start stamp."""
+    store.add_model("m")
+    clock.now += timedelta(hours=1)
+    run_id = store.start_check_run(scope="m")
+    clock.now += timedelta(seconds=1)
+    register(store, [package()])
+    store.add_check_run_target(run_id, "m", 1)
+    store.finish_check_run(run_id, {"osv": "ok"})
+    assert store.get_check_run(run_id)["started_at"] < store.registered_at("m", 1)
+    assert audit(store, "m")["findings"]["state"] == "checked"
+
+
+def test_a_current_run_without_a_target_row_never_counts(store: Store, clock: Clock) -> None:
+    """T3: a run since runs record their targets that has no row for the model did not check it
+    (``check --all`` read the models before this one had a version)."""
+    register(store, [package()])
+    clock.now += timedelta(hours=1)
+    run_id = store.start_check_run(scope="all")  # no target row: this model was not checked
+    store.finish_check_run(run_id, {"osv": "ok"})
+    assert store.check_runs_for("m", since="")[0]["legacy"] is False
+    assert audit(store, "m")["findings"]["state"] == "not_yet_checked"
+
+
+def test_a_run_from_before_runs_recorded_targets_counts_by_its_time(tmp_path: Path) -> None:
+    """T3: a legacy run (before ``first_linked_run``) keeps the registration time window."""
+    import json
+    import sqlite3
+
+    from test_store_assurance_schema import pre_003_database
+
+    path = tmp_path / "old.db"
+    pre_003_database(path)
+    conn = sqlite3.connect(path)
+    with conn:
+        conn.execute(
+            "INSERT INTO check_runs (started_at, finished_at, scope, sources)"
+            " VALUES ('2026-11-02T00:00:00Z', '2026-11-02T00:00:01Z', 'legacy', ?)",
+            (json.dumps({"format-check": "ok"}),),
+        )
+    conn.close()
+    with Store(path, now=lambda: START) as store:
+        assert store.first_linked_run() == 2
+        [old] = store.check_runs_for("legacy", since="")
+        assert (old["version"], old["legacy"]) == (None, True)
+        assert audit(store, "legacy")["findings"]["state"] == "checked"
+
+
+def test_a_fresh_database_marks_its_first_run_as_linked(store: Store) -> None:
+    assert store.first_linked_run() == 1

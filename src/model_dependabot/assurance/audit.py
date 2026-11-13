@@ -243,15 +243,22 @@ def audit_report(
     entries = store.entries(model_id, chosen)
     checks = store.claim_checks(model_id, chosen)
     # A run records the version it checked (PR #15 round 2, G1), so it counts for that version
-    # only. A run recorded before that has no version: a check takes the latest version, so it
-    # counts if it started after this version was registered and before the next one was
-    # (review F1), to the second.
+    # only, whenever it started (round 3, T2). A legacy run, recorded before runs recorded their
+    # targets, has no version: a check takes the latest version, so it counts if it started after
+    # this version was registered and before the next one was (review F1), to the second. A
+    # current run with no target row for the model did not check it and never counts (T3).
+    since = record["registered_at"]
     until = store.registered_at(model_id, chosen + 1)
     runs = [
         run
-        for run in store.check_runs_for(model_id, since=record["registered_at"])
+        for run in store.check_runs_for(model_id, since="")
         if run["version"] == chosen
-        or (run["version"] is None and (until is None or run["started_at"] < until))
+        or (
+            run["version"] is None
+            and run["legacy"]
+            and run["started_at"] >= since
+            and (until is None or run["started_at"] < until)
+        )
     ]
 
     assured: list[dict[str, Any]] = []

@@ -318,6 +318,13 @@ CREATE TABLE IF NOT EXISTS check_run_targets (
     FOREIGN KEY (model_id, version) REFERENCES model_versions (model_id, version)
 );
 
+-- PR #15 round 3, T3: facts about the database itself; ``first_linked_run`` is the first run
+-- that records its targets, so a run before it is legacy.
+CREATE TABLE IF NOT EXISTS store_marks (
+    name TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 -- Review C2, research U13: the ETag cache, kept across runs so a later run revalidates with
 -- If-None-Match. One row per URL; the body is the redacted one, kept in the evidence store.
 CREATE TABLE IF NOT EXISTS etag_cache (
@@ -471,7 +478,9 @@ class Store:
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
+        had_targets = "check_run_targets" in self.tables()
         self.conn.executescript(SCHEMA)
+        self._mark_first_linked_run(had_targets)
         if "used_at" not in self.columns("etag_cache"):
             with self.conn:
                 self.conn.execute("ALTER TABLE etag_cache ADD COLUMN used_at TEXT")
@@ -485,6 +494,47 @@ class Store:
         self._add_origins()
         self._widen_watch_kinds()
         self._rekey_repository_alerts()
+
+    def _mark_first_linked_run(self, had_targets: bool) -> None:
+        """Record the first run that records its targets, once (PR #15 round 3, T3).
+
+        Runs before it were written before ``check_run_targets`` existed: they are legacy, and the
+        audit falls back to their start time. A run from this mark on that has no target row for a
+        model did not check it. A database that gains the table now marks the next run; one that
+        already had the table without a mark (written by an earlier build of this feature) marks
+        its first linked run, or the next run if it has none.
+        """
+        if self.conn.execute(
+            "SELECT 1 FROM store_marks WHERE name = 'first_linked_run'"
+        ).fetchone():
+            return
+        first = None
+        if had_targets:
+            first = self.conn.execute("SELECT min(run_id) FROM check_run_targets").fetchone()[0]
+        if first is None:
+            first = self.conn.execute(
+                "SELECT coalesce(max(run_id), 0) + 1 FROM check_runs"
+            ).fetchone()[0]
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO store_marks (name, value) VALUES ('first_linked_run', ?)",
+                (str(first),),
+            )
+
+    def first_linked_run(self) -> int | None:
+        """The first run that records its targets, or ``None`` when every run is legacy (an older
+        database opened read-only, without the table)."""
+        tables = self.tables()
+        if "store_marks" in tables:
+            row = self.conn.execute(
+                "SELECT value FROM store_marks WHERE name = 'first_linked_run'"
+            ).fetchone()
+            if row is not None:
+                return int(row["value"])
+        if "check_run_targets" in tables:
+            first = self.conn.execute("SELECT min(run_id) FROM check_run_targets").fetchone()[0]
+            return None if first is None else int(first)
+        return None
 
     @contextlib.contextmanager
     def _atomic(self) -> Iterator[None]:
@@ -1166,7 +1216,8 @@ class Store:
     ) -> list[dict[str, Any]]:
         """Finished runs started at or after ``since`` (and before ``until``, if given) whose scope
         covered the model, newest first. Each has ``version``: the version of the model it
-        checked, or ``None`` for a run recorded before ``check_run_targets`` existed.
+        checked, or ``None`` when it has no target row for it, and ``legacy``: whether the run
+        was recorded before runs recorded their targets (``first_linked_run``).
 
         A run covers the model when its scope is ``all`` or names it (``check ID`` records the
         id; a run over several models records them joined by commas).
@@ -1186,6 +1237,7 @@ class Store:
                     (model_id,),
                 )
             }
+        first = self.first_linked_run()
         runs = []
         for row in rows:
             if row["scope"] != SCOPE_ALL and model_id not in str(row["scope"]).split(","):
@@ -1193,6 +1245,7 @@ class Store:
             record = dict(row)
             record["sources"] = _loads(record["sources"]) or {}
             record["version"] = linked.get(record["run_id"])
+            record["legacy"] = first is None or record["run_id"] < first
             runs.append(record)
         return runs
 
