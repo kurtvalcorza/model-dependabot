@@ -99,9 +99,12 @@ output; both may go before or after the command name.
 | `discover PATH [--manifest FILE] [--model-id ID] [--upstream] [-o FILE [--force]]` | Proposes candidate dependencies for a project folder; see [Discovering dependencies](#discovering-dependencies). Reads nothing outside `PATH` and opens no database. Makes no request unless `--upstream`. Writes nothing unless `-o`, never replaces a file unless `--force` and refuses an `-o` path that is a link |
 | `check (ID \| --all) [--scheduled] [--source ...]` | Runs the checks now and records a check run. Sources: `osv`, `picklescan`, `hf-scan`, `format-check`, `hf-hub`, `hf-takedowns`, `crossref`, `datacite`, `zenodo` and `figshare`; without `--source` every source runs. `--scheduled` marks the run as scheduled and needs `--all` (`check ID --scheduled` exits 1); see [Scheduling](#scheduling) |
 | `policy ID --format (default\|strict) --by NAME` | Sets the model's weight-format policy, recording who set it and when. Under `default` a format that can run code when loaded is a watch event; under `strict` a code-capable weight file with no pinned code-free file beside it in the same version raises an alert (an unpinned name proves nothing). Takes effect at the next check |
-| `alerts ID [--state open\|closed\|all]` | Lists alerts by severity (`CRITICAL`, `HIGH`, `MODERATE`, `LOW`, `UNKNOWN`), then the watch events, each with its evidence |
+| `alerts ID [--state open\|excepted\|closed\|all]` | Lists alerts by severity (`CRITICAL`, `HIGH`, `MODERATE`, `LOW`, `UNKNOWN`), then the excepted alerts in their own list, then the watch events, each with its evidence. The `alerts` list never holds an excepted alert; `--state excepted` lists only the excepted ones |
 | `alert show ALERT_ID` | One alert with all its evidence; for a redacted response, both hashes and the fields removed |
-| `alert dismiss ALERT_ID --reason REASON [--note TEXT] --by NAME` | Dismisses an alert; `REASON` is `not_used_at_runtime`, `risk_accepted`, `false_positive` or `fix_not_available` |
+| `alert dismiss ALERT_ID --reason REASON [--note TEXT] --by NAME` | Dismisses an alert, an excepted one included; `REASON` is `not_used_at_runtime`, `risk_accepted`, `false_positive` or `fix_not_available` |
+| `exception record --global GLOBAL --sha256 HEX --reason TEXT --by NAME [--expires YYYY-MM-DD]` | Accepts one reviewed global in files with exactly this SHA-256, wherever they are registered; see [Exceptions for globals](#exceptions-for-globals). Changes no alert until the next check that asks a weight source |
+| `exception list [--all] [--sha256 HEX]` | Lists active exceptions (`--all`: also revoked and expired), each with where it applies and whether it is in use |
+| `exception revoke EXCEPTION_ID --reason TEXT --by NAME` | Revokes an active exception, recording who, when and why; the finding returns at the next check |
 | `history ID` | Closed alerts with how they closed (`fixed`, `dismissed`, `withdrawn` or `cleared`), when and on what evidence |
 
 Watch events are things worth knowing that are not alerts: a weight file in a format that can run code,
@@ -193,7 +196,7 @@ and [`specs/002-upstream-watch/contracts/cli.md`](specs/002-upstream-watch/contr
 | Code | Meaning |
 | :-- | :-- |
 | 0 | Success. For `check`: the check completed, whether or not it found anything |
-| 1 | Invalid input (manifest, inventory or arguments); for `inventory audit` also an unknown model or version or a database older than feature 002; for `discover` a `PATH` that is not a folder, an existing `-o` file without `--force` or an `-o` path that is a link |
+| 1 | Invalid input (manifest, inventory or arguments); for `inventory audit` also an unknown model or version or a database older than feature 002; for `discover` a `PATH` that is not a folder, an existing `-o` file without `--force` or an `-o` path that is a link; for `exception record` and `exception revoke` every refusal listed under [Exceptions for globals](#exceptions-for-globals) |
 | 2 | `check` finished but at least one source failed; alerts that depend on it were left unchanged |
 | 3 | Unexpected error |
 
@@ -223,11 +226,38 @@ inventory is always marked `import`, whatever that property says. A version regi
 feature has no origin. It counts as imported unless it was registered from a registration record, so its
 code-free claims also need confirming. `inventory show` notes each claim still unverified.
 
+### Exceptions for globals
+
+A pickle scan alert (`weight_file_scan`) names the dangerous globals the scanner found in one file. An
+owner who has reviewed such a global in that file can record an exception for it:
+
+```sh
+model-dependabot exception record --global __builtin__.getattr --sha256 <hex> \
+  --reason "reviewed: attribute lookup on layer classes only" --by "Owner"
+```
+
+`GLOBAL` is `MODULE.NAME`, split at the last dot, or `MODULE:NAME` for a name that itself contains a
+dot. It is matched exactly as the scanner reports it: `__builtin__.getattr` and `builtins.getattr` are
+two globals. An exception covers only that global in files with exactly that SHA-256, under every model
+and path where those bytes are registered; other bytes with the same global raise the finding as
+before. It is refused without a reason or a name, for a malformed global or hash, for an expiry date
+before today (UTC), for a global whose module or name contains `unknown` (the scanner's mark for an
+import it could not resolve) and while another active exception covers the same global and hash.
+
+At the next check that asks a weight source (`picklescan`, `hf-scan` or `format-check`), an alert
+whose every dangerous global is covered is shown as `excepted`, with the exceptions as its evidence,
+and no longer counts as open. An alert with a global left uncovered stays open and lists the covered
+ones under `excepted`. When an exception is revoked, or its expiry date has passed (it covers that
+whole day in UTC), the next such check returns the finding on the same alert, recording the release.
+A check with only other sources, `osv` say, does not apply exceptions. Hub weight files are not
+covered: no source reads their globals, so an exception for a hub file's hash is listed as not in use.
+
 ### Auditing an inventory
 
 `inventory audit ID` answers three questions separately, from the stored data:
 
-- **Findings**: the open alerts and the version's watch events. They are "checked" once every source
+- **Findings**: the open alerts, the excepted alerts (counted apart, `alerts_excepted`) and the
+  version's watch events. They are "checked" once every source
   relevant to the version has succeeded in a check of that version, "partly checked" while only some
   have, and "not yet checked" while none has.
 - **Assurance**: each entry as `verified`, `declared-but-unverified`, `conflicting` or `unavailable`,

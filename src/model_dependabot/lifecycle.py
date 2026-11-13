@@ -59,6 +59,7 @@ from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
 from model_dependabot.assurance import format_check
+from model_dependabot.assurance.exceptions import covering
 from model_dependabot.assurance.trust import (
     CODE_FREE,
     IDENTITY,
@@ -98,7 +99,13 @@ from model_dependabot.sources.osv import (
     pinned_packages,
     withdrawn,
 )
-from model_dependabot.store import DISMISSAL_REASONS, Store, content_key, same_evidence
+from model_dependabot.store import (
+    DISMISSAL_REASONS,
+    Store,
+    content_key,
+    same_evidence,
+    utc_text,
+)
 from model_dependabot.upstream.changes import (
     LICENCE_SOURCES,
     appeared,
@@ -312,6 +319,7 @@ def _check(
     if any(source in WEIGHT_SOURCES for source in sources):
         for target in targets:
             _apply_format_rules(store, run_id, target)
+            _apply_globals_rules(store, run_id, target)
     completed.update(WEIGHT_SOURCES)
     if upstream is not None:
         observed = _Observed(store, run_id)
@@ -940,6 +948,9 @@ def _weight_alert(
     linked = store.alert_evidence(alert_id)
     for evidence_id in _store_observations(store, run_id, identifier, observations, linked):
         store.link_alert_evidence(alert_id, evidence_id)
+    # Feature 004: what exceptions covered and released stays with the alert (research S8).
+    kept = {key: existing["cause"][key] for key in EXCEPTION_KEYS if key in existing["cause"]}
+    cause = {**cause, **kept}
     store.update_open_alert(
         alert_id,
         current_version=max(existing["current_version"], target.version),
@@ -1043,6 +1054,85 @@ def _apply_format_rules(store: Store, run_id: int, target: _Target) -> None:
         )
         for evidence_id in claim_evidence if alert is not None else []:
             store.link_alert_evidence(alert["alert_id"], evidence_id)
+
+
+# --- feature 004: exceptions for globals (research S4, S8) ---------------------------------------
+
+EXCEPTION_KEYS = ("excepted", "released")
+
+
+def _dangerous_pairs(store: Store, sha256: str, names: Sequence[str]) -> list[tuple[str, str]]:
+    """The dangerous globals of an alert as (module, name), as the latest scan of the bytes
+    reported them; a name no file scan holds is split at its last dot."""
+    latest = store.latest_file_scan(sha256)
+    scanned = {
+        f"{g['module']}.{g['name']}": (g["module"], g["name"])
+        for g in (latest["globals"] if latest is not None else [])
+    }
+    return [scanned.get(text) or tuple(text.rsplit(".", 1)) for text in names]  # type: ignore[misc]
+
+
+def _apply_globals_rules(store: Store, run_id: int, target: _Target) -> None:
+    """Mark the model's open ``weight_file_scan`` alerts excepted, or release them (S8).
+
+    An alert is excepted when every dangerous global in its cause is covered by an active
+    exception for its file's hash; its cause lists each covered global under ``excepted`` and each
+    exception's evidence is linked. When an exception stops being active (revoked or expired) the
+    alert counts as open again, on the same id, its cause recording the release under
+    ``released`` with the revocation as evidence.
+    """
+    del run_id  # exceptions are applied, not observed: they add no evidence of this run
+    now = store.now()
+    stamp = utc_text(now)
+    for alert in store.alerts_for(target.model_id, ["open"]):
+        if alert["kind"] != WEIGHT_SCAN_ALERT:
+            continue
+        cause = dict(alert["cause"])
+        sha256 = str(cause.get("identifier", "")).removeprefix("sha256:")
+        names = list(cause.get("dangerous") or [])
+        active = store.exceptions(sha256)
+        covered = []
+        for module, name in _dangerous_pairs(store, sha256, names):
+            found = covering(active, module, name)
+            if found is not None:
+                covered.append(found)
+        excepted = [
+            {
+                "global": f"{e['module']}.{e['name']}",
+                "exception_id": e["exception_id"],
+                "accepted_by": e["accepted_by"],
+                "recorded_at": e["recorded_at"],
+                "expires_on": e["expires_on"],
+            }
+            for e in covered
+        ]
+        still = {e["exception_id"] for e in covered}
+        released = list(cause.get("released") or [])
+        for item in cause.get("excepted") or []:
+            if item["exception_id"] in still:
+                continue
+            gone = store.get_exception(int(item["exception_id"]))
+            why = "revoked" if gone is not None and gone["state"] == "revoked" else "expired"
+            released.append(
+                {
+                    "global": item["global"],
+                    "exception_id": item["exception_id"],
+                    "why": why,
+                    "at": stamp,
+                }
+            )
+            for evidence_id in store.exception_evidence(int(item["exception_id"])):
+                store.link_alert_evidence(alert["alert_id"], evidence_id)
+        for record in covered:
+            store.link_alert_evidence(alert["alert_id"], int(record["evidence_id"]))
+        if excepted or "excepted" in cause:
+            cause["excepted"] = excepted
+        if released:
+            cause["released"] = released
+        whole = bool(names) and len(covered) == len(names)
+        excepted_at = (alert["excepted_at"] or stamp) if whole else None
+        if cause != alert["cause"] or excepted_at != alert["excepted_at"]:
+            store.set_alert_exception(alert["alert_id"], excepted_at=excepted_at, cause=cause)
 
 
 def _clear_on_confirmation(

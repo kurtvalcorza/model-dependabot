@@ -489,6 +489,13 @@ def _loads(text: str | None) -> Any:
     return None if text is None else json.loads(text)
 
 
+EXCEPTION_SOURCE = "exception"
+
+
+def _canonical_json(record: Mapping[str, Any]) -> bytes:
+    return json.dumps(record, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
 _MODEL_DEFAULTS = {
     "globals_policy": "default",
     "globals_policy_set_by": None,
@@ -1040,6 +1047,165 @@ class Store:
                 records.append(record)
         return records
 
+    def add_exception(
+        self,
+        *,
+        module: str,
+        name: str,
+        sha256: str,
+        reason: str,
+        accepted_by: str,
+        expires_on: str | None = None,
+    ) -> dict[str, Any]:
+        """Record an exception with its evidence row, in one transaction (data-model.md).
+
+        The evidence (source ``exception``, URL ``exception:<id>``) is the record as canonical
+        JSON. A second exception for the same global and hash is refused while one is active.
+        """
+        now = self.now()
+        recorded_at = utc_text(now)
+        with self._atomic():
+            for row in self.conn.execute(
+                "SELECT * FROM global_exceptions WHERE sha256 = ? AND module = ? AND name = ?",
+                (sha256, module, name),
+            ).fetchall():
+                if exception_state(dict(row), now) == "active":
+                    raise ValueError(
+                        f"an active exception ({row['exception_id']}) already covers"
+                        f" {module}.{name} in {sha256}"
+                    )
+            exception_id = self.conn.execute(
+                "SELECT coalesce(max(exception_id), 0) + 1 FROM global_exceptions"
+            ).fetchone()[0]
+            record = {
+                "exception_id": exception_id,
+                "module": module,
+                "name": name,
+                "global": f"{module}.{name}",
+                "sha256": sha256,
+                "reason": reason,
+                "accepted_by": accepted_by,
+                "recorded_at": recorded_at,
+                "expires_on": expires_on,
+            }
+            evidence_id = self._insert_evidence(
+                source=EXCEPTION_SOURCE,
+                url=f"{EXCEPTION_SOURCE}:{exception_id}",
+                retrieved_at=now,
+                matched_identifier=f"sha256:{sha256}",
+                body=_canonical_json(record),
+            )
+            self.conn.execute(
+                "INSERT INTO global_exceptions (exception_id, module, name, sha256, reason,"
+                " accepted_by, recorded_at, expires_on, evidence_id)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    exception_id,
+                    module,
+                    name,
+                    sha256,
+                    reason,
+                    accepted_by,
+                    recorded_at,
+                    expires_on,
+                    evidence_id,
+                ),
+            )
+        made = self.get_exception(exception_id)
+        assert made is not None
+        return made
+
+    def get_exception(self, exception_id: int) -> dict[str, Any] | None:
+        if "global_exceptions" not in self.tables():
+            return None
+        row = self.conn.execute(
+            "SELECT * FROM global_exceptions WHERE exception_id = ?", (exception_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        record = dict(row)
+        record["state"] = exception_state(record, self.now())
+        return record
+
+    def revoke_exception(self, exception_id: int, *, by: str, reason: str) -> dict[str, Any]:
+        """Revoke an active exception, recording who, when and why, with the revocation as a
+        second evidence row of the exception (source ``exception``, URL ``exception:<id>``)."""
+        if not by.strip():
+            raise ValueError("a revocation needs the name of who revoked it")
+        if not reason.strip():
+            raise ValueError("a revocation needs a reason")
+        now = self.now()
+        with self._atomic():
+            row = self.conn.execute(
+                "SELECT * FROM global_exceptions WHERE exception_id = ?", (exception_id,)
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"no exception {exception_id}")
+            state = exception_state(dict(row), now)
+            if state != "active":
+                raise ValueError(f"exception {exception_id} is not active (it is {state})")
+            record = {
+                "exception_id": exception_id,
+                "global": f"{row['module']}.{row['name']}",
+                "sha256": row["sha256"],
+                "revoked_at": utc_text(now),
+                "revoked_by": by.strip(),
+                "revoke_reason": reason.strip(),
+            }
+            self._insert_evidence(
+                source=EXCEPTION_SOURCE,
+                url=f"{EXCEPTION_SOURCE}:{exception_id}",
+                retrieved_at=now,
+                matched_identifier=f"sha256:{row['sha256']}",
+                body=_canonical_json(record),
+            )
+            self.conn.execute(
+                "UPDATE global_exceptions SET revoked_at = ?, revoked_by = ?, revoke_reason = ?"
+                " WHERE exception_id = ?",
+                (record["revoked_at"], record["revoked_by"], record["revoke_reason"], exception_id),
+            )
+        revoked = self.get_exception(exception_id)
+        assert revoked is not None
+        return revoked
+
+    def exception_evidence(self, exception_id: int) -> list[int]:
+        """The exception's evidence rows, oldest first: its record, then any revocation."""
+        rows = self.conn.execute(
+            "SELECT evidence_id FROM evidence WHERE source = ? AND url = ? ORDER BY evidence_id",
+            (EXCEPTION_SOURCE, f"{EXCEPTION_SOURCE}:{exception_id}"),
+        )
+        return [int(row["evidence_id"]) for row in rows]
+
+    def set_alert_exception(
+        self, alert_id: int, *, excepted_at: str | None, cause: Mapping[str, Any]
+    ) -> None:
+        """Mark an open alert excepted (``excepted_at`` set) or not, with its cause (S4, S8)."""
+        with self.conn:
+            cursor = self.conn.execute(
+                "UPDATE alerts SET excepted_at = ?, cause = ?"
+                " WHERE alert_id = ? AND state = 'open'",
+                (excepted_at, json.dumps(cause), alert_id),
+            )
+        if cursor.rowcount != 1:
+            raise ValueError(f"alert {alert_id} is not open")
+
+    def pinned_to(self, sha256: str) -> list[dict[str, Any]]:
+        """The model versions with a pinned weight entry for these bytes, and where it is."""
+        rows = self.conn.execute(
+            "SELECT model_id, version, location, hub_repo, hub_file FROM inventory_entries"
+            " WHERE kind = 'weight_file' AND pinned = 1 AND identifier = ?"
+            " ORDER BY model_id, version, entry_id",
+            (f"sha256:{sha256}",),
+        )
+        return [
+            {
+                "model_id": row["model_id"],
+                "version": row["version"],
+                "location": row["location"] or f"hf:{row['hub_repo']}/{row['hub_file']}",
+            }
+            for row in rows
+        ]
+
     def check_run_overview(self, run_id: int) -> list[dict[str, Any]]:
         """The overview rows of a run; the run-wide rows read ``model_id`` as ``None``."""
         if "check_run_overview" not in self.tables():
@@ -1307,25 +1473,51 @@ class Store:
         body's hash, which is right for every source with nothing to redact. A JSON body also gets
         its ``canonical_sha256`` (feature 006).
         """
-        digest = self.put_body(body)
         with self.conn:
-            cursor = self.conn.execute(
-                "INSERT INTO evidence (source, url, retrieved_at, matched_identifier, body_sha256,"
-                " detail, run_id, original_sha256, redacted_fields, canonical_sha256)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    source,
-                    url,
-                    utc_text(retrieved_at),
-                    matched_identifier,
-                    digest,
-                    None if detail is None else json.dumps(detail),
-                    run_id,
-                    original_sha256 or digest,
-                    json.dumps(sorted(redacted_fields)),
-                    canonical_sha256(body),
-                ),
+            return self._insert_evidence(
+                source=source,
+                url=url,
+                retrieved_at=retrieved_at,
+                matched_identifier=matched_identifier,
+                body=body,
+                detail=detail,
+                run_id=run_id,
+                original_sha256=original_sha256,
+                redacted_fields=redacted_fields,
             )
+
+    def _insert_evidence(
+        self,
+        *,
+        source: str,
+        url: str,
+        retrieved_at: datetime,
+        matched_identifier: str,
+        body: bytes,
+        detail: Mapping[str, Any] | None = None,
+        run_id: int | None = None,
+        original_sha256: str | None = None,
+        redacted_fields: Iterable[str] = (),
+    ) -> int:
+        """The evidence insert of ``add_evidence``, inside the caller's transaction."""
+        digest = self.put_body(body)
+        cursor = self.conn.execute(
+            "INSERT INTO evidence (source, url, retrieved_at, matched_identifier, body_sha256,"
+            " detail, run_id, original_sha256, redacted_fields, canonical_sha256)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                source,
+                url,
+                utc_text(retrieved_at),
+                matched_identifier,
+                digest,
+                None if detail is None else json.dumps(detail),
+                run_id,
+                original_sha256 or digest,
+                json.dumps(sorted(redacted_fields)),
+                canonical_sha256(body),
+            ),
+        )
         return int(cursor.lastrowid)
 
     def add_response_evidence(

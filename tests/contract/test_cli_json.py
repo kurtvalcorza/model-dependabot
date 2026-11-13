@@ -21,7 +21,8 @@ from model_dependabot.sources.fetcher import RecordedFetcher
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 MODEL = "pillow-model"
 
-ALERTS_KEYS = {"model_id", "current_version", "alerts", "watch_events", "last_check"}
+# Feature 004 adds "excepted" (contracts/cli.md of 004, Alert additions).
+ALERTS_KEYS = {"model_id", "current_version", "alerts", "excepted", "watch_events", "last_check"}
 ALERT_KEYS = {
     "alert_id",
     "kind",

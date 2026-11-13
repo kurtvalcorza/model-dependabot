@@ -20,6 +20,7 @@ from typing import Any
 
 from jsonschema import ValidationError
 
+from model_dependabot.assurance import exceptions
 from model_dependabot.assurance.audit import DEFAULT_STALE_AFTER_HOURS, audit_report
 from model_dependabot.assurance.format_check import measure_imported, record_import_contradictions
 from model_dependabot.discover.project import discover, write_proposal
@@ -250,7 +251,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     alerts = leaf(commands, "alerts", "alerts", "list alerts, then watch events")
     alerts.add_argument("model_id", metavar="ID")
-    alerts.add_argument("--state", choices=("open", "closed", "all"), default="open")
+    alerts.add_argument("--state", choices=("open", "excepted", "closed", "all"), default="open")
 
     alert = commands.add_parser("alert", help="show or dismiss one alert")
     alert_commands = alert.add_subparsers(dest="alert_command", required=True)
@@ -261,6 +262,31 @@ def build_parser() -> argparse.ArgumentParser:
     dismiss.add_argument("--reason", choices=DISMISSAL_REASONS, required=True)
     dismiss.add_argument("--note", metavar="TEXT")
     dismiss.add_argument("--by", metavar="NAME", required=True)
+
+    exception = commands.add_parser(
+        "exception", help="accept a reviewed global in one exact file (record, list, revoke)"
+    )
+    exception_commands = exception.add_subparsers(dest="exception_command", required=True)
+    exception_record = leaf(
+        exception_commands,
+        "record",
+        "exception record",
+        "record an exception for one global in files with exactly this SHA-256",
+    )
+    exception_record.add_argument("--global", dest="global_name", metavar="GLOBAL", required=True)
+    exception_record.add_argument("--sha256", metavar="HEX", required=True)
+    exception_record.add_argument("--reason", metavar="TEXT", required=True)
+    exception_record.add_argument("--by", metavar="NAME", required=True)
+    exception_record.add_argument("--expires", metavar="YYYY-MM-DD")
+    exception_list = leaf(exception_commands, "list", "exception list", "list active exceptions")
+    exception_list.add_argument("--all", action="store_true", help="also revoked and expired")
+    exception_list.add_argument("--sha256", metavar="HEX")
+    exception_revoke = leaf(
+        exception_commands, "revoke", "exception revoke", "revoke an active exception"
+    )
+    exception_revoke.add_argument("exception_id", metavar="EXCEPTION_ID", type=int)
+    exception_revoke.add_argument("--reason", metavar="TEXT", required=True)
+    exception_revoke.add_argument("--by", metavar="NAME", required=True)
 
     history = leaf(commands, "history", "history", "closed alerts and how they closed")
     history.add_argument("model_id", metavar="ID")
@@ -441,6 +467,31 @@ def _check_text(payload: Mapping[str, Any]) -> str:
 def _alert_text(payload: Mapping[str, Any]) -> str:
     lines = [alert_line(payload).strip(), f"Model: {payload['model_id']}"]
     lines += [f"  {evidence_line(evidence)}" for evidence in payload["evidence"]]
+    return "\n".join(lines)
+
+
+def _exceptions_text(listed: Sequence[Mapping[str, Any]]) -> str:
+    lines = [f"Exceptions ({len(listed)}):"]
+    for item in listed:
+        expiry = f", expires {item['expires_on']}" if item["expires_on"] else ""
+        use = "in use" if item["in_use"] else "not in use"
+        lines.append(
+            f"  #{item['exception_id']} {item['state']:<8} {item['global']} in"
+            f" sha256:{item['sha256']} ({use}{expiry})"
+        )
+        lines.append(
+            f"      accepted by {item['accepted_by']} at {item['recorded_at']}: {item['reason']}"
+        )
+        if item["revoked"]:
+            revoked = item["revoked"]
+            lines.append(
+                f"      revoked by {revoked['by']} at {revoked['at']}: {revoked['reason']}"
+            )
+        places = ", ".join(
+            f"{place['model_id']} v{place['version']} {place['location']}"
+            for place in item["applies_to"]
+        )
+        lines.append(f"      applies to: {places or 'no registered version'}")
     return "\n".join(lines)
 
 
@@ -750,6 +801,51 @@ def make_handlers(
         )
         return CommandResult(payload, text)
 
+    def exception_record(args: argparse.Namespace) -> CommandResult:
+        with _open(args.db) as store:
+            try:
+                made = exceptions.record_exception(
+                    store,
+                    global_name=args.global_name,
+                    sha256=args.sha256,
+                    reason=args.reason,
+                    by=args.by,
+                    expires_on=args.expires,
+                )
+            except ValueError as error:
+                raise InvalidInputError(str(error)) from None
+        text = (
+            f"Recorded exception {made['exception_id']}: {made['global']} in"
+            f" sha256:{made['sha256']}, accepted by {made['accepted_by']} at"
+            f" {made['recorded_at']}; takes effect at the next check that asks a weight source"
+        )
+        return CommandResult(made, text)
+
+    def exception_list(args: argparse.Namespace) -> CommandResult:
+        with _open(args.db) as store:
+            try:
+                listed = exceptions.list_exceptions(
+                    store, include_inactive=args.all, sha256=args.sha256
+                )
+            except ValueError as error:
+                raise InvalidInputError(str(error)) from None
+        return CommandResult({"exceptions": listed}, _exceptions_text(listed))
+
+    def exception_revoke(args: argparse.Namespace) -> CommandResult:
+        with _open(args.db) as store:
+            try:
+                revoked = exceptions.revoke_exception(
+                    store, args.exception_id, reason=args.reason, by=args.by
+                )
+            except ValueError as error:
+                raise InvalidInputError(str(error)) from None
+        text = (
+            f"Revoked exception {revoked['exception_id']} ({revoked['global']}) by"
+            f" {revoked['revoked']['by']} at {revoked['revoked']['at']}; the finding returns at"
+            " the next check that asks a weight source"
+        )
+        return CommandResult(revoked, text)
+
     return {
         "record": record,
         "register": register,
@@ -763,6 +859,9 @@ def make_handlers(
         "alerts": alerts,
         "alert show": alert_show,
         "alert dismiss": alert_dismiss,
+        "exception record": exception_record,
+        "exception list": exception_list,
+        "exception revoke": exception_revoke,
         "history": history,
     }
 

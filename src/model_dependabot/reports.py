@@ -41,9 +41,21 @@ EVIDENCE_FIELDS = (
 )
 STATE_FILTERS: dict[str, tuple[str, ...] | None] = {
     "open": ("open",),
+    "excepted": ("open",),  # an excepted alert is stored open (feature 004, research S4)
     "closed": CLOSED_STATES,
     "all": None,
 }
+EXCEPTED = "excepted"
+
+
+def is_excepted(alert: Mapping[str, Any]) -> bool:
+    """Stored open with ``excepted_at`` set: every global that raised it is excepted (S4)."""
+    return alert["state"] == "open" and bool(alert.get("excepted_at"))
+
+
+def view_state(alert: Mapping[str, Any]) -> str:
+    """``excepted`` when stored open and excepted; otherwise the stored state (data-model.md)."""
+    return EXCEPTED if is_excepted(alert) else str(alert["state"])
 
 
 def evidence_view(evidence: Mapping[str, Any]) -> dict[str, Any]:
@@ -54,7 +66,7 @@ def alert_view(store: Store, alert: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "alert_id": alert["alert_id"],
         "kind": alert["kind"],
-        "state": alert["state"],
+        "state": view_state(alert),
         "severity": alert["severity"],
         "severity_origin": alert["severity_origin"],
         "cause": alert["cause"],
@@ -105,17 +117,21 @@ def by_severity(alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def alerts_report(store: Store, model_id: str, *, state: str = "open") -> dict[str, Any]:
-    """The ``alerts`` payload: alerts in ``state`` by severity, then the watch events."""
+    """The ``alerts`` payload: alerts in ``state`` by severity, the excepted ones in their own
+    list (feature 004: ``alerts`` never holds an excepted alert), then the watch events."""
     if state not in STATE_FILTERS:
         raise ValueError(f"state must be one of {', '.join(STATE_FILTERS)}, got {state!r}")
     version = store.latest_version(model_id)
     listed = by_severity(store.alerts_for(model_id, STATE_FILTERS[state]))
+    excepted = [alert for alert in listed if is_excepted(alert)]
+    others = [] if state == EXCEPTED else [alert for alert in listed if not is_excepted(alert)]
     events = [] if version is None else store.watch_events(model_id, version)
     run = store.latest_check_run([model_id, SCOPE_ALL])
     return {
         "model_id": model_id,
         "current_version": version,
-        "alerts": [alert_view(store, alert) for alert in listed],
+        "alerts": [alert_view(store, alert) for alert in others],
+        "excepted": [alert_view(store, alert) for alert in excepted],
         "watch_events": [watch_view(event) for event in events],
         "last_check": None if run is None else _last_check(run),
     }
@@ -223,6 +239,16 @@ def alerts_text(payload: Mapping[str, Any]) -> str:
         lines.append(alert_line(alert))
         if alert["evidence"]:
             lines.append(f"      evidence: {evidence_line(alert['evidence'][-1])}")
+    excepted = payload.get("excepted") or []
+    if excepted:
+        lines.append(f"Excepted ({len(excepted)}):")
+        for alert in excepted:
+            lines.append(alert_line(alert))
+            for item in alert["cause"].get("excepted") or []:
+                lines.append(
+                    f"      excepted: {item['global']} by exception {item['exception_id']}"
+                    f" ({item['accepted_by']}, {item['recorded_at']})"
+                )
     lines.append(f"Watch events ({len(payload['watch_events'])}):")
     for event in payload["watch_events"]:
         lines.append(f"  {event['kind']} {event['identifier']}")
@@ -258,7 +284,8 @@ def history_text(payload: Mapping[str, Any]) -> str:
 
 def _summary_line(summary: Mapping[str, Any]) -> str:
     return (
-        f"Summary: {summary['alerts_open']} open alerts, {summary['watch_events']} watch events;"
+        f"Summary: {summary['alerts_open']} open alerts,"
+        f" {summary.get('alerts_excepted', 0)} excepted, {summary['watch_events']} watch events;"
         f" {summary['entries']} entries: {summary['verified']} verified,"
         f" {summary['declared_but_unverified']} declared but unverified,"
         f" {summary['conflicting']} conflicting, {summary['unavailable']} unavailable;"
@@ -306,6 +333,9 @@ def audit_text(payload: Mapping[str, Any]) -> str:
             f" {len(findings['watch_events'])} watch events{partly}"
         )
     lines += [alert_line(alert) for alert in findings["alerts"]]
+    if findings.get("excepted"):
+        lines.append(f"Excepted ({len(findings['excepted'])}):")
+        lines += [alert_line(alert) for alert in findings["excepted"]]
     lines += [f"  {event['kind']} {event['identifier']}" for event in findings["watch_events"]]
     assurance = payload["assurance"]
     lines.append(f"Assurance ({len(assurance['entries'])} entries):")
