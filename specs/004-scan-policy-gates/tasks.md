@@ -226,8 +226,8 @@ coverage (FR-021); 2 wins. Phase 7 (T054 to T059) is a prerequisite.
 - [X] T064 [P] Update `README.md`: the exit-code table with code 4, its coverage conditions and its precedence; `policy ID [--format ...] [--globals ...] --by NAME`; the `exception record|list|revoke` commands; `run show RUN_ID`; `alerts --state excepted`; that a dismissal holds until new evidence; that a model whose incomplete state never clears (absent record bytes, a hub verdict that stays unknown, a gated base model, a paper that stays not found) trips `--fail-on` on every run unless `--source` leaves that source out; the check overview; rule IDs and `docs/rules/`; the safe list and its D2 trade-off
 - [X] T065 [P] Bring `specs/004-scan-policy-gates/contracts/cli.md` and `specs/004-scan-policy-gates/data-model.md` in step with what was built (field names, text layout, refusal messages), and note the change to dismissals in `specs/001-inventory-alerts/contracts/cli.md` under `alert dismiss`
 - [X] T066 [P] Update the module docstrings that describe closing and dismissal in `src/model_dependabot/lifecycle.py`, `src/model_dependabot/store.py` and `src/model_dependabot/reports.py` so they state held dismissals, excepted alerts and the new kind
-- [ ] T067 Run every scenario of `specs/004-scan-policy-gates/quickstart.md` (the integration-only parts through their tests) and record the results, with the real-file section of T036, in `specs/004-scan-policy-gates/validation.md`
-- [ ] T068 Run `uv run pytest -q`, `uv run ruff check` and `uv run ruff format --check` with their real exit codes (no pipe) and record the counts against the baseline taken before T008 in `specs/004-scan-policy-gates/validation.md`
+- [X] T067 Run every scenario of `specs/004-scan-policy-gates/quickstart.md` (the integration-only parts through their tests) and record the results, with the real-file section of T036, in `specs/004-scan-policy-gates/validation.md`
+- [X] T068 Run `uv run pytest -q`, `uv run ruff check` and `uv run ruff format --check` with their real exit codes (no pipe) and record the counts against the baseline taken before T008 in `specs/004-scan-policy-gates/validation.md`
 
 ---
 
