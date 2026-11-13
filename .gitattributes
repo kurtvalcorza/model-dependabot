@@ -6,3 +6,5 @@ tests/fixtures/** -text
 # The vendored SPDX licence list is checked by its SHA256SUMS too.
 src/model_dependabot/licences/*.json -text
 src/model_dependabot/licences/SHA256SUMS -text
+# The safe list is cited by its SHA-256 as read; keep it byte-exact on every platform.
+src/model_dependabot/safe_globals/safe-globals.toml -text
