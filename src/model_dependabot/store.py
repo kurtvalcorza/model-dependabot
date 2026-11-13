@@ -24,6 +24,7 @@ the hash from their stored bodies where the body is still there and is JSON.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -475,35 +476,59 @@ class Store:
         self._widen_watch_kinds()
         self._rekey_repository_alerts()
 
+    @contextlib.contextmanager
+    def _atomic(self) -> Iterator[None]:
+        """One explicit transaction, committed at the end or rolled back on any error.
+
+        ``sqlite3`` opens a transaction implicitly only before a data statement, so a schema
+        statement (``ALTER``, ``CREATE``, ``DROP``) would otherwise commit on its own and leave a
+        migration half done if the open were interrupted (review F5).
+        """
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+        except BaseException:
+            self.conn.rollback()
+            raise
+        self.conn.commit()
+
     def _add_origins(self) -> None:
         """Add feature 003's ``origin`` and ``format_origin`` to an older database (research A2).
 
         A version registered from a registration record is back-filled as ``record``; every other
         old version keeps a null origin (legacy) and every old entry a null ``format_origin``.
         The versions stay immutable: the trigger that guards them is lifted for the back-fill
-        only, inside the same transaction, and put back.
+        only, inside the one transaction that adds the columns, and put back. Every version
+        registered since this feature has an origin, so a record-registered version without one
+        can only be left by an interrupted upgrade, and it is back-filled on the next open.
         """
-        if "format_origin" not in self.columns("inventory_entries"):
-            with self.conn:
-                self.conn.execute(
-                    "ALTER TABLE inventory_entries ADD COLUMN format_origin TEXT CHECK"
-                    f" (format_origin IS NULL OR format_origin IN {_in(FORMAT_ORIGINS)})"
-                )
-        if "origin" in self.columns("model_versions"):
-            return
+        added = "origin" not in self.columns("model_versions")
+        if not added and "format_origin" in self.columns("inventory_entries"):
+            pending = self.conn.execute(
+                "SELECT 1 FROM model_versions WHERE origin IS NULL"
+                " AND registration_record_sha256 IS NOT NULL LIMIT 1"
+            ).fetchone()
+            if pending is None:
+                return
         trigger = self.conn.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'trigger'"
             " AND name = 'model_versions_no_update'"
         ).fetchone()
-        with self.conn:
-            self.conn.execute(
-                "ALTER TABLE model_versions ADD COLUMN origin TEXT CHECK"
-                f" (origin IS NULL OR origin IN {_in(VERSION_ORIGINS)})"
-            )
+        with self._atomic():
+            if "format_origin" not in self.columns("inventory_entries"):
+                self.conn.execute(
+                    "ALTER TABLE inventory_entries ADD COLUMN format_origin TEXT CHECK"
+                    f" (format_origin IS NULL OR format_origin IN {_in(FORMAT_ORIGINS)})"
+                )
+            if added:
+                self.conn.execute(
+                    "ALTER TABLE model_versions ADD COLUMN origin TEXT CHECK"
+                    f" (origin IS NULL OR origin IN {_in(VERSION_ORIGINS)})"
+                )
             self.conn.execute("DROP TRIGGER IF EXISTS model_versions_no_update")
             self.conn.execute(
                 "UPDATE model_versions SET origin = 'record'"
-                " WHERE registration_record_sha256 IS NOT NULL"
+                " WHERE registration_record_sha256 IS NOT NULL AND origin IS NULL"
             )
             if trigger is not None:
                 self.conn.execute(trigger["sql"])
@@ -539,8 +564,10 @@ class Store:
 
         SQLite cannot change a CHECK constraint in place, so a database written before a watch kind
         was added (``base_model_moved``, held-out scoring 2026-10-25) has its table rebuilt with
-        the current schema, every row and id kept (the SQLite twelve-step procedure).
+        the current schema, every row and id kept (the SQLite twelve-step procedure). The rebuild
+        is one transaction (``_atomic``), so an interrupted open leaves the old table as it was.
         """
+        self._resolve_interrupted_widening()
         row = self.conn.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'watch_events'"
         ).fetchone()
@@ -551,13 +578,34 @@ class Store:
         ddl = ddl.replace("IF NOT EXISTS watch_events (", "watch_events_widened (", 1)
         self.conn.execute("PRAGMA foreign_keys = OFF")
         try:
-            with self.conn:
+            with self._atomic():
                 self.conn.execute(ddl)
                 self.conn.execute("INSERT INTO watch_events_widened SELECT * FROM watch_events")
                 self.conn.execute("DROP TABLE watch_events")
                 self.conn.execute("ALTER TABLE watch_events_widened RENAME TO watch_events")
                 if self.conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
                     raise sqlite3.IntegrityError("watch_events rebuild broke a foreign key")
+        finally:
+            self.conn.execute("PRAGMA foreign_keys = ON")
+
+    def _resolve_interrupted_widening(self) -> None:
+        """Settle a ``watch_events_widened`` left by a rebuild an earlier release did not finish.
+
+        That release committed each schema statement on its own. If it had dropped the old table,
+        the open recreates ``watch_events`` empty and the leftover copy holds the rows, so the copy
+        takes its place; otherwise the old table still holds them and the copy is dropped.
+        """
+        if "watch_events_widened" not in self.tables():
+            return
+        rows = self.conn.execute("SELECT count(*) FROM watch_events").fetchone()[0]
+        self.conn.execute("PRAGMA foreign_keys = OFF")
+        try:
+            with self._atomic():
+                if rows == 0:
+                    self.conn.execute("DROP TABLE watch_events")
+                    self.conn.execute("ALTER TABLE watch_events_widened RENAME TO watch_events")
+                else:
+                    self.conn.execute("DROP TABLE watch_events_widened")
         finally:
             self.conn.execute("PRAGMA foreign_keys = ON")
 

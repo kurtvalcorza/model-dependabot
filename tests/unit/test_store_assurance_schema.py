@@ -223,3 +223,100 @@ def test_the_back_fill_keeps_every_other_field(tmp_path: Path) -> None:
     assert record["registration_record_sha256"] == "c" * 64
     assert record["inventory"] == json.loads("{}")
     assert record["registered_at"] == "2026-11-01T00:00:00Z"
+
+
+# --- Review F5: the upgrade is one transaction and recovers from an interrupted one ---------------
+
+
+def _columns(path: Path, table: str) -> set[str]:
+    conn = sqlite3.connect(path)
+    try:
+        return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    finally:
+        conn.close()
+
+
+def test_a_failed_upgrade_leaves_the_old_database_as_it_was(tmp_path: Path) -> None:
+    path = tmp_path / "old.db"
+    pre_003_database(path)
+    conn = sqlite3.connect(path)
+    with conn:  # makes the back-fill fail after the new columns would have been added
+        conn.execute(
+            "CREATE TRIGGER fail_back_fill BEFORE UPDATE ON model_versions"
+            " BEGIN SELECT RAISE(ABORT, 'interrupted'); END"
+        )
+    conn.close()
+    with pytest.raises(sqlite3.IntegrityError, match="interrupted"):
+        _store(path)
+    assert "origin" not in _columns(path, "model_versions")
+    assert "format_origin" not in _columns(path, "inventory_entries")
+    conn = sqlite3.connect(path)
+    with conn:
+        conn.execute("DROP TRIGGER fail_back_fill")
+    conn.close()
+    with _store(path) as store:
+        assert store.get_version("from-record", 1)["origin"] == "record"
+        with pytest.raises(sqlite3.IntegrityError):  # the guard is back
+            store.conn.execute("UPDATE model_versions SET origin = 'import'")
+
+
+def test_a_back_fill_an_earlier_release_did_not_finish_is_completed_on_open(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "old.db"
+    pre_003_database(path)
+    conn = sqlite3.connect(path)
+    with conn:  # what an interrupted earlier upgrade left: the columns, but no back-fill
+        conn.execute("ALTER TABLE model_versions ADD COLUMN origin TEXT")
+        conn.execute("ALTER TABLE inventory_entries ADD COLUMN format_origin TEXT")
+    conn.close()
+    with _store(path) as store:
+        assert store.get_version("from-record", 1)["origin"] == "record"
+        assert store.get_version("legacy", 1)["origin"] is None
+
+
+def _old_watch_events(path: Path, rows: int, leftover_rows: int, dropped: bool) -> None:
+    """A pre-003 database with a ``watch_events_widened`` left by an interrupted rebuild."""
+    pre_003_database(path)
+    conn = sqlite3.connect(path)
+    values = (
+        "legacy",
+        1,
+        SHA,
+        "pickle_format",
+        "2026-11-01T00:00:00Z",
+        "2026-11-01T00:00:00Z",
+    )
+    insert = (
+        "INSERT INTO {} (model_id, version, entry_identifier, kind, first_seen, last_seen)"
+        " VALUES (?, ?, ?, ?, ?, ?)"
+    )
+    with conn:
+        for _ in range(rows):
+            conn.execute(insert.format("watch_events"), values)
+        conn.execute("CREATE TABLE watch_events_widened AS SELECT * FROM watch_events WHERE 0")
+        for _ in range(leftover_rows):
+            conn.execute(insert.format("watch_events_widened"), values)
+        if dropped:
+            conn.execute("DROP TABLE watch_events")
+    conn.close()
+
+
+def test_a_leftover_rebuild_copy_is_dropped_when_the_old_table_still_holds_the_rows(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "old.db"
+    _old_watch_events(path, rows=1, leftover_rows=0, dropped=False)
+    with _store(path) as store:
+        assert "watch_events_widened" not in store.tables()
+        assert len(store.watch_events("legacy", 1)) == 1
+        assert "format_claim_contradicted" in _check_values(store.conn, "watch_events")
+
+
+def test_a_leftover_rebuild_copy_takes_the_place_of_a_dropped_table(tmp_path: Path) -> None:
+    path = tmp_path / "old.db"
+    _old_watch_events(path, rows=1, leftover_rows=1, dropped=True)
+    with _store(path) as store:
+        assert "watch_events_widened" not in store.tables()
+        assert len(store.watch_events("legacy", 1)) == 1
+        assert "format_claim_contradicted" in _check_values(store.conn, "watch_events")
