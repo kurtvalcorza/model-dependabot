@@ -88,7 +88,9 @@ def test_extension_decides_the_scanner_path(
     assert calls == [("weights/model.BIN", ".bin")]
 
 
-@pytest.mark.parametrize("name", ["innocuous.pkl", "suspicious.pkl", "joblib-style.joblib"])
+@pytest.mark.parametrize(
+    "name", ["innocuous.pkl", "suspicious.pkl", "joblib-style.joblib", "posix-path.pkl"]
+)
 def test_committed_fixtures_match_the_builder(craft: ModuleType, name: str) -> None:
     assert (PICKLES / name).read_bytes() == craft.COMMITTED[name]()
 
@@ -101,4 +103,29 @@ def test_no_dangerous_fixture_is_committed() -> None:
         "innocuous.pkl",
         "suspicious.pkl",
         "joblib-style.joblib",
+        "posix-path.pkl",
     }
+
+
+@pytest.mark.parametrize(
+    ("build", "dangerous", "suspicious"),
+    [
+        ("mixed", ["os.system"], ["model_dependabot_fixture.layers.CustomLayer"]),
+        (
+            "protocol2_getattr",
+            ["__builtin__.getattr"],
+            ["__builtin__.set", "model_dependabot_fixture.layers.CustomLayer", "torch.Size"],
+        ),
+        ("two_dangerous", ["builtins.eval", "os.system"], []),
+        ("unresolved", ["unknown.eval"], []),
+        ("posix_path", [], ["pathlib.PosixPath"]),
+    ],
+)
+def test_feature_004_fixtures_scan_as_documented(
+    craft: ModuleType, build: str, dangerous: list[str], suspicious: list[str]
+) -> None:
+    """The fixtures of research S12, as picklescan 1.0.5 reports them (tests/fixtures/pickles)."""
+    report = pickle_scan.scan(getattr(craft, build)(), f"{build}.pkl")
+    assert report.complete
+    assert report.dangerous == dangerous
+    assert report.suspicious == suspicious

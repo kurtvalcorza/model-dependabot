@@ -163,9 +163,33 @@ the next check, citing that version.
 
 Not on the list: any framework layer or class (`torch.nn.*` and the like: they import code, which is
 what strict is for), nor anything picklescan calls dangerous. The entries in group 2 come from the
-samples above and from PyTorch's restricted loader; **inferred, to confirm**: before the list ships, a task checks each group 2 entry against the
-allow-list in `torch/_weights_only_unpickler.py` of a named PyTorch release, and records that release
-in the file's `why`. (PyTorch is not installed in this environment, so that check was not run.)
+samples above and from PyTorch's restricted loader.
+
+**Confirmed (T006, 2026-11-13)** against the default allow-list (`_get_allowed_globals` and
+`_tensor_rebuild_functions`) in `torch/_weights_only_unpickler.py` of PyTorch **2.15.0**, the newest
+release on the package index that day, read as text from the release tag's source and never imported
+(SHA-256 `dd589755743adb7576bffe9190c4b4db463008afe85ff9211c626e25e44c244f`). The module renames
+come from `IMPORT_MAPPING` in the same release's `torch/_utils.py` (SHA-256
+`8a4260434d72035c4e8e2c7295f035842e7d82a1a8faca1bfa813470ae776c4f`), which maps `__builtin__` to
+`builtins` before the allow-list is read. PyTorch 2.9.0's copy of the first file
+(SHA-256 `76b2eafeda2078538987d5cf18e99d6371b2f747eb4f059a513fcf0ef81cf10e`) gives the same results.
+
+| Entry | Group | In PyTorch 2.15.0's default allow-list |
+| :-- | :-- | :-- |
+| `torch._utils._rebuild_parameter` | 2 | yes (tensor rebuild functions) |
+| `torch._utils._rebuild_parameter_with_state` | 2 | yes (tensor rebuild functions) |
+| `torch.Size` | 2 | yes |
+| `builtins.set` | 2 | yes |
+| `__builtin__.set` | 2 | yes, read as `builtins.set` through `IMPORT_MAPPING` |
+| `builtins.frozenset` | 2 | **no**: flagged for the owner |
+| `__builtin__.frozenset` | 2 | **no**: flagged for the owner |
+| `_codecs.encode` | 3 | yes |
+| `numpy.core.multiarray.scalar` | 3 | **no**: PyTorch leaves every numpy global out of its default list; already the owner's ruling D2 |
+
+**Awaiting the owner**: `builtins.frozenset` and `__builtin__.frozenset` are not on PyTorch's default
+list, so group 2's rationale ("from PyTorch's restricted loader") does not hold for them; they rest
+only on the checkpoint samples. Keep them, or drop them from version 1. Until the owner rules, they
+stay as provisional entries.
 
 The file starts with `version = 1` and a `[[changes]]` table (version, date, what changed). Any change
 to the entries bumps the version by one; a unit test holds the SHA-256 of the entries for each version
@@ -445,6 +469,29 @@ answers; any others found by the fixture survey of every folder whose answers be
 and `doi_ra/` included). The stored evidence and its `canonical_sha256` are unchanged; the table is
 used only to decide whether evidence is new, so a dismissed `hub_scan` alert holds while only those
 counters move.
+
+**Fixture survey (T007, 2026-11-13)** of every JSON answer in `tests/fixtures/` `hf/`, `doi_ra/`,
+`crossref/`, `datacite/`, `zenodo/`, `figshare/`, `hf_upstream/`, `hf_takedowns/` and `osv/`, for fields
+that move on requests that change nothing else. The `VOLATILE_FIELDS` table to start with:
+
+| Source (as the evidence row stores it) | Top-level fields | Seen in | Status |
+| :-- | :-- | :-- | :-- |
+| the hub's host (`huggingface.co`) | `downloads`, `likes`, `lastModified` | `hf/eicar-security.json`, `hf/gpt2-security.json`, `hf/gpt2-model-info.json`; `lastModified` also in `hf_upstream/model-*.json` | confirmed (the three named above) |
+
+Proposals, **awaiting the owner's yes** (not in `VOLATILE_FIELDS`):
+
+| Source | Field | Seen in | Note |
+| :-- | :-- | :-- | :-- |
+| Zenodo | `stats` (top level: `downloads`, `views`, `unique_*`, `version_*`) | `zenodo/record-3242074.json`, `zenodo/older-version.json` | usage counters, move on every read; a top-level key, so the S13 rule can remove it |
+| Crossref | `message.indexed`, `message.is-referenced-by-count` | `crossref/*.json` | re-indexing time and citation count; **nested** under `message`, so the top-level-only rule cannot remove them |
+| DataCite | `data.attributes.viewCount`, `viewsOverTime`, `downloadCount`, `downloadsOverTime`, `citationCount`, `citationsOverTime`, `referenceCount`, `partCount`, `partOfCount`, `versionCount`, `versionOfCount` | `datacite/findable.json`, `obsoleted.json`, `previous-version.json` | usage and link counters; **nested** under `data.attributes`, so the same limit applies |
+
+Not volatile: OSV `modified` (changes only with the advisory, which is new evidence); Crossref
+`created` and `deposited`, DataCite `created` and `updated`, Zenodo `created`, `modified` and
+`updated`, and the hub's `createdAt` and per-file `lastCommit.date` (each changes only with the record
+or the repository); `doi_ra/`, `figshare/` and `hf_takedowns/` carry no counters or request ids. The
+two nested proposals would need the owner to allow a nested path in `VOLATILE_FIELDS`; until then a
+dismissed Crossref or DataCite alert reopens when only those counters move.
 
 **Decision**: a store method `latest_alert(model_id, cause_key)` returns the most recent alert for the
 key in any state. In each insert path, when there is no open alert and that latest alert is `dismissed`,
