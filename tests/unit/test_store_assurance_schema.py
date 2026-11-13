@@ -320,3 +320,26 @@ def test_a_leftover_rebuild_copy_takes_the_place_of_a_dropped_table(tmp_path: Pa
         assert "watch_events_widened" not in store.tables()
         assert len(store.watch_events("legacy", 1)) == 1
         assert "format_claim_contradicted" in _check_values(store.conn, "watch_events")
+
+
+class _Racing(Store):
+    """A store whose upgrade lets another process upgrade first, just before it takes the lock."""
+
+    raced = False
+
+    def _atomic(self):  # type: ignore[override]
+        if not _Racing.raced:
+            _Racing.raced = True
+            Store(self.path, now=lambda: NOW).close()
+        return super()._atomic()
+
+
+def test_two_processes_upgrading_at_once_do_not_fail(tmp_path: Path) -> None:
+    """PR #15 round 2, G4: the upgrade decides what to add under the write lock."""
+    path = tmp_path / "old.db"
+    pre_003_database(path)
+    _Racing.raced = False
+    with _Racing(path, now=lambda: NOW) as store:
+        assert _Racing.raced
+        assert store.get_version("from-record", 1)["origin"] == "record"
+        assert "format_claim_contradicted" in _check_values(store.conn, "watch_events")

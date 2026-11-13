@@ -503,24 +503,26 @@ class Store:
         can only be left by an interrupted upgrade, and it is back-filled on the next open.
         """
         added = "origin" not in self.columns("model_versions")
-        if not added and "format_origin" in self.columns("inventory_entries"):
+        if not added and "format_origin" in self.columns("inventory_entries"):  # a cheap first look
             pending = self.conn.execute(
                 "SELECT 1 FROM model_versions WHERE origin IS NULL"
                 " AND registration_record_sha256 IS NOT NULL LIMIT 1"
             ).fetchone()
             if pending is None:
                 return
-        trigger = self.conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type = 'trigger'"
-            " AND name = 'model_versions_no_update'"
-        ).fetchone()
         with self._atomic():
+            # Read again under the write lock: another process may have upgraded the database
+            # while this one waited for it (PR #15 round 2, G4).
+            trigger = self.conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'trigger'"
+                " AND name = 'model_versions_no_update'"
+            ).fetchone()
             if "format_origin" not in self.columns("inventory_entries"):
                 self.conn.execute(
                     "ALTER TABLE inventory_entries ADD COLUMN format_origin TEXT CHECK"
                     f" (format_origin IS NULL OR format_origin IN {_in(FORMAT_ORIGINS)})"
                 )
-            if added:
+            if "origin" not in self.columns("model_versions"):
                 self.conn.execute(
                     "ALTER TABLE model_versions ADD COLUMN origin TEXT CHECK"
                     f" (origin IS NULL OR origin IN {_in(VERSION_ORIGINS)})"
@@ -579,6 +581,11 @@ class Store:
         self.conn.execute("PRAGMA foreign_keys = OFF")
         try:
             with self._atomic():
+                row = self.conn.execute(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'watch_events'"
+                ).fetchone()
+                if all(f"'{kind}'" in row["sql"] for kind in WATCH_KINDS):
+                    return  # another process rebuilt it while this one waited (G4)
                 self.conn.execute(ddl)
                 self.conn.execute("INSERT INTO watch_events_widened SELECT * FROM watch_events")
                 self.conn.execute("DROP TABLE watch_events")
