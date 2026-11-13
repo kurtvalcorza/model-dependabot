@@ -91,7 +91,10 @@ imported claim the name never confirms it (review F2 of PR #15, owner ruling "un
 top-level field one the message has, of its wire type and with a length that fits the file. A lead that
 does not is recorded `unreadable` with that reason, so the claim stays unverified and never counts under
 the strict policy; import leaves such a file's claim for `format-check` instead of taking it as measured.
-No pickle or zip passes, as none starts with the byte `0x08`. A file the owner registers from a manifest
+No pickle passes, as none starts with the byte `0x08`. A zip may carry leading bytes and is read from its
+end, so a lead or a local file's last 64 KiB holding a zip signature is refused too (PR #15 round 2, G2);
+a hub file's end is not read, so a zip lying wholly past the lead is the case left. A file the owner
+registers from a manifest
 keeps the documented limit of local files: a protocol 0 or 1 pickle named `.onnx` passes there.
 
 Evidence is a JSON body holding the URL, commit, file, status, `Content-Range`, the lead's SHA-256 and
