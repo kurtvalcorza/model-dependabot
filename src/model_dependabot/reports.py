@@ -24,6 +24,7 @@ from model_dependabot.assurance.trust import (
     needs_confirmation,
 )
 from model_dependabot.matching.severity import severity_rank
+from model_dependabot.rules import rule_for
 from model_dependabot.store import SCOPE_ALL as SCOPE_ALL  # moved to the store (feature 003)
 from model_dependabot.store import Store
 
@@ -63,8 +64,11 @@ def evidence_view(evidence: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def alert_view(store: Store, alert: Mapping[str, Any]) -> dict[str, Any]:
+    rule = rule_for(alert["kind"])
     return {
         "alert_id": alert["alert_id"],
+        "rule_id": rule.rule_id,
+        "rule_doc": rule.page,
         "kind": alert["kind"],
         "state": view_state(alert),
         "severity": alert["severity"],
@@ -95,8 +99,11 @@ def watch_view(event: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def history_view(store: Store, alert: Mapping[str, Any]) -> dict[str, Any]:
+    rule = rule_for(alert["kind"])
     return {
         "alert_id": alert["alert_id"],
+        "rule_id": rule.rule_id,
+        "rule_doc": rule.page,
         "kind": alert["kind"],
         "outcome": alert["state"],
         "severity": alert["severity"],
@@ -228,7 +235,8 @@ def evidence_line(evidence: Mapping[str, Any]) -> str:
 
 
 def alert_line(alert: Mapping[str, Any]) -> str:
-    head = f"  #{alert['alert_id']} {alert['severity']:<8} {alert['state']:<9}"
+    rule_id = alert.get("rule_id") or rule_for(alert["kind"]).rule_id
+    head = f"  #{alert['alert_id']} {rule_id} {alert['severity']:<8} {alert['state']:<9}"
     return f"{head} {_cause_text(alert['kind'], alert['cause'])}"
 
 

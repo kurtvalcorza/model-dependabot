@@ -19,5 +19,5 @@ prove, how it closes and how to fix or accept it.
 | [`MDB501`](MDB501.md) | `base_model_disabled` | base model |
 | [`MDB502`](MDB502.md) | `base_model_unavailable` | base model |
 
-The pages are written with the rule registry (`src/model_dependabot/rules.py`); until then the links
-above lead nowhere.
+The registry is `src/model_dependabot/rules.py`; every alert in every view carries its `rule_id` and
+`rule_doc`, and text output shows the ID after the alert id.

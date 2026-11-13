@@ -161,17 +161,17 @@ nor excepted, dangerous ones included (D3).
 
 ### Tests for User Story 4 (write first, see them fail)
 
-- [ ] T046 [P] [US4] Write `tests/fixtures/rules/assigned.json` (the twelve IDs and kinds of research S1) and `tests/unit/test_rules.py`: one rule per `ALERT_KINDS` value (twelve, `globals_policy` included, so this phase follows Phase 2), IDs unique, no ID in `assigned.json` gone or naming another kind, every page in `docs/rules/` exists with exactly the four headings of FR-015, every `WATCH_KINDS` value on exactly one page (FR-016)
-- [ ] T047 [P] [US4] Extend `tests/contract/test_cli_json.py` so every alert in `alerts`, `alert show`, `history` and `inventory audit` JSON carries `rule_id` and `rule_doc`, and every text alert line shows the rule ID after the alert id
+- [X] T046 [P] [US4] Write `tests/fixtures/rules/assigned.json` (the twelve IDs and kinds of research S1) and `tests/unit/test_rules.py`: one rule per `ALERT_KINDS` value (twelve, `globals_policy` included, so this phase follows Phase 2), IDs unique, no ID in `assigned.json` gone or naming another kind, every page in `docs/rules/` exists with exactly the four headings of FR-015, every `WATCH_KINDS` value on exactly one page (FR-016)
+- [X] T047 [P] [US4] Extend `tests/contract/test_cli_json.py` so every alert in `alerts`, `alert show`, `history` and `inventory audit` JSON carries `rule_id` and `rule_doc`, and every text alert line shows the rule ID after the alert id
 
 ### Implementation for User Story 4
 
-- [ ] T048 [US4] Implement `src/model_dependabot/rules.py`: one record per alert kind with `rule_id`, `kind`, `title`, `page`, `family` and `watch_kinds` as data-model.md (Rule)
-- [ ] T049 [US4] Add `rule_id` and `rule_doc` to `alert_view` and `history_view` and the ID to `alert_line` in `src/model_dependabot/reports.py`
-- [ ] T050 [P] [US4] Write `docs/rules/MDB101.md`, `docs/rules/MDB102.md`, `docs/rules/MDB103.md` and `docs/rules/MDB104.md` (weight files), each with What raises it; What it does not prove; How it closes; How to fix or accept it, and their watch kinds; MDB101 and MDB104 explain that one exception covers a global in both alerts and that an `unknown` global can never be excepted
-- [ ] T051 [P] [US4] Write `docs/rules/MDB201.md` (package advisories) with the four headings, its watch kinds and how a dismissal holds until new evidence (FR-020)
-- [ ] T052 [P] [US4] Write `docs/rules/MDB301.md`, `docs/rules/MDB302.md`, `docs/rules/MDB303.md` and `docs/rules/MDB304.md` (datasets and papers) with the four headings and their watch kinds
-- [ ] T053 [P] [US4] Write `docs/rules/MDB401.md`, `docs/rules/MDB501.md` and `docs/rules/MDB502.md` (licences and base model) with the four headings and their watch kinds, and complete the links in `docs/rules/README.md`
+- [X] T048 [US4] Implement `src/model_dependabot/rules.py`: one record per alert kind with `rule_id`, `kind`, `title`, `page`, `family` and `watch_kinds` as data-model.md (Rule)
+- [X] T049 [US4] Add `rule_id` and `rule_doc` to `alert_view` and `history_view` and the ID to `alert_line` in `src/model_dependabot/reports.py`
+- [X] T050 [P] [US4] Write `docs/rules/MDB101.md`, `docs/rules/MDB102.md`, `docs/rules/MDB103.md` and `docs/rules/MDB104.md` (weight files), each with What raises it; What it does not prove; How it closes; How to fix or accept it, and their watch kinds; MDB101 and MDB104 explain that one exception covers a global in both alerts and that an `unknown` global can never be excepted
+- [X] T051 [P] [US4] Write `docs/rules/MDB201.md` (package advisories) with the four headings, its watch kinds and how a dismissal holds until new evidence (FR-020)
+- [X] T052 [P] [US4] Write `docs/rules/MDB301.md`, `docs/rules/MDB302.md`, `docs/rules/MDB303.md` and `docs/rules/MDB304.md` (datasets and papers) with the four headings and their watch kinds
+- [X] T053 [P] [US4] Write `docs/rules/MDB401.md`, `docs/rules/MDB501.md` and `docs/rules/MDB502.md` (licences and base model) with the four headings and their watch kinds, and complete the links in `docs/rules/README.md`
 
 **Checkpoint**: T046 and T047 pass.
 

@@ -47,6 +47,8 @@ WATCH_KEYS = {"kind", "identifier", "detail"}
 HISTORY_KEYS = {"model_id", "current_version", "history"}
 HISTORY_ITEM_KEYS = {
     "alert_id",
+    "rule_id",  # feature 004 (FR-014)
+    "rule_doc",
     "kind",
     "outcome",
     "severity",
@@ -217,3 +219,33 @@ def test_policy_needs_format_or_globals(checked: Callable[..., tuple[int, Any]])
     assert code == EXIT_INVALID_INPUT
     assert "--format" in payload["error"]["message"]
     assert checked("policy", MODEL, "--globals", "lenient", "--by", "O")[0] == EXIT_INVALID_INPUT
+
+
+# --- feature 004: rule IDs on every alert (T047, FR-014) ----------------------------------------
+
+
+def test_every_alert_view_carries_its_rule_id(checked: Callable[..., tuple[int, Any]]) -> None:
+    _, listed = checked("alerts", MODEL, "--state", "all")
+    assert listed["alerts"]
+    for alert in listed["alerts"]:
+        assert alert["rule_id"] == "MDB201"
+        assert alert["rule_doc"] == "docs/rules/MDB201.md"
+    first = listed["alerts"][0]
+    _, shown = checked("alert", "show", str(first["alert_id"]))
+    assert (shown["rule_id"], shown["rule_doc"]) == ("MDB201", "docs/rules/MDB201.md")
+    _, audited = checked("inventory", "audit", MODEL)
+    assert all(alert["rule_id"] == "MDB201" for alert in audited["findings"]["alerts"])
+    argv = ("--reason", "risk_accepted", "--by", "Owner")
+    assert checked("alert", "dismiss", str(first["alert_id"]), *argv)[0] == EXIT_OK
+    _, history = checked("history", MODEL)
+    assert [item["rule_id"] for item in history["history"]] == ["MDB201"]
+
+
+def test_text_alert_lines_show_the_rule_id_after_the_alert_id(
+    checked: Callable[..., tuple[int, Any]], capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    _, listed = checked("alerts", MODEL)
+    alert_id = listed["alerts"][0]["alert_id"]
+    handlers = make_handlers(fetcher=RecordedFetcher(FIXTURES / "osv"))
+    main(["alerts", MODEL, "--db", str(tmp_path / "db" / "md.db")], handlers=handlers)
+    assert f"  #{alert_id} MDB201 " in capsys.readouterr().out

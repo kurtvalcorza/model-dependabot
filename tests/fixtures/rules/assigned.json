@@ -1,0 +1,17 @@
+{
+ "note": "Every rule ID ever assigned, with its alert kind. An ID is never reused or removed (FR-016).",
+ "assigned": {
+  "MDB101": "weight_file_scan",
+  "MDB102": "hub_scan",
+  "MDB103": "format_policy",
+  "MDB104": "globals_policy",
+  "MDB201": "package_advisory",
+  "MDB301": "dataset_retracted",
+  "MDB302": "paper_retracted",
+  "MDB303": "dataset_removed",
+  "MDB304": "dataset_not_findable",
+  "MDB401": "licence_changed",
+  "MDB501": "base_model_disabled",
+  "MDB502": "base_model_unavailable"
+ }
+}
