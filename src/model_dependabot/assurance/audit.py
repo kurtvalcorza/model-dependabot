@@ -3,8 +3,9 @@
 Three separate answers from the stored data, so that "no alerts" is never read as "complete" or
 "safe" (FR-012):
 
-- **findings**: the open alerts and the version's watch events, or ``not_yet_checked`` when no
-  check has covered the version since it was registered;
+- **findings**: the open alerts and the version's watch events, with the state ``checked`` once
+  every relevant source has succeeded in a run that checked the version, ``partly_checked`` while
+  only some have and ``not_yet_checked`` while none has;
 - **assurance**: every entry classified ``verified``, ``declared-but-unverified``, ``conflicting``
   or ``unavailable`` with each claim's origin and verification (``trust.claim_verification``), and
   the dependency kinds the inventory does not declare at all;
@@ -55,6 +56,9 @@ UNKNOWN_FORMAT = "the file's format is unknown"
 NO_AGENCY = "the DOI's registration agency is not known, so no source is asked about it"
 NO_SOURCE = "no source checks this entry"
 NOT_CHECKED = "not checked"
+CHECKED = "checked"
+PARTLY_CHECKED = "partly_checked"
+NOT_YET_CHECKED = "not_yet_checked"
 NO_COMMIT = (
     "format-check never reads a hub file not pinned to a commit, so its format claim cannot be"
     " confirmed"
@@ -137,7 +141,21 @@ def relevant_sources(store: Store, entry: Mapping[str, Any], origin: str | None)
         found += ["hf-hub", "hf-takedowns"]
     elif kind == "dataset":
         found += _doi_sources(store, str(entry["identifier"]))
+    if kind == "dataset" and "crossref" not in found and _papers_at_crossref(store, entry):
+        found.append("crossref")
     return found
+
+
+def _papers_at_crossref(store: Store, entry: Mapping[str, Any]) -> bool:
+    """Whether Crossref is asked about one of the papers tied to a dataset (PR #15 round 2, S2).
+
+    The upstream check reads a paper's retraction from Crossref when Crossref registers its DOI,
+    for a hub dataset as for a DOI dataset, so a failed Crossref read leaves that paper unchecked.
+    """
+    return any(
+        crossref.queried((store.get_routing(paper) or {}).get("agency"))
+        for paper in entry.get("paper_dois") or []
+    )
 
 
 def _unconfirmable(entry: Mapping[str, Any]) -> str | None:
@@ -224,10 +242,17 @@ def audit_report(
     origin = record.get("origin")
     entries = store.entries(model_id, chosen)
     checks = store.claim_checks(model_id, chosen)
-    # A check run checks the model's latest version, so the runs that checked this one started
-    # after it was registered and before the next version was (review F1).
+    # A run records the version it checked (PR #15 round 2, G1), so it counts for that version
+    # only. A run recorded before that has no version: a check takes the latest version, so it
+    # counts if it started after this version was registered and before the next one was
+    # (review F1), to the second.
     until = store.registered_at(model_id, chosen + 1)
-    runs = store.check_runs_for(model_id, since=record["registered_at"], until=until)
+    runs = [
+        run
+        for run in store.check_runs_for(model_id, since=record["registered_at"])
+        if run["version"] == chosen
+        or (run["version"] is None and (until is None or run["started_at"] < until))
+    ]
 
     assured: list[dict[str, Any]] = []
     uncheckable: list[dict[str, Any]] = []
@@ -283,9 +308,17 @@ def audit_report(
     alerts = [alert_view(store, alert) for alert in store.alerts_for(model_id, ["open"])]
     events = [watch_view(event) for event in store.watch_events(model_id, chosen)]
     counts = {status: sum(item["status"] == status for item in assured) for status in STATUSES}
-    # A run that asked none of the relevant sources, or whose relevant sources all failed, has
-    # not checked the version (review F6); a version with nothing to check counts any run.
-    checked = any(item["last_ok_at"] for item in coverage) if coverage else bool(runs)
+    # The version is checked once every relevant source has succeeded in a run that checked it
+    # (review F6, PR #15 round 2 G5), partly checked while only some have, and not yet checked
+    # when none has; a version with nothing to check counts any run.
+    succeeded = sum(bool(item["last_ok_at"]) for item in coverage)
+    if not coverage:
+        state = CHECKED if runs else NOT_YET_CHECKED
+    elif succeeded == len(coverage):
+        state = CHECKED
+    else:
+        state = PARTLY_CHECKED if succeeded else NOT_YET_CHECKED
+    checked = state == CHECKED
     summary = {
         "checked": checked,
         "alerts_open": len(alerts),
@@ -311,7 +344,7 @@ def audit_report(
         "statement": STATEMENT,
         "summary": summary,
         "findings": {
-            "state": "checked" if checked else "not_yet_checked",
+            "state": state,
             "alerts": alerts,
             "watch_events": events,
         },

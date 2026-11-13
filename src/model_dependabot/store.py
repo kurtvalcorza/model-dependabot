@@ -308,6 +308,16 @@ CREATE TABLE IF NOT EXISTS claim_checks (
 CREATE INDEX IF NOT EXISTS claim_checks_by_entry
     ON claim_checks (model_id, version, entry_identifier, claim, claim_check_id);
 
+-- PR #15 round 2, G1: the version each check run checked of each model, so the audit credits a
+-- run to exactly that version. Runs written before this table have no rows here.
+CREATE TABLE IF NOT EXISTS check_run_targets (
+    run_id INTEGER NOT NULL REFERENCES check_runs (run_id),
+    model_id TEXT NOT NULL,
+    version INTEGER NOT NULL CHECK (version >= 1),
+    PRIMARY KEY (run_id, model_id),
+    FOREIGN KEY (model_id, version) REFERENCES model_versions (model_id, version)
+);
+
 -- Review C2, research U13: the ETag cache, kept across runs so a later run revalidates with
 -- If-None-Match. One row per URL; the body is the redacted one, kept in the evidence store.
 CREATE TABLE IF NOT EXISTS etag_cache (
@@ -1155,7 +1165,8 @@ class Store:
         self, model_id: str, since: str, until: str | None = None
     ) -> list[dict[str, Any]]:
         """Finished runs started at or after ``since`` (and before ``until``, if given) whose scope
-        covered the model, newest first.
+        covered the model, newest first. Each has ``version``: the version of the model it
+        checked, or ``None`` for a run recorded before ``check_run_targets`` existed.
 
         A run covers the model when its scope is ``all`` or names it (``check ID`` records the
         id; a run over several models records them joined by commas).
@@ -1166,14 +1177,33 @@ class Store:
             query += " AND started_at < ?"
             params += (until,)
         rows = self.conn.execute(query + " ORDER BY run_id DESC", params).fetchall()
+        linked: dict[int, int] = {}
+        if "check_run_targets" in self.tables():  # absent from a read-only older database
+            linked = {
+                int(row["run_id"]): int(row["version"])
+                for row in self.conn.execute(
+                    "SELECT run_id, version FROM check_run_targets WHERE model_id = ?",
+                    (model_id,),
+                )
+            }
         runs = []
         for row in rows:
             if row["scope"] != SCOPE_ALL and model_id not in str(row["scope"]).split(","):
                 continue
             record = dict(row)
             record["sources"] = _loads(record["sources"]) or {}
+            record["version"] = linked.get(record["run_id"])
             runs.append(record)
         return runs
+
+    def add_check_run_target(self, run_id: int, model_id: str, version: int) -> None:
+        """Record that run ``run_id`` checked ``version`` of ``model_id`` (G1)."""
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO check_run_targets (run_id, model_id, version)"
+                " VALUES (?, ?, ?)",
+                (run_id, model_id, version),
+            )
 
     def registered_at(self, model_id: str, version: int) -> str | None:
         row = self.conn.execute(

@@ -81,7 +81,7 @@ claims exist in the version, `unconfirmed_claims`: a list of `{identifier, locat
 | :-- | :-- |
 | `model_id`, `version`, `produced_at`, `stale_after_hours` | |
 | `summary` | counts: `alerts_open`, `watch_events`, `entries`, `verified`, `declared_but_unverified`, `conflicting`, `unavailable`, `gaps`, `uncheckable`, `sources_failed`, `sources_stale`, `sources_not_checked`; and `checked` (boolean) |
-| `findings` | `{state: "not_yet_checked" \| "checked", alerts: [...], watch_events: [...]}` in the shapes `alerts` already prints |
+| `findings` | `{state: "not_yet_checked" \| "partly_checked" \| "checked", alerts: [...], watch_events: [...]}` (checked once every relevant source succeeded in a run of this version; PR #15 round 2) in the shapes `alerts` already prints |
 | `assurance.entries[]` | `{kind, identifier, location, status, gap_reason, claims: [{claim, value, origin, verification}]}`; `claim` is `format`, `can_run_code`, `sha256` or `revision`; `verification` is `owner`, `measured`, `confirmed`, `unverified` or `contradicted` |
 | `assurance.undeclared_kinds[]` | kinds the inventory has none of: `environment`, `base_model`, `datasets`, `weights` |
 | `coverage.sources[]` | `{source, relevant_entries: [identifier or location, …], last_run_id, last_finished_at, status, age_hours, stale}` |

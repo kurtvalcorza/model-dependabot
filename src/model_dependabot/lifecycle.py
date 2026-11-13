@@ -254,6 +254,7 @@ def _check(
         }
         record = store.get_version(model_id, version) or {}
         entries = store.entries(model_id, version)
+        store.add_check_run_target(run_id, model_id, version)  # what the audit credits (G1)
         targets.append(
             _Target(
                 model_id,

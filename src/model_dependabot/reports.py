@@ -288,12 +288,19 @@ def audit_text(payload: Mapping[str, Any]) -> str:
         _summary_line(payload["summary"]),
         payload["statement"],
     ]
+    sources = payload["coverage"]["sources"]
     if findings["state"] == "not_yet_checked":
         lines.append("Findings: not yet checked (no check has covered this version)")
     else:
+        partly = ""
+        if findings["state"] == "partly_checked":
+            partly = (
+                f" (partly checked: {sum(bool(item['last_ok_at']) for item in sources)} of"
+                f" {len(sources)} relevant sources have succeeded)"
+            )
         lines.append(
             f"Findings: {len(findings['alerts'])} open alerts,"
-            f" {len(findings['watch_events'])} watch events"
+            f" {len(findings['watch_events'])} watch events{partly}"
         )
     lines += [alert_line(alert) for alert in findings["alerts"]]
     lines += [f"  {event['kind']} {event['identifier']}" for event in findings["watch_events"]]

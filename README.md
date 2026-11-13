@@ -227,8 +227,9 @@ code-free claims also need confirming. `inventory show` notes each claim still u
 
 `inventory audit ID` answers three questions separately, from the stored data:
 
-- **Findings**: the open alerts and the version's watch events, or "not yet checked" when no check has
-  covered the version since it was registered.
+- **Findings**: the open alerts and the version's watch events. They are "checked" once every source
+  relevant to the version has succeeded in a check of that version, "partly checked" while only some
+  have, and "not yet checked" while none has.
 - **Assurance**: each entry as `verified`, `declared-but-unverified`, `conflicting` or `unavailable`,
   with each claim's origin and whether a check confirmed it, and the dependency kinds the inventory does
   not declare at all.

@@ -358,3 +358,57 @@ def test_a_claim_format_check_can_never_read_is_uncheckable(
     assert "format-check" not in {item["source"] for item in report["coverage"]["sources"]}
     [item] = report["coverage"]["uncheckable"]
     assert reason in item["reason"]
+
+
+# --- PR #15 round 2 (G1, G5, S2) ------------------------------------------------------------------
+
+
+def test_a_run_counts_for_the_version_it_checked_even_within_one_second(
+    store: Store, clock: Clock
+) -> None:
+    """G1: a run started in the same second as the next registration checked the older version."""
+    register(store, [package()])
+    clock.now += timedelta(hours=1)
+    run_id = store.start_check_run(scope="m")
+    store.add_check_run_target(run_id, "m", 1)  # as run_check records it
+    store.finish_check_run(run_id, {"osv": "ok"})
+    register(store, [package(identifier="pkg:pypi/newvuln@9.9", name="newvuln", version="9.9")])
+    assert store.registered_at("m", 2) == store.get_check_run(run_id)["started_at"]
+    assert audit(store, "m", version=1)["findings"]["state"] == "checked"
+    newer = audit(store, "m")
+    assert newer["findings"]["state"] == "not_yet_checked"
+    [osv] = newer["coverage"]["sources"]
+    assert osv["last_run_id"] is None
+
+
+def test_run_check_records_the_version_it_checked(store: Store) -> None:
+    from model_dependabot.lifecycle import run_check
+
+    register(store, [weight()])
+    outcome = run_check(store, object(), ["m"], ["picklescan"])  # nothing here asks a source
+    [checked] = store.check_runs_for("m", since="2000-01-01T00:00:00Z")
+    assert (checked["run_id"], checked["version"]) == (outcome.run_id, 1)
+
+
+def test_findings_are_partly_checked_until_every_relevant_source_succeeded(
+    store: Store, clock: Clock
+) -> None:
+    """G5: one source succeeding does not make 0 alerts read as checked."""
+    register(store, [package(), weight(identifier=PICKLE_SHA, format="pickle", can_run_code=True)])
+    run(store, clock, {"osv": "ok"})
+    report = audit(store, "m")
+    assert report["findings"]["state"] == "partly_checked"
+    assert report["summary"]["checked"] is False
+    run(store, clock, {"picklescan": "ok"})
+    report = audit(store, "m")
+    assert report["findings"]["state"] == "checked"
+    assert report["summary"]["checked"] is True
+
+
+def test_a_hub_dataset_paper_at_crossref_makes_crossref_relevant(store: Store) -> None:
+    """S2: the upstream check asks Crossref about the dataset's papers."""
+    store.set_routing("10.5555/paper", agency="Crossref")
+    entry = hub_dataset() | {"paper_dois": ["10.5555/paper"]}
+    assert set(relevant_sources(store, entry, "manifest")) == {"hf-hub", "hf-takedowns", "crossref"}
+    unrouted = hub_dataset() | {"paper_dois": ["10.5555/unknown"]}
+    assert "crossref" not in relevant_sources(store, unrouted, "manifest")
