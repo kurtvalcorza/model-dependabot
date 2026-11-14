@@ -64,13 +64,14 @@ def write_proposal(
 
     The paths in it are relative to the folder ``output`` is in, resolved as the project root
     is, so a link or short name in either spelling never makes them climb out (review F9). Only
-    the folder is resolved: ``output`` itself must not be a link (``OutputLinkError``, PR #15
-    round 3, T1), so the file is written, checked and replaced at the path given.
+    the folder is resolved: neither ``output`` nor a folder above it inside the project may be
+    a link (``OutputLinkError``, PR #15 round 3, T1; issue #16), so the file is written, checked and
+    replaced at the path given.
     """
-    propose.refuse_link(output)
     root = Path(result["project"]).resolve()
+    propose.refuse_link(output, root)
     destination = output.absolute().parent.resolve() / output.name
     text = propose.render(result, model_id, root, destination)
-    propose.write(text, destination, force=force)
+    propose.write(text, destination, force=force, root=root)
     result["output"] = {"path": str(output), "written": True}
     return result

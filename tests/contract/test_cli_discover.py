@@ -132,3 +132,57 @@ def test_an_output_link_exits_1_and_writes_nothing(
         assert code == EXIT_INVALID_INPUT
         assert "is a link" in out_text
     assert not (tmp_path / "planted").exists()
+
+
+def test_an_output_through_a_link_folder_exits_1_and_writes_nothing(
+    detector_project: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Issue #16: a link in a folder above the -o file, with or without --force."""
+    from conftest import make_directory_link
+
+    planted = tmp_path / "planted"
+    planted.mkdir()
+    make_directory_link(detector_project / "out-link", planted)
+    output = detector_project / "out-link" / "planted.toml"
+    for extra in ([], ["--force"]):
+        code, _, out_text = run(
+            ["discover", str(detector_project), "-o", str(output), *extra], capsys
+        )
+        assert code == EXIT_INVALID_INPUT
+        assert "passes through the link" in out_text
+    assert list(planted.iterdir()) == []
+
+
+def test_a_relative_output_through_a_link_folder_exits_1(
+    detector_project: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #16: relative PATH and -o, with the working directory inside the project."""
+    from conftest import make_directory_link
+
+    planted = tmp_path / "planted"
+    planted.mkdir()
+    make_directory_link(detector_project / "out-link", planted)
+    monkeypatch.chdir(detector_project)
+    code, _, out_text = run(["discover", ".", "-o", "out-link/p.toml", "--force"], capsys)
+    assert code == EXIT_INVALID_INPUT
+    assert "passes through the link" in out_text
+    assert list(planted.iterdir()) == []
+
+
+def test_an_output_outside_the_project_below_a_link_exits_0(
+    detector_project: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Review P2: like ``-o /tmp/proposed.toml`` on macOS, where ``/tmp`` is a link."""
+    from conftest import make_directory_link
+
+    real = tmp_path / "private-tmp"
+    real.mkdir()
+    make_directory_link(tmp_path / "tmp-link", real)
+    code, _, _ = run(
+        ["discover", str(detector_project), "-o", str(tmp_path / "tmp-link" / "p.toml")], capsys
+    )
+    assert code == EXIT_OK
+    assert (real / "p.toml").is_file()

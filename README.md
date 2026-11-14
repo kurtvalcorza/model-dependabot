@@ -96,7 +96,7 @@ output; both may go before or after the command name.
 | `inventory show ID [--version N]` | Lists the entries with their identifiers and the gaps with their reasons |
 | `inventory export ID [--version N] -o FILE` | Writes the stored CycloneDX 1.7 inventory, validated against the official schema |
 | `inventory audit ID [--version N] [--stale-after HOURS]` | Reports one version's findings, how far each entry is verified and which sources have checked it, from the stored data only; see [Auditing an inventory](#auditing-an-inventory). Opens the database read-only, contacts no source and writes nothing |
-| `discover PATH [--manifest FILE] [--model-id ID] [--upstream] [-o FILE [--force]]` | Proposes candidate dependencies for a project folder; see [Discovering dependencies](#discovering-dependencies). Reads nothing outside `PATH` and opens no database. Makes no request unless `--upstream`. Writes nothing unless `-o`, never replaces a file unless `--force` and refuses an `-o` path that is a link |
+| `discover PATH [--manifest FILE] [--model-id ID] [--upstream] [-o FILE [--force]]` | Proposes candidate dependencies for a project folder; see [Discovering dependencies](#discovering-dependencies). Reads nothing outside `PATH` and opens no database. Makes no request unless `--upstream`. Writes nothing unless `-o`, never replaces a file unless `--force` and refuses an `-o` path that is a link or passes through a link inside `PATH` |
 | `check (ID \| --all) [--scheduled] [--source ...] [--fail-on SEVERITY]` | Runs the checks now, records a check run and ends with its [check overview](#the-check-overview). `--fail-on` turns it into a gate; see [Exit codes](#exit-codes). Sources: `osv`, `picklescan`, `hf-scan`, `format-check`, `hf-hub`, `hf-takedowns`, `crossref`, `datacite`, `zenodo` and `figshare`; without `--source` every source runs. `--scheduled` marks the run as scheduled and needs `--all` (`check ID --scheduled` exits 1); see [Scheduling](#scheduling) |
 | `policy ID [--format (default\|strict)] [--globals (default\|strict)] --by NAME` | At least one of the two options. `--format` sets the model's weight-format policy, recording who set it and when. Under `default` a format that can run code when loaded is a watch event; under `strict` a code-capable weight file with no pinned code-free file beside it in the same version raises an alert (an unpinned name proves nothing). Takes effect at the next check. `--globals strict`: any global in a scanned pickle file of the model that is neither on the safe list (`src/model_dependabot/safe_globals/`) nor excepted, dangerous ones included, raises one MODERATE `globals_policy` alert per file; a dangerous global also keeps its HIGH alert |
 | `alerts ID [--state open\|excepted\|closed\|all]` | Lists alerts by severity (`CRITICAL`, `HIGH`, `MODERATE`, `LOW`, `UNKNOWN`), then the excepted alerts in their own list, then the watch events, each with its evidence. The `alerts` list never holds an excepted alert; `--state excepted` lists only the excepted ones |
@@ -197,7 +197,7 @@ and [`specs/002-upstream-watch/contracts/cli.md`](specs/002-upstream-watch/contr
 | Code | Meaning |
 | :-- | :-- |
 | 0 | Success. For `check`: the check completed, whether or not it found anything, unless `--fail-on` tripped (4) |
-| 1 | Invalid input (manifest, inventory or arguments); for `inventory audit` also an unknown model or version or a database older than feature 002; for `discover` a `PATH` that is not a folder, an existing `-o` file without `--force` or an `-o` path that is a link; for `exception record` and `exception revoke` every refusal listed under [Exceptions for globals](#exceptions-for-globals) |
+| 1 | Invalid input (manifest, inventory or arguments); for `inventory audit` also an unknown model or version or a database older than feature 002; for `discover` a `PATH` that is not a folder, an existing `-o` file without `--force` or an `-o` path that is a link or passes through a link inside `PATH`; for `exception record` and `exception revoke` every refusal listed under [Exceptions for globals](#exceptions-for-globals) |
 | 2 | `check` finished but at least one source failed; alerts that depend on it were left unchanged |
 | 3 | Unexpected error, including an interrupted run |
 | 4 | Only with `check --fail-on SEVERITY`: no source failed, and a model in the scope has an open alert that is not excepted at or above `SEVERITY` (whichever run raised it), or a source in the `incomplete` state, or no relevant source that checked it, or the scope matched no model |
@@ -472,8 +472,10 @@ who removed a record) are dropped. Such evidence keeps the SHA-256 of the respon
 - It never loads a weight file to inspect it: pickles are scanned as data, without running them.
 - `discover` reads nothing outside the folder it is given, runs no project code, opens no database,
   makes no request without `--upstream` and writes only the `-o` file. It refuses an `-o` path that
-  is a symbolic link or junction, even a dangling one and even with `--force`, so a link in the
-  project cannot choose where the proposal is written.
+  is a symbolic link or junction, or that passes through one in a folder inside the project, even
+  a dangling link and even with `--force`, so a link in the project cannot choose where the
+  proposal is written. Links outside the project folder, above it or elsewhere (such as `/tmp` on
+  macOS), are yours and are followed.
 - It never sends a token, an account name or personal data to a source; every upstream request is a
   `GET` or `HEAD`.
 - It never stores the requesting party of a takedown or the names of people in a source's answer.

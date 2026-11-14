@@ -267,6 +267,99 @@ def test_an_output_junction_is_refused(tmp_path: Path) -> None:
     assert not (tmp_path / "outside").exists()
 
 
+@pytest.mark.parametrize("force", [False, True])
+def test_an_output_through_a_link_folder_is_refused(tmp_path: Path, force: bool) -> None:
+    """Issue #16: a link in a folder above the output file is refused too, not followed.
+
+    A symbolic link where the platform allows one, else a junction (Windows without privilege).
+    """
+    project = _project(tmp_path)
+    (tmp_path / "outside").mkdir()
+    make_directory_link(project / "out", tmp_path / "outside")
+    output = project / "out" / "planted.toml"
+    with pytest.raises(OutputLinkError, match="passes through the link"):
+        write_proposal(discover(project), output, model_id="m", force=force)
+    with pytest.raises(OutputLinkError, match="passes through the link"):
+        write('[model]\nid = "m"\n', output, force=force, root=project)
+    assert list((tmp_path / "outside").iterdir()) == []
+
+
+def test_an_output_below_a_link_folder_not_yet_created_is_refused(tmp_path: Path) -> None:
+    """Issue #16: folders still to be made under a link do not hide it, nor does ``..``."""
+    project = _project(tmp_path)
+    (tmp_path / "outside").mkdir()
+    make_directory_link(project / "out", tmp_path / "outside")
+    for output in (
+        project / "out" / "new" / "deeper" / "planted.toml",
+        project / "out" / ".." / "planted.toml",
+    ):
+        with pytest.raises(OutputLinkError, match="passes through the link"):
+            write_proposal(discover(project), output, model_id="m", force=True)
+    assert list((tmp_path / "outside").iterdir()) == []
+    assert not (project / "planted.toml").exists()
+
+
+def test_an_output_through_a_dangling_link_folder_is_refused(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    (tmp_path / "outside").mkdir()
+    make_directory_link(project / "out", tmp_path / "outside")
+    (tmp_path / "outside").rmdir()  # the link now dangles
+    with pytest.raises(OutputLinkError, match="passes through the link"):
+        write_proposal(discover(project), project / "out" / "p.toml", model_id="m", force=True)
+    assert not (tmp_path / "outside").exists()
+
+
+def test_a_relative_output_through_a_planted_link_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #16: a relative -o, with the working directory inside the project."""
+    project = _project(tmp_path)
+    (tmp_path / "outside").mkdir()
+    make_directory_link(project / "out", tmp_path / "outside")
+    monkeypatch.chdir(project)
+    with pytest.raises(OutputLinkError, match="passes through the link"):
+        write_proposal(discover(project), Path("out") / "p.toml", model_id="m", force=True)
+    assert list((tmp_path / "outside").iterdir()) == []
+
+
+def test_a_planted_link_back_to_the_project_root_is_refused(tmp_path: Path) -> None:
+    """The shortest ancestor that is the project is the anchor, so ``proj/out -> proj`` is
+    below it and refused, though ``proj/out`` is itself the project folder on disk."""
+    project = _project(tmp_path)
+    make_directory_link(project / "out", project)
+    with pytest.raises(OutputLinkError, match="passes through the link"):
+        write_proposal(discover(project), project / "out" / "p.toml", model_id="m", force=True)
+    assert not (project / "p.toml").exists()
+
+
+def test_a_link_above_the_project_is_followed(tmp_path: Path) -> None:
+    """Review P2: a link the user owns above the project folder is not the project's to plant."""
+    project = _project(tmp_path)
+    above = tmp_path / "above"
+    make_directory_link(above, tmp_path)
+    output = above / "proj" / "p.toml"
+    write_proposal(discover(project), output, model_id="m", force=False)
+    assert load_manifest(project / "p.toml", weights_present=False)
+
+
+def test_an_output_outside_the_project_below_a_link_is_written(tmp_path: Path) -> None:
+    """Like ``/tmp`` on macOS: outside the project only the file itself is checked."""
+    project = _project(tmp_path)
+    (tmp_path / "private-tmp").mkdir()
+    make_directory_link(tmp_path / "tmp", tmp_path / "private-tmp")
+    output = tmp_path / "tmp" / "proposed.toml"
+    write_proposal(discover(project), output, model_id="m", force=False)
+    assert load_manifest(tmp_path / "private-tmp" / "proposed.toml", weights_present=False)
+
+
+def test_an_output_in_a_new_plain_folder_is_written(tmp_path: Path) -> None:
+    """No link anywhere: folders that do not exist yet are made and the file is written."""
+    project = _project(tmp_path)
+    output = project / "drafts" / "new" / "proposed.toml"
+    write_proposal(discover(project), output, model_id="m", force=False)
+    assert load_manifest(output, weights_present=False)
+
+
 def test_a_lock_that_pins_a_conflicting_package_is_only_a_comment(
     project: Path, tmp_path: Path
 ) -> None:
