@@ -8,6 +8,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import sqlite3
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -211,6 +212,109 @@ def test_m4_a_policy_set_strict_still_waits_for_a_weight_source(
     cli("policy", "m", "--globals", "strict", "--by", "Owner")
     cli("check", "m", "--source", "osv")
     assert _policy_alerts(cli, "m") == []
+
+
+# --- PR #19 review 3: a check without a weight source acts only on a lapse since the last one ---
+
+ALPHA_NAME, BETA_NAME = ".".join(ALPHA), ".".join(BETA)
+
+
+def _except(cli: Any, sha: str, name: str) -> int:
+    code, made = cli("exception", "record", "--global", name, "--sha256", sha,
+                     "--reason", "r", "--by", "O")  # fmt: skip
+    assert code == EXIT_OK, made
+    return int(made["exception_id"])
+
+
+def _revoke(cli: Any, exception_id: int) -> None:
+    code, _ = cli("exception", "revoke", str(exception_id), "--reason", "no", "--by", "O")
+    assert code == EXIT_OK
+
+
+def test_r3_a_reopened_alert_waits_for_the_new_exception(cli: Any, tmp_path: Path) -> None:
+    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    alpha = _except(cli, sha, ALPHA_NAME)
+    cli("check", "m", "--source", "picklescan")
+    [listed] = _policy_alerts(cli, "m")
+    assert listed["cause"]["unlisted"] == [BETA_NAME]
+    cli("alert", "dismiss", str(listed["alert_id"]), *DISMISS)
+    _except(cli, sha, BETA_NAME)
+    _revoke(cli, alpha)
+    cli("check", "m", "--source", "osv")
+    [back] = _policy_alerts(cli, "m")
+    assert back["cause"]["unlisted"] == [ALPHA_NAME, BETA_NAME]
+    assert back["cause"]["excepted"] == []
+
+
+def test_r3_a_lapse_opens_an_alert_while_its_new_exception_waits(cli: Any, tmp_path: Path) -> None:
+    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    alpha = _except(cli, sha, ALPHA_NAME)
+    _except(cli, sha, BETA_NAME)
+    cli("check", "m", "--source", "picklescan")
+    assert _policy_alerts(cli, "m") == []
+    _revoke(cli, alpha)
+    _except(cli, sha, ALPHA_NAME)
+    cli("check", "m", "--source", "osv")
+    [opened] = _policy_alerts(cli, "m")
+    assert opened["cause"]["unlisted"] == [ALPHA_NAME]
+    cli("check", "m", "--source", "picklescan")
+    assert _policy_alerts(cli, "m") == []
+
+
+def test_r3_a_policy_set_strict_ignores_an_older_lapse(cli: Any, tmp_path: Path) -> None:
+    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
+    _revoke(cli, _except(cli, sha, ALPHA_NAME))
+    cli("check", "m", "--source", "picklescan")
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    _, checked = cli("check", "m", "--source", "osv", "--fail-on", "moderate")
+    assert [a["kind"] for a in checked["gate"]["alerts"]] == []
+    assert _policy_alerts(cli, "m") == []
+    cli("check", "m", "--source", "picklescan")
+    assert len(_policy_alerts(cli, "m")) == 1
+
+
+def test_r3_a_policy_set_strict_waits_even_for_a_fresh_lapse(cli: Any, tmp_path: Path) -> None:
+    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
+    alpha = _except(cli, sha, ALPHA_NAME)
+    cli("check", "m", "--source", "picklescan")
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    _revoke(cli, alpha)
+    _, checked = cli("check", "m", "--source", "osv", "--fail-on", "moderate")
+    assert [a["kind"] for a in checked["gate"]["alerts"]] == []
+    assert _policy_alerts(cli, "m") == []
+
+
+def test_r3_an_alert_the_default_policy_cleared_stays_cleared(cli: Any, tmp_path: Path) -> None:
+    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    alpha = _except(cli, sha, ALPHA_NAME)
+    cli("check", "m", "--source", "picklescan")
+    _revoke(cli, alpha)
+    cli("check", "m", "--source", "osv")
+    cli("policy", "m", "--globals", "default", "--by", "Owner")
+    cli("check", "m", "--source", "picklescan")
+    assert _policy_alerts(cli, "m") == []
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    cli("check", "m", "--source", "osv")
+    assert _policy_alerts(cli, "m") == []
+
+
+def test_r3_without_a_mark_a_lapse_waits_for_a_weight_check(cli: Any, tmp_path: Path) -> None:
+    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    alpha = _except(cli, sha, ALPHA_NAME)
+    cli("check", "m", "--source", "picklescan")
+    with sqlite3.connect(tmp_path / "db" / "md.db") as conn:
+        conn.execute("DROP TABLE IF EXISTS weight_check_marks")  # a store from before the mark
+    _revoke(cli, alpha)
+    cli("check", "m", "--source", "osv")
+    [untouched] = _policy_alerts(cli, "m")
+    assert untouched["cause"]["unlisted"] == [BETA_NAME]
+    cli("check", "m", "--source", "picklescan")
+    [listed] = _policy_alerts(cli, "m")
+    assert listed["cause"]["unlisted"] == [ALPHA_NAME, BETA_NAME]
 
 
 # --- M5: an uncheckable DOI through the real path ------------------------------------------------

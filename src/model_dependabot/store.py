@@ -341,6 +341,16 @@ CREATE TABLE IF NOT EXISTS store_marks (
     value TEXT NOT NULL
 );
 
+-- PR #19 review 3: what the model's last check that asked a weight source applied, so a check
+-- that asks none acts only on a lapse since then (FR-010). ``exception_ids`` is a JSON list.
+CREATE TABLE IF NOT EXISTS weight_check_marks (
+    model_id TEXT PRIMARY KEY,
+    run_id INTEGER NOT NULL REFERENCES check_runs (run_id),
+    globals_policy TEXT NOT NULL,
+    policy_set_at TEXT,
+    exception_ids TEXT NOT NULL
+);
+
 -- Review C2, research U13: the ETag cache, kept across runs so a later run revalidates with
 -- If-None-Match. One row per URL; the body is the redacted one, kept in the evidence store.
 CREATE TABLE IF NOT EXISTS etag_cache (
@@ -1179,6 +1189,45 @@ class Store:
         made = self.get_exception(exception_id)
         assert made is not None
         return made
+
+    def set_weight_check_mark(
+        self,
+        model_id: str,
+        *,
+        run_id: int,
+        globals_policy: str,
+        policy_set_at: str | None,
+        exception_ids: Sequence[int],
+    ) -> None:
+        """Record what a check that asked a weight source applied to the model (FR-010)."""
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO weight_check_marks"
+                " (model_id, run_id, globals_policy, policy_set_at, exception_ids)"
+                " VALUES (?, ?, ?, ?, ?) ON CONFLICT (model_id) DO UPDATE SET"
+                " run_id = excluded.run_id, globals_policy = excluded.globals_policy,"
+                " policy_set_at = excluded.policy_set_at, exception_ids = excluded.exception_ids",
+                (
+                    model_id,
+                    run_id,
+                    globals_policy,
+                    policy_set_at,
+                    json.dumps(sorted(exception_ids)),
+                ),
+            )
+
+    def weight_check_mark(self, model_id: str) -> dict[str, Any] | None:
+        """The model's mark from its last check that asked a weight source, or ``None``."""
+        if "weight_check_marks" not in self.tables():
+            return None  # an older database opened read-only
+        row = self.conn.execute(
+            "SELECT * FROM weight_check_marks WHERE model_id = ?", (model_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        mark = dict(row)
+        mark["exception_ids"] = [int(i) for i in json.loads(mark["exception_ids"])]
+        return mark
 
     def get_exception(self, exception_id: int) -> dict[str, Any] | None:
         if "global_exceptions" not in self.tables():

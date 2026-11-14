@@ -46,6 +46,26 @@ fields from null. *Applies to*: the model versions with a pinned weight entry wh
 | `globals_policy_set_by` | text \| null | who set it; null until first set |
 | `globals_policy_set_at` | timestamp \| null | |
 
+## Weight check mark (new, PR #19 review 3)
+
+The table is created when the database is opened. Every check that asks a weight source
+(`picklescan`, `hf-scan` or `format-check`) writes the model's one row; a check that asks none reads
+it, so that only a lapse since that check acts (FR-010).
+
+| Field | Type | Notes |
+| :-- | :-- | :-- |
+| `model_id` | text | key |
+| `run_id` | integer | the check run that wrote it |
+| `globals_policy` | `default` \| `strict` | the model's policy at that check |
+| `policy_set_at` | timestamp \| null | the model's `globals_policy_set_at` at that check |
+| `exception_ids` | JSON | the ids of every exception active at that check, sorted |
+
+Rule: a check that asks no weight source changes no `globals_policy` alert when the model has no mark,
+when the policy or its `policy_set_at` differs from the mark, or when the policy is `default`. Otherwise
+it counts only the exceptions in `exception_ids` that are still active, and a global returns (opening the
+alert or joining its list) only when an exception in `exception_ids` covering it has been revoked or has
+expired. A new exception, a policy change and a new scan wait for the next check that asks a weight source.
+
 ## File scan (new)
 
 What one applied static scan of a file's bytes saw, so exceptions and the strict policy can be applied

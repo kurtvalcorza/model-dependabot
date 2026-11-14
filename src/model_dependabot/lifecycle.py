@@ -541,6 +541,7 @@ def _check(
             target.source = POLICY_ROW
             _apply_format_rules(store, run_id, target)
             _apply_globals_rules(store, run_id, target)
+            _mark_weight_check(store, run_id, target)
     else:
         # Review K5: whether an exception has lapsed needs no source, so every check releases the
         # alerts a revoked or expired exception covered; a new exception still waits (FR-010).
@@ -1433,11 +1434,26 @@ def _exception_item(record: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _lapsed(store: Store, sha256: str, name: str) -> bool:
-    """Whether an exception for this global in these bytes was revoked or has expired."""
+def _lapsed(store: Store, sha256: str, name: str, applied: set[int]) -> bool:
+    """Whether an exception for this global in these bytes that the last check asking a weight
+    source applied (``applied``) has since been revoked or has expired."""
     return any(
-        f"{e['module']}.{e['name']}" == name and e["state"] != "active"
+        f"{e['module']}.{e['name']}" == name
+        and e["exception_id"] in applied
+        and e["state"] != "active"
         for e in store.exceptions(sha256, include_inactive=True)
+    )
+
+
+def _mark_weight_check(store: Store, run_id: int, target: _Target) -> None:
+    """Record the policy and the exceptions a check that asked a weight source applied."""
+    model = store.get_model(target.model_id) or {}
+    store.set_weight_check_mark(
+        target.model_id,
+        run_id=run_id,
+        globals_policy=model.get("globals_policy") or "default",
+        policy_set_at=model.get("globals_policy_set_at"),
+        exception_ids=[int(e["exception_id"]) for e in store.exceptions()],
     )
 
 
@@ -1460,6 +1476,19 @@ def _apply_globals_policy(
     safe = globals_policy.current_safe_list() if policy == "strict" else None
     if lapse_only and safe is None:
         return  # a policy change waits for a check that asks a weight source
+    applied: set[int] = set()
+    if lapse_only:
+        # FR-010, PR #19 review 3: outside a weight check only a lapse since the model's last
+        # weight check acts, and only under the policy that check applied; with no mark yet,
+        # nothing does.
+        mark = store.weight_check_mark(target.model_id)
+        if (
+            mark is None
+            or mark["globals_policy"] != policy
+            or mark["policy_set_at"] != model.get("globals_policy_set_at")
+        ):
+            return
+        applied = set(mark["exception_ids"])
     if safe is None:
         # Review X4: the policy is the alert's source, so its change clears every open
         # ``globals_policy`` alert of the model, whatever its entry has become.
@@ -1506,11 +1535,10 @@ def _apply_globals_policy(
         if scan is None:
             continue
         active = store.exceptions(sha256)
-        if lapse_only and open_alert is not None:
+        if lapse_only:
             # FR-010 and the round 2 ruling: a new exception waits for a check that asks a weight
-            # source, so outside one only the exceptions the open alert already applies count.
-            known = {item["exception_id"] for item in open_alert["cause"].get("excepted") or []}
-            active = [e for e in active if e["exception_id"] in known]
+            # source, so outside one only the exceptions the last such check applied count.
+            active = [e for e in active if e["exception_id"] in applied]
         listed = globals_policy.unlisted(scan, safe, active)
         covered = globals_policy.excepted(scan, safe, active)
         record |= {
@@ -1556,7 +1584,7 @@ def _apply_globals_policy(
         }
         if lapse_only:
             grown = set(listed) - set((open_alert or {}).get("cause", {}).get("unlisted") or [])
-            if not any(_lapsed(store, sha256, name) for name in grown):
+            if not any(_lapsed(store, sha256, name, applied) for name in grown):
                 continue  # review M4: only a lapsed exception acts outside a weight check
         _weight_alert(
             store,
