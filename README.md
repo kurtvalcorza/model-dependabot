@@ -311,8 +311,9 @@ globals off the list (so the store grows by one row per file per weight check). 
 weight source reads the file's latest snapshot and changes only the globals whose exception has lapsed
 since: it adds them to the open alert, or opens one if the snapshot was `strict`. A global that an active
 exception covers again by then (a renewal: the old exception revoked or expired and a new one recorded) is
-skipped, so renewing an exception never opens or extends an alert; this is the one case where a new
-exception counts before a weight check. Otherwise a policy change, a new exception and a new scan still
+skipped, so renewing an exception never opens or extends an alert, neither the `globals_policy` alert nor
+a dangerous global's HIGH `weight_file_scan` alert, and never fails `--fail-on`; this is the one case where
+a new exception counts before a weight check. Otherwise a policy change, a new exception and a new scan still
 wait for the next weight check, and a file whose latest snapshot is
 `default`, or that has none (a database from before the snapshots), opens nothing until then.
 

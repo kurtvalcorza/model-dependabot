@@ -7,6 +7,7 @@ Pickles are crafted opcode bytes built at test time; nothing is ever loaded.
 from __future__ import annotations
 
 import hashlib
+import shutil
 import sqlite3
 from datetime import timedelta
 from pathlib import Path
@@ -180,3 +181,112 @@ def test_each_model_and_file_reads_its_own_snapshot(cli: Any, tmp_path: Path, cl
     lists = {a["cause"]["identifier"]: a["cause"]["unlisted"] for a in _policy_alerts(cli, "s")}
     assert lists == {f"sha256:{sha_two}": [A, B], f"sha256:{sha_alpha}": [A]}
     assert _policy_alerts(cli, "d") == []  # its snapshot is default
+
+
+# --- round 2 of the review: a renewal in both passes, and its edges ----------------------------
+
+FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
+GETATTR = "__builtin__.getattr"
+
+
+def _lapse_then(cli: Any, tmp_path: Path, clock: Clock, *expiring: str) -> str:
+    """Strict policy, an expiring exception for each of ``expiring`` and one for every other
+    global, a weight check (nothing listed), then 30 days later: those exceptions have expired."""
+    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    for name in (A, B):
+        expiry = ("--expires", "2026-11-15") if name in expiring else ()
+        cli("exception", "record", "--global", name, "--sha256", sha, "--reason", "r",
+            "--by", "O", *expiry)  # fmt: skip
+    cli("check", "m", "--source", "picklescan")
+    assert _policy_alerts(cli, "m") == []
+    clock.at = NOW + timedelta(days=30)
+    return sha
+
+
+def _renew(cli: Any, name: str, sha: str, *extra: str) -> dict[str, Any]:
+    _, made = cli("exception", "record", "--global", name, "--sha256", sha, "--reason", "renewed",
+                  "--by", "O", *extra)  # fmt: skip
+    return made
+
+
+def _unlisted(cli: Any) -> list[list[str]]:
+    return [a["cause"]["unlisted"] for a in _policy_alerts(cli, "m")]
+
+
+def test_a_renewal_keeps_a_dangerous_global_excepted_at_a_packages_only_check(
+    cli: Any, tmp_path: Path, clock: Clock, craft: Any
+) -> None:
+    sha = _register(cli, tmp_path / "m", "m", craft.protocol2_getattr())
+    cli("exception", "record", "--global", GETATTR, "--sha256", sha, "--reason", "r",
+        "--by", "O", "--expires", "2026-11-15")  # fmt: skip
+    code, checked = cli("check", "m", "--source", "picklescan", "--fail-on", "HIGH")
+    assert code == EXIT_OK, checked["gate"]
+    clock.at = NOW + timedelta(days=30)
+    _renew(cli, GETATTR, sha)
+    _, checked = cli("check", "m", "--source", "osv", "--fail-on", "HIGH")
+    assert checked["gate"]["alerts"] == [], checked["gate"]  # MDB101 stays excepted
+    _, listed = cli("alerts", "m")
+    assert [a["kind"] for a in listed["alerts"]] == []
+
+
+def test_a_renewal_passes_the_gate_of_an_osv_checked_model(
+    cli: Any, tmp_path: Path, clock: Clock, craft: Any
+) -> None:
+    root = tmp_path / "m"
+    root.mkdir()
+    (root / "w.pkl").write_bytes(craft.protocol2_getattr())
+    shutil.copy(FIXTURES / "locks" / "fixed.txt", root / "requirements.txt")
+    (root / "model.toml").write_text(
+        '[model]\nid = "m"\n\n[environment]\nlock = "requirements.txt"\n\n'
+        '[[weights]]\npath = "w.pkl"\n',
+        encoding="utf-8",
+    )
+    osv = FIXTURES / "osv"
+    assert cli("register", str(root / "model.toml"), recordings=osv)[0] == EXIT_OK
+    sha = hashlib.sha256((root / "w.pkl").read_bytes()).hexdigest()
+    cli("exception", "record", "--global", GETATTR, "--sha256", sha, "--reason", "r",
+        "--by", "O", "--expires", "2026-11-15")  # fmt: skip
+    code, checked = cli("check", "m", "--source", "osv,picklescan", "--fail-on", "HIGH",
+                        recordings=osv)  # fmt: skip
+    assert code == EXIT_OK, checked["gate"]
+    clock.at = NOW + timedelta(days=30)
+    _renew(cli, GETATTR, sha)
+    code, checked = cli("check", "m", "--source", "osv", "--fail-on", "HIGH", recordings=osv)
+    assert code == EXIT_OK, checked["gate"]
+
+
+def test_a_partial_renewal_lists_only_the_global_not_renewed(
+    cli: Any, tmp_path: Path, clock: Clock
+) -> None:
+    sha = _lapse_then(cli, tmp_path, clock, A, B)
+    _renew(cli, A, sha)
+    cli("check", "m", "--source", "osv")
+    assert _unlisted(cli) == [[B]]
+
+
+def test_a_renewal_that_expired_in_turn_returns_the_global(
+    cli: Any, tmp_path: Path, clock: Clock
+) -> None:
+    sha = _lapse_then(cli, tmp_path, clock, A)
+    _renew(cli, A, sha, "--expires", "2026-12-20")
+    cli("check", "m", "--source", "osv")
+    assert _unlisted(cli) == []
+    clock.at = NOW + timedelta(days=60)
+    cli("check", "m", "--source", "osv")
+    assert _unlisted(cli) == [[A]]
+
+
+def test_a_renewal_revoked_returns_the_global(cli: Any, tmp_path: Path, clock: Clock) -> None:
+    sha = _lapse_then(cli, tmp_path, clock, A)
+    made = _renew(cli, A, sha)
+    cli("exception", "revoke", str(made["exception_id"]), "--reason", "r", "--by", "O")
+    cli("check", "m", "--source", "osv")
+    assert _unlisted(cli) == [[A]]
+
+
+def test_an_exception_for_other_bytes_is_no_renewal(cli: Any, tmp_path: Path, clock: Clock) -> None:
+    _lapse_then(cli, tmp_path, clock, A)
+    _renew(cli, A, hashlib.sha256(b"other bytes").hexdigest())
+    cli("check", "m", "--source", "osv")
+    assert _unlisted(cli) == [[A]]

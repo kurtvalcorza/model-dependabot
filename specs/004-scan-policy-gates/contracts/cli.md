@@ -176,8 +176,9 @@ not mistake findings for failures (SC-005).
   by each check that asks a weight source; only those globals change, under the policy that check
   applied, and a file with no snapshot or a `default` one waits for the next weight check. A lapsed
   global that an active exception covers now (a renewal: revoked or expired, then recorded again) is
-  skipped, so renewing never opens or extends an alert; this is the one exception to "a new exception
-  waits for a weight check".
+  skipped, so renewing never opens or extends an alert, neither the `globals_policy` alert nor a dangerous
+  global's `weight_file_scan` alert; this is the one exception to "a new exception waits for a weight
+  check".
 
 - `run show RUN_ID --json` prints `{run_id, scope, trigger, started_at, finished_at, sources, overview}`;
   its text is the run's header, each source's status, then the overview block. An unknown run exits 1

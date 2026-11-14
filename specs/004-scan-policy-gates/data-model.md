@@ -227,9 +227,13 @@ version, `coverage.sources[]` items gain `last_state` (the row's state in that s
   reads the latest one by `evidence_id` (never by timestamp, so a policy change in the same second as a
   check does not tie) and adds to the file's alert, or opens it, only the globals of `exception_ids` that
   have been revoked or have expired since, skipping any such global an active exception covers now (a
-  renewal never opens or extends an alert, the one exception to "a new exception waits"); the policy, the
+  renewal never opens or extends an alert, the one exception to "a new exception waits"; the same holds
+  for an excepted `weight_file_scan` alert, which a renewal keeps excepted); the policy, the
   rest of the list and the other exceptions recorded since stay as they were. A `default` snapshot, or none (a database from before this row), opens nothing.
-  The evidence table grows by one row per file per weight check; no schema change.
+  The evidence table grows by one row per file per weight check. No table changes; one index,
+  `evidence_by_source_url_match` on evidence (source, url, matched_identifier), serves the lookup and is
+  created with `CREATE INDEX IF NOT EXISTS` when a database is opened for writing, so no migration is
+  needed.
 
 - The `globals-policy` evidence record is `{model_id, identifier, globals_policy, set_by, set_at,
   safe_list_version, safe_list_sha256, unlisted, excepted}`, with `unlisted` and `excepted` sorted global

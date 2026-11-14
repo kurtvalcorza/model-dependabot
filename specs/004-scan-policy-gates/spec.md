@@ -126,7 +126,8 @@ Rulings by the owner on the plan's open decisions (research.md, Decisions on the
   exception recorded since waits. With no snapshot, or a `default` one, nothing opens until a weight check.
 - Q: Does renewing an exception (revoke or let it expire, then record it again) between weight checks raise
   the global at a check without a weight source? → A: No (owner's decision). A lapsed global that an active
-  exception covers now is skipped, so a renewal never opens or extends an alert, nor trips `--fail-on`. This
+  exception covers now is skipped, so a renewal never opens or extends an alert (the `globals_policy` alert or
+  a dangerous global's `weight_file_scan` alert), nor trips `--fail-on`. This
   is the one exception to "a new exception waits for a weight check"; a new exception for another global
   still waits.
 

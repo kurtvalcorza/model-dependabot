@@ -1343,6 +1343,27 @@ EXCEPTION_KEYS = ("excepted", "released")
 CARRIED_KEYS = (*EXCEPTION_KEYS, "reopens")
 
 
+def _renewals(
+    store: Store, sha256: str, applied: Sequence[Mapping[str, Any]]
+) -> dict[str, Mapping[str, Any]]:
+    """Issue #18, review P2 (Kurt): the renewals among these bytes' active exceptions.
+
+    For each exception in ``applied`` (what the last weight check applied) that has been revoked or
+    has expired, the active exception that covers the same global in the same bytes now, keyed by
+    ``module.name``. A renewal counts at a check that asks no weight source, so renewing never opens
+    or extends an alert; any other new exception still waits for a weight check (FR-010).
+    """
+    current = store.exceptions(sha256)
+    found: dict[str, Mapping[str, Any]] = {}
+    for record in applied:
+        if record["state"] == "active":
+            continue
+        renewal = covering(current, record["module"], record["name"])
+        if renewal is not None:
+            found[f"{record['module']}.{record['name']}"] = renewal
+    return found
+
+
 def _dangerous_pairs(store: Store, sha256: str, names: Sequence[str]) -> list[tuple[str, str]]:
     """The dangerous globals of an alert as (module, name), as the latest scan of the bytes
     reported them; a name no file scan holds is split at its last dot."""
@@ -1376,7 +1397,13 @@ def _apply_globals_rules(
         active = store.exceptions(sha256)
         if not apply_new:
             known = {item["exception_id"] for item in cause.get("excepted") or []}
-            active = [e for e in active if e["exception_id"] in known]
+            applied = [
+                e
+                for e in store.exceptions(sha256, include_inactive=True)
+                if e["exception_id"] in known
+            ]
+            renewed = list(_renewals(store, sha256, applied).values())
+            active = [e for e in active if e["exception_id"] in known] + renewed
         covered = []
         for module, name in _dangerous_pairs(store, sha256, names):
             found = covering(active, module, name)
@@ -1506,14 +1533,13 @@ def _apply_globals_lapses(store: Store, run_id: int, target: _Target) -> None:
         known = {int(e["exception_id"]): e for e in store.exceptions(sha256, include_inactive=True)}
         applied = [known[i] for i in snapshot.get("exception_ids") or [] if i in known]
         still = [e for e in applied if e["state"] == "active"]
-        # Review P2 (Kurt): a lapsed global that an active exception covers now was renewed, not
-        # released, so it is skipped: renewing never opens or extends an alert. The one exception
-        # to "a new exception waits for a weight check".
-        current = store.exceptions(sha256)
+        # Review P2 (Kurt): a renewed global was not released, so it is skipped: renewing never
+        # opens or extends an alert.
+        renewed = _renewals(store, sha256, applied)
         lapsed = {
             f"{e['module']}.{e['name']}"
             for e in applied
-            if e["state"] != "active" and covering(current, e["module"], e["name"]) is None
+            if e["state"] != "active" and f"{e['module']}.{e['name']}" not in renewed
         }
         if not lapsed:
             continue
