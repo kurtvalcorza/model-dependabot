@@ -46,7 +46,7 @@ fields from null. *Applies to*: the model versions with a pinned weight entry wh
 | `globals_policy_set_by` | text \| null | who set it; null until first set |
 | `globals_policy_set_at` | timestamp \| null | |
 
-## Weight check mark (new, PR #19 review 3)
+## Weight check mark (new, PR #19 reviews 3 and 4)
 
 The table is created when the database is opened. Every check that asks a weight source
 (`picklescan`, `hf-scan` or `format-check`) writes the model's one row; a check that asks none reads
@@ -56,15 +56,18 @@ it, so that only a lapse since that check acts (FR-010).
 | :-- | :-- | :-- |
 | `model_id` | text | key |
 | `run_id` | integer | the check run that wrote it |
-| `globals_policy` | `default` \| `strict` | the model's policy at that check |
-| `policy_set_at` | timestamp \| null | the model's `globals_policy_set_at` at that check |
-| `exception_ids` | JSON | the ids of every exception active at that check, sorted |
+| `globals_policy` | `default` \| `strict` | the model's policy value at that check |
+| `exception_ids` | JSON | the ids of every exception in the store active at that check, sorted |
+| `files` | JSON | each local pickle file the check judged: its SHA-256 to the evidence id of its latest scan then, or null when it had none |
 
 Rule: a check that asks no weight source changes no `globals_policy` alert when the model has no mark,
-when the policy or its `policy_set_at` differs from the mark, or when the policy is `default`. Otherwise
-it counts only the exceptions in `exception_ids` that are still active, and a global returns (opening the
-alert or joining its list) only when an exception in `exception_ids` covering it has been revoked or has
-expired. A new exception, a policy change and a new scan wait for the next check that asks a weight source.
+when the policy value differs from the mark's or when the policy is `default`. Otherwise, for each file in
+`files` whose latest scan is still the one recorded there, it counts only the exceptions in
+`exception_ids` that are still active, and a global returns (opening the alert or joining its list) only
+when an exception in `exception_ids` covering it has been revoked or has expired. A new exception, a
+policy change, a file the check did not judge and a newer scan wait for the next check that asks a weight
+source. Setting the same policy value again is not a change. A database that gains the table has no
+marks, so after an upgrade every model waits once for its next check that asks a weight source.
 
 ## File scan (new)
 

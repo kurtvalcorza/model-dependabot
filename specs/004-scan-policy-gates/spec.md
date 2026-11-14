@@ -118,6 +118,19 @@ Rulings by the owner on the plan's open decisions (research.md, Decisions on the
   the stored scans, like the HIGH alert. A new exception, a policy change and a new scan still wait for a check
   that asks a weight source (FR-010).
 
+### Session 2026-11-15 (pull request review, rounds 3 and 4)
+
+- Q: A lapse since when? → A: Since the model's last check that asked a weight source, which records the
+  policy value, the active exceptions and the files and scans it judged. A check without a weight source
+  acts only under that policy value, on those files and scans, for an exception in that record that has
+  since been revoked or has expired (FR-010).
+- Q: What if a model has no such record yet, as after an upgrade? → A: Its `globals_policy` alerts wait for
+  its next check that asks a weight source.
+- Q: Every global was excepted, one exception is revoked and the same global excepted again; what does a check
+  without a weight source do? → A: The lapse acts: the alert opens listing that global, and the new exception
+  waits for a check that asks a weight source.
+- Q: Does setting the same policy again count as a change? → A: No. Only the policy value is compared.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Accept a reviewed global in one exact file (Priority: P1)

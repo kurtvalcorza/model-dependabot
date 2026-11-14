@@ -1445,15 +1445,30 @@ def _lapsed(store: Store, sha256: str, name: str, applied: set[int]) -> bool:
     )
 
 
+def _policy_entries(store: Store, target: _Target) -> list[Mapping[str, Any]]:
+    """The version's local pickle entries the globals policy judges (research S7)."""
+    return [
+        entry
+        for entry in _code_capable(_measured_target(store, target))
+        if not entry.get("hub_repo") and entry.get("location") and entry.get("identifier")
+    ]
+
+
 def _mark_weight_check(store: Store, run_id: int, target: _Target) -> None:
-    """Record the policy and the exceptions a check that asked a weight source applied."""
+    """Record the policy, the exceptions and the files and scans a check that asked a weight
+    source applied (PR #19 reviews 3 and 4)."""
     model = store.get_model(target.model_id) or {}
+    files: dict[str, int | None] = {}
+    for entry in _policy_entries(store, target):
+        sha256 = entry["identifier"].removeprefix("sha256:")
+        scan = store.latest_file_scan(sha256)
+        files[sha256] = None if scan is None else int(scan["evidence_id"])
     store.set_weight_check_mark(
         target.model_id,
         run_id=run_id,
         globals_policy=model.get("globals_policy") or "default",
-        policy_set_at=model.get("globals_policy_set_at"),
         exception_ids=[int(e["exception_id"]) for e in store.exceptions()],
+        files=files,
     )
 
 
@@ -1477,18 +1492,16 @@ def _apply_globals_policy(
     if lapse_only and safe is None:
         return  # a policy change waits for a check that asks a weight source
     applied: set[int] = set()
+    judged: dict[str, int | None] = {}
     if lapse_only:
-        # FR-010, PR #19 review 3: outside a weight check only a lapse since the model's last
-        # weight check acts, and only under the policy that check applied; with no mark yet,
-        # nothing does.
+        # FR-010, PR #19 reviews 3 and 4: outside a weight check only a lapse since the model's
+        # last weight check acts, under the policy value that check applied and on the files and
+        # scans it judged; with no mark yet, nothing does.
         mark = store.weight_check_mark(target.model_id)
-        if (
-            mark is None
-            or mark["globals_policy"] != policy
-            or mark["policy_set_at"] != model.get("globals_policy_set_at")
-        ):
+        if mark is None or mark["globals_policy"] != policy:
             return
         applied = set(mark["exception_ids"])
+        judged = mark["files"]
     if safe is None:
         # Review X4: the policy is the alert's source, so its change clears every open
         # ``globals_policy`` alert of the model, whatever its entry has become.
@@ -1508,15 +1521,15 @@ def _apply_globals_policy(
             ids = _store_observations(store, run_id, identifier, [observation], linked)
             _close(store, target, open_alert, "cleared", ids, note="cleared: policy")
         return
-    for entry in _code_capable(_measured_target(store, target)):
-        if entry.get("hub_repo") or not entry.get("location") or not entry.get("identifier"):
-            continue
+    for entry in _policy_entries(store, target):
         identifier = entry["identifier"]
         sha256 = identifier.removeprefix("sha256:")
         open_alert = store.find_open_alert(
             target.model_id, weight_cause_key(GLOBALS_POLICY_ALERT, identifier)
         )
         scan = store.latest_file_scan(sha256)
+        if lapse_only and (scan is None or judged.get(sha256, -1) != int(scan["evidence_id"])):
+            continue  # a file or scan the last weight check did not judge waits for the next
         record: dict[str, Any] = {
             "model_id": target.model_id,
             "identifier": identifier,

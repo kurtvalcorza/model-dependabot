@@ -317,6 +317,100 @@ def test_r3_without_a_mark_a_lapse_waits_for_a_weight_check(cli: Any, tmp_path: 
     assert listed["cause"]["unlisted"] == [ALPHA_NAME, BETA_NAME]
 
 
+# --- PR #19 review 4: the policy value, and only the files and scans the weight check judged ----
+
+GAMMA = ("model_dependabot_fixture.layers", "Gamma")
+
+
+def one_suspicious() -> bytes:
+    """Imports one global on neither scanner list (protocol 2 opcodes, built here)."""
+    return b"\x80\x02" + _global(*GAMMA) + b"0."
+
+
+def _version(cli: Any, root: Path, model_id: str, data: bytes) -> None:
+    """Register a new version of a model that is already registered."""
+    _model(cli, root, model_id, ["[[weights]]", 'path = "w.pkl"'], {"w.pkl": data})
+    code, payload = cli("register", str(root / "model.toml"), "--model-id", model_id)
+    assert code == EXIT_OK, payload
+
+
+def _two_alerts(cli: Any, model_id: str, sha: str) -> list[dict[str, Any]]:
+    return [a for a in _policy_alerts(cli, model_id) if a["cause"]["identifier"] == f"sha256:{sha}"]
+
+
+def test_r4_strict_set_again_later_still_lets_a_lapse_act(
+    cli: Any, tmp_path: Path, clock: Clock
+) -> None:
+    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    alpha = _except(cli, sha, ALPHA_NAME)
+    cli("check", "m", "--source", "picklescan")
+    clock.at += timedelta(minutes=5)
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    clock.at += timedelta(minutes=5)
+    _revoke(cli, alpha)
+    cli("check", "m", "--source", "osv")
+    [back] = _policy_alerts(cli, "m")
+    assert back["cause"]["unlisted"] == [ALPHA_NAME, BETA_NAME]
+
+
+def test_r4_strict_default_strict_without_a_check_lets_a_lapse_act(
+    cli: Any, tmp_path: Path, clock: Clock
+) -> None:
+    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    alpha = _except(cli, sha, ALPHA_NAME)
+    cli("check", "m", "--source", "picklescan")
+    for policy in ("default", "strict"):
+        clock.at += timedelta(minutes=5)
+        cli("policy", "m", "--globals", policy, "--by", "Owner")
+    clock.at += timedelta(minutes=5)
+    _revoke(cli, alpha)
+    cli("check", "m", "--source", "osv")
+    [back] = _policy_alerts(cli, "m")
+    assert back["cause"]["unlisted"] == [ALPHA_NAME, BETA_NAME]
+
+
+def test_r4_bytes_gained_by_registration_wait_for_a_weight_check(cli: Any, tmp_path: Path) -> None:
+    _register(cli, tmp_path / "m1", "m", one_suspicious())
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    sha = _register(cli, tmp_path / "n", "n", two_suspicious())
+    cli("check", "n", "--source", "picklescan")
+    alpha = _except(cli, sha, ALPHA_NAME)
+    _except(cli, sha, BETA_NAME)
+    cli("check", "m", "--source", "picklescan")
+    _version(cli, tmp_path / "m2", "m", two_suspicious())
+    cli("check", "m", "--source", "osv")
+    _revoke(cli, alpha)
+    cli("check", "m", "--source", "osv")
+    assert _two_alerts(cli, "m", sha) == []
+    cli("check", "m", "--source", "picklescan")
+    assert [a["cause"]["unlisted"] for a in _two_alerts(cli, "m", sha)] == [[ALPHA_NAME]]
+
+
+def test_r4_a_scan_newer_than_the_weight_check_waits(cli: Any, tmp_path: Path) -> None:
+    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
+    alpha = _except(cli, sha, ALPHA_NAME)
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    cli("check", "m", "--source", "hf-scan")  # a weight check that reads no scan of the file
+    _register(cli, tmp_path / "n", "n", two_suspicious())
+    cli("check", "n", "--source", "picklescan")
+    _revoke(cli, alpha)
+    cli("check", "m", "--source", "osv")
+    assert _policy_alerts(cli, "m") == []
+
+
+def test_r4_a_lapse_before_the_weight_check_never_acts(cli: Any, tmp_path: Path) -> None:
+    sha = _register(cli, tmp_path / "m1", "m", two_suspicious())
+    _revoke(cli, _except(cli, sha, ALPHA_NAME))
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    cli("check", "m", "--source", "picklescan")
+    _version(cli, tmp_path / "m2", "m", one_suspicious())
+    _version(cli, tmp_path / "m3", "m", two_suspicious())
+    cli("check", "m", "--source", "osv")
+    assert _two_alerts(cli, "m", sha) == []
+
+
 # --- M5: an uncheckable DOI through the real path ------------------------------------------------
 
 

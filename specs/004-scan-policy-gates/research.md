@@ -284,12 +284,15 @@ code is as today (FR-018), which the contract test of every row in the exit-code
 alerts from the stored scans, but only for globals whose exception was revoked or has expired: such a
 global opens the alert again, or joins its list. Nothing else changes outside a weight check (M4).
 
-**PR #19 review 3 (2026-11-15)**: "since" is measured against the model's last check that asked a weight
-source, not inferred from the open alert or from whether an exception ever lapsed. That check writes a
-`weight_check_marks` row (the policy, its `globals_policy_set_at` and the ids of the active exceptions);
-a check without a weight source acts only under the same policy and only on a lapse of an exception in
-that row, counting no exception recorded since. A model with no row yet waits for a weight check. A time
-comparison would not do: revocations and policy changes can share a timestamp with the check (data-model.md).
+**PR #19 reviews 3 and 4 (2026-11-15)**: "since" is measured against the model's last check that asked
+a weight source, not inferred from the open alert or from whether an exception ever lapsed. That check
+writes a `weight_check_marks` row: the policy value, the ids of the store's active exceptions and, for each
+file it judged, the evidence id of the scan it judged it on. A check without a weight source acts only
+under the same policy value, only on those files and scans and only on a lapse of an exception in that row,
+counting no exception recorded since. Setting the same value again changes nothing, so the mark keeps the
+value and not the time it was set. A model with no row yet, every model after an upgrade included, waits
+for its next weight check. A time comparison would not do: revocations and policy changes can share a
+timestamp with the check.
 
 **Review round 1 (2026-11-14)**: the `policy` row is not coverage, so a model whose only non-failed row
 is `policy` reads `checked: false` and trips the gate (K1). An item no source can ever read (S6,
