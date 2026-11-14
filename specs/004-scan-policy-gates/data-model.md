@@ -219,6 +219,21 @@ version, `coverage.sources[]` items gain `last_state` (the row's state in that s
   `cause.unlisted`, and the scan's evidence row takes part in the comparison.
 - Review round 2: at a check that asks no weight source, a `globals_policy` alert opens again, or gains a
   global, when that global's exception was revoked or has expired.
+- Review round 3 (issue #18): every check that asks a weight source stores one `globals-snapshot` evidence
+  row per local pickle file of the version, under either policy and even when nothing is unlisted (URL
+  `globals-snapshot:<model_id>`, matched identifier the file's `sha256:<hex>`, linked to no alert). Its
+  record is `{model_id, identifier, globals_policy, set_by, set_at, safe_list_version, safe_list_sha256,
+  scan_evidence_id, unlisted, exception_ids}`: what that check applied. A check that asks no weight source
+  reads the latest one by `evidence_id` (never by timestamp, so a policy change in the same second as a
+  check does not tie) and adds to the file's alert, or opens it, only the globals of `exception_ids` that
+  have been revoked or have expired since, skipping any such global an active exception covers now (a
+  renewal never opens or extends an alert, the one exception to "a new exception waits"; the same holds
+  for an excepted `weight_file_scan` alert, which a renewal keeps excepted); the policy, the
+  rest of the list and the other exceptions recorded since stay as they were. A `default` snapshot, or none (a database from before this row), opens nothing.
+  The evidence table grows by one row per file per weight check. No table changes; one index,
+  `evidence_by_source_url_match` on evidence (source, url, matched_identifier), serves the lookup and is
+  created with `CREATE INDEX IF NOT EXISTS` when a database is opened for writing, so no migration is
+  needed.
 
 - The `globals-policy` evidence record is `{model_id, identifier, globals_policy, set_by, set_at,
   safe_list_version, safe_list_sha256, unlisted, excepted}`, with `unlisted` and `excepted` sorted global
