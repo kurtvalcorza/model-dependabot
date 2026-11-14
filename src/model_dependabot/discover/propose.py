@@ -48,13 +48,25 @@ def is_link(path: Path) -> bool:
 
 
 def refuse_link(output: Path) -> None:
-    """Refuse an output path that is a link, whatever it points at and with or without
-    ``--force``: a link inside an untrusted project must never choose where a proposal lands."""
+    """Refuse an output path that is a link or passes through one, whatever it points at and
+    with or without ``--force``: a link inside an untrusted project must never choose where a
+    proposal lands.
+
+    Every part of the absolute path is checked, the file and each folder above it (issue #16),
+    so a planted link folder such as ``proj/out`` in ``proj/out/planted.toml`` is refused too.
+    Parts that do not exist yet are not links; the nearest one that exists is checked as it is.
+    The path is not normalised first, so ``out/..`` still has ``out`` checked."""
     if is_link(output):
         raise OutputLinkError(
             f"{output} is a link; discover writes only to the path it is given, never through a"
             " link, so name a file that is not one"
         )
+    for part in output.absolute().parents:
+        if is_link(part):
+            raise OutputLinkError(
+                f"{output} passes through the link {part}; discover writes only to the path it"
+                " is given, never through a link, so name a path with no link in it"
+            )
 
 
 def toml_string(text: str) -> str:

@@ -472,8 +472,9 @@ who removed a record) are dropped. Such evidence keeps the SHA-256 of the respon
 - It never loads a weight file to inspect it: pickles are scanned as data, without running them.
 - `discover` reads nothing outside the folder it is given, runs no project code, opens no database,
   makes no request without `--upstream` and writes only the `-o` file. It refuses an `-o` path that
-  is a symbolic link or junction, even a dangling one and even with `--force`, so a link in the
-  project cannot choose where the proposal is written.
+  is a symbolic link or junction, or that passes through one in any folder above it, even a
+  dangling link and even with `--force`, so a link in the project cannot choose where the proposal
+  is written.
 - It never sends a token, an account name or personal data to a source; every upstream request is a
   `GET` or `HEAD`.
 - It never stores the requesting party of a takedown or the names of people in a source's answer.
