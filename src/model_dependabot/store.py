@@ -396,6 +396,11 @@ CREATE TABLE IF NOT EXISTS file_scans (
 
 CREATE INDEX IF NOT EXISTS file_scans_by_hash ON file_scans (sha256, file_scan_id);
 
+-- Issue #18: the latest ``globals-snapshot`` row of a model's file (``latest_globals_snapshot``).
+-- Created on open like every index here, so an existing database gains it without a migration.
+CREATE INDEX IF NOT EXISTS evidence_by_source_url_match
+    ON evidence (source, url, matched_identifier);
+
 -- Feature 004 (data-model.md, Check overview): one row per run, model and source, plus one row per
 -- source for the run as a whole, stored with ``model_id = ''`` so the key holds for it too.
 CREATE TABLE IF NOT EXISTS check_run_overview (

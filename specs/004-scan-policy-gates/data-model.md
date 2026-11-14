@@ -226,8 +226,9 @@ version, `coverage.sources[]` items gain `last_state` (the row's state in that s
   scan_evidence_id, unlisted, exception_ids}`: what that check applied. A check that asks no weight source
   reads the latest one by `evidence_id` (never by timestamp, so a policy change in the same second as a
   check does not tie) and adds to the file's alert, or opens it, only the globals of `exception_ids` that
-  have been revoked or have expired since; the policy, the rest of the list and the exceptions recorded
-  since stay as they were. A `default` snapshot, or none (a database from before this row), opens nothing.
+  have been revoked or have expired since, skipping any such global an active exception covers now (a
+  renewal never opens or extends an alert, the one exception to "a new exception waits"); the policy, the
+  rest of the list and the other exceptions recorded since stay as they were. A `default` snapshot, or none (a database from before this row), opens nothing.
   The evidence table grows by one row per file per weight check; no schema change.
 
 - The `globals-policy` evidence record is `{model_id, identifier, globals_policy, set_by, set_at,

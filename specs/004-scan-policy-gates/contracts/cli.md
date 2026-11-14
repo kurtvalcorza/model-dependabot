@@ -170,11 +170,14 @@ not mistake findings for failures (SC-005).
 - Review round 1: every `check` releases alerts whose exception was revoked or has expired, whatever the
   sources asked; recording an exception still takes effect only at a check that asks a weight source.
 - Review round 2: the same holds for a `globals_policy` finding: a global whose exception lapsed returns at
-  the next check of any sources.
+  the next check of any sources. In text, a checked model is never followed by a "not checked" line, and
+  its uncheckable items follow its rows.
 - Review round 3 (issue #18): "lapsed" is judged against the file's latest `globals-snapshot` row, written
   by each check that asks a weight source; only those globals change, under the policy that check
-  applied, and a file with no snapshot or a `default` one waits for the next weight check. In text, a checked model is never followed by a "not checked" line, and
-  its uncheckable items follow its rows.
+  applied, and a file with no snapshot or a `default` one waits for the next weight check. A lapsed
+  global that an active exception covers now (a renewal: revoked or expired, then recorded again) is
+  skipped, so renewing never opens or extends an alert; this is the one exception to "a new exception
+  waits for a weight check".
 
 - `run show RUN_ID --json` prints `{run_id, scope, trigger, started_at, finished_at, sources, overview}`;
   its text is the run's header, each source's status, then the overview block. An unknown run exits 1

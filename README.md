@@ -291,7 +291,7 @@ and no longer counts as open. An alert with a global left uncovered stays open a
 ones under `excepted`. When an exception is revoked, or its expiry date has passed (it covers that
 whole day in UTC), the next check, whatever sources it asks, returns the finding on the same alert,
 recording the release; under `--globals strict` the lapsed global also returns to the `globals_policy`
-alert. A new exception, though, takes effect only at a check that asks a weight source:
+alert, unless an active exception covers it again (a renewal, below). A new exception, though, takes effect only at a check that asks a weight source:
 a check with only other sources, `osv` say, does not apply it. Hub weight files are not
 covered: no source reads their globals, so an exception for a hub file's hash is listed as not in use.
 
@@ -309,8 +309,11 @@ Each check that asks a weight source records, for every local pickle file and un
 `globals-snapshot` evidence row: the policy in force, the unlisted globals and the exceptions that took
 globals off the list (so the store grows by one row per file per weight check). A check that asks no
 weight source reads the file's latest snapshot and changes only the globals whose exception has lapsed
-since: it adds them to the open alert, or opens one if the snapshot was `strict`. A policy change, a new
-exception and a new scan still wait for the next weight check, and a file whose latest snapshot is
+since: it adds them to the open alert, or opens one if the snapshot was `strict`. A global that an active
+exception covers again by then (a renewal: the old exception revoked or expired and a new one recorded) is
+skipped, so renewing an exception never opens or extends an alert; this is the one case where a new
+exception counts before a weight check. Otherwise a policy change, a new exception and a new scan still
+wait for the next weight check, and a file whose latest snapshot is
 `default`, or that has none (a database from before the snapshots), opens nothing until then.
 
 ### Auditing an inventory

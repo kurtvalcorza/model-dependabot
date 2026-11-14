@@ -1489,7 +1489,8 @@ def _apply_globals_lapses(store: Store, run_id: int, target: _Target) -> None:
     Review M4 and issue #18: the latest ``globals-snapshot`` of each file is what the last weight
     check applied. Only a global whose exception was applied there and has since been revoked or
     expired is added to the file's alert (opened if none is open); everything else, the policy
-    included, stays as that check left it. A snapshot under the default policy, or none at all (a
+    included, stays as that check left it, except that a global an active exception covers now
+    (a renewal) is skipped. A snapshot under the default policy, or none at all (a
     store from before the snapshots), opens nothing: the next weight check decides (FR-010).
     """
     now = store.now()
@@ -1505,7 +1506,15 @@ def _apply_globals_lapses(store: Store, run_id: int, target: _Target) -> None:
         known = {int(e["exception_id"]): e for e in store.exceptions(sha256, include_inactive=True)}
         applied = [known[i] for i in snapshot.get("exception_ids") or [] if i in known]
         still = [e for e in applied if e["state"] == "active"]
-        lapsed = {f"{e['module']}.{e['name']}" for e in applied if e["state"] != "active"}
+        # Review P2 (Kurt): a lapsed global that an active exception covers now was renewed, not
+        # released, so it is skipped: renewing never opens or extends an alert. The one exception
+        # to "a new exception waits for a weight check".
+        current = store.exceptions(sha256)
+        lapsed = {
+            f"{e['module']}.{e['name']}"
+            for e in applied
+            if e["state"] != "active" and covering(current, e["module"], e["name"]) is None
+        }
         if not lapsed:
             continue
         open_alert = store.find_open_alert(
