@@ -107,6 +107,17 @@ Rulings by the owner on the plan's open decisions (research.md, Decisions on the
   policy or, for the globals policy, a global the dismissed alert did not list; re-asserting the same policy
   or a shrinking list is not new evidence (FR-020).
 
+### Session 2026-11-14 (pull request review, round 2)
+
+- Q: Against what is a globals policy list compared for a held dismissal? → A: The list as it stood when the
+  alert was dismissed (its cause then), not every list it ever held: a global that returns after its exception
+  is revoked or expires reopens the alert (FR-004, FR-020).
+- Q: Is the scan new evidence for a `globals_policy` alert? → A: Yes. A new scanner version or a changed report
+  of the same bytes reopens a dismissed `globals_policy` alert, as it does a `weight_file_scan` one.
+- Q: Does a lapsed exception return a strict-policy finding at a check without a weight source? → A: Yes, from
+  the stored scans, like the HIGH alert. A new exception, a policy change and a new scan still wait for a check
+  that asks a weight source (FR-010).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Accept a reviewed global in one exact file (Priority: P1)

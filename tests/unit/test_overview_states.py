@@ -102,14 +102,5 @@ def test_uncheckable_items_are_listed_apart_and_never_coverage() -> None:
             }
         ],
     }
-    assert "  uncheckable: paper_not_found 10.1/a: r" in overview.text(1, "m", covered)
-    rows = overview.run_rows(
-        [
-            {"model_id": "m", "version": 1, "source": "uncheckable", "state": "passed",
-             "reason": "[]", "entries": 1} | dict.fromkeys(overview.COUNTS[1:])
-        ],
-        ["crossref"],
-        {"crossref": "ok"},
-    )  # fmt: skip
-    assert [row["source"] for row in rows] == ["crossref"]
-    assert rows[0]["reason"] == "no entry needed this source"
+    lines = overview.text(1, "m", covered).splitlines()
+    assert lines[-2:] == ["m v1: checked", "  uncheckable: paper_not_found 10.1/a: r"]

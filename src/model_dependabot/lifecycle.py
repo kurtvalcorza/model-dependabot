@@ -224,13 +224,12 @@ def _note(
     *,
     kind: str | None = None,
     identifier: str | None = None,
-    source: str | None = None,
     uncheckable: str | None = None,
 ) -> None:
     """Tally an alert, a closed alert or a watch event to the check source being applied.
 
-    The upstream pass applies several sources at once, so its items are tallied to ``source`` when
-    given, else to the source of their evidence. An item no source can ever read (``uncheckable``,
+    The upstream pass applies several sources at once, so its items are tallied to the source of
+    their evidence. An item no source can ever read (``uncheckable``,
     the reason) is listed apart: it is neither incomplete nor counted to a source (review K3,
     owner's ruling). Outside a check run (registration) nothing is tallied.
     """
@@ -240,7 +239,7 @@ def _note(
                 {"kind": kind, "identifier": identifier, "reason": uncheckable}
             )
         return
-    source = source or target.source
+    source = target.source
     if source == UPSTREAM_PASS:
         source = ""
         for evidence_id in evidence_ids:
@@ -303,14 +302,10 @@ def _held_dismissal(
                 )
             )
     new = any(item not in linked for item in items)
-    # Review K2: a globals policy record is new evidence only when it lists a global the dismissed
-    # alert's records did not (a shrinking list or a re-asserted policy is not).
-    before = {
-        name
-        for e in dismissed
-        if e["source"] == GLOBALS_POLICY_SOURCE
-        for name in (e.get("detail") or {}).get("unlisted", [])
-    }
+    # Review K2 and M2: a globals policy record is new evidence only when it lists a global the
+    # dismissed alert did not list when it was dismissed (its cause then); a shrinking list or a
+    # re-asserted policy is not.
+    before = set(latest["cause"].get("unlisted") or [])
     for o in observations or ():
         if o.source == GLOBALS_POLICY_SOURCE and set(o.detail.get("unlisted", [])) - before:
             new = True
@@ -1183,15 +1178,26 @@ def _weight_alert(
     entry: Mapping[str, Any],
     cause: Mapping[str, Any],
     observations: Sequence[_Observation],
+    evidence_ids: Sequence[int] = (),
 ) -> None:
-    """Open a weight-file alert, or carry the open one forward (FR-010, FR-013)."""
+    """Open a weight-file alert, or carry the open one forward (FR-010, FR-013).
+
+    ``evidence_ids`` are rows already stored that the alert also rests on (a ``globals_policy``
+    alert's scan, review M3); they take part in the held-dismissal comparison.
+    """
     identifier = entry["identifier"]
     cause_key = weight_cause_key(kind, identifier)
     severity = WEIGHT_SEVERITY[kind]
     existing = store.find_open_alert(target.model_id, cause_key)
     if existing is None:
         held, reopens = _held_dismissal(
-            store, target, cause_key, severity, identifier=identifier, observations=observations
+            store,
+            target,
+            cause_key,
+            severity,
+            identifier=identifier,
+            observations=observations,
+            evidence_ids=list(evidence_ids),
         )
         if held:
             return
@@ -1412,8 +1418,9 @@ def _apply_globals_rules(
         excepted_at = (alert["excepted_at"] or stamp) if whole else None
         if cause != alert["cause"] or excepted_at != alert["excepted_at"]:
             store.set_alert_exception(alert["alert_id"], excepted_at=excepted_at, cause=cause)
-    if apply_new:
-        _apply_globals_policy(store, run_id, target)
+    # Review M4: a lapsed exception returns a strict-policy finding at any check, too; the stored
+    # scans are enough, so a check without a weight source re-evaluates only what lapsed.
+    _apply_globals_policy(store, run_id, target, lapse_only=not apply_new)
 
 
 def _exception_item(record: Mapping[str, Any]) -> dict[str, Any]:
@@ -1426,7 +1433,17 @@ def _exception_item(record: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _apply_globals_policy(store: Store, run_id: int, target: _Target) -> None:
+def _lapsed(store: Store, sha256: str, name: str) -> bool:
+    """Whether an exception for this global in these bytes was revoked or has expired."""
+    return any(
+        f"{e['module']}.{e['name']}" == name and e["state"] != "active"
+        for e in store.exceptions(sha256, include_inactive=True)
+    )
+
+
+def _apply_globals_policy(
+    store: Store, run_id: int, target: _Target, *, lapse_only: bool = False
+) -> None:
     """The ``globals_policy`` alerts of the version's local pickle files (US2, research S7).
 
     Under ``strict``, a file whose latest scan has globals neither on the safe list nor excepted, or
@@ -1441,6 +1458,8 @@ def _apply_globals_policy(store: Store, run_id: int, target: _Target) -> None:
     policy = model.get("globals_policy") or "default"
     now = store.now()
     safe = globals_policy.current_safe_list() if policy == "strict" else None
+    if lapse_only and safe is None:
+        return  # a policy change waits for a check that asks a weight source
     if safe is None:
         # Review X4: the policy is the alert's source, so its change clears every open
         # ``globals_policy`` alert of the model, whatever its entry has become.
@@ -1498,7 +1517,7 @@ def _apply_globals_policy(store: Store, run_id: int, target: _Target) -> None:
         observation = _Observation(GLOBALS_POLICY_SOURCE, "", now, _json_body(record), record)
         exception_ids = [int(e["evidence_id"]) for e in covered]
         if not listed and scan["complete"]:
-            if open_alert is None:
+            if open_alert is None or lapse_only:
                 continue
             before = set(open_alert["cause"].get("unlisted") or [])
             excepted_now = set(record["excepted"])
@@ -1530,7 +1549,20 @@ def _apply_globals_policy(store: Store, run_id: int, target: _Target) -> None:
                 "scanned_at": scan["scanned_at"],
             },
         }
-        _weight_alert(store, run_id, target, GLOBALS_POLICY_ALERT, entry, cause, [observation])
+        if lapse_only:
+            grown = set(listed) - set((open_alert or {}).get("cause", {}).get("unlisted") or [])
+            if not any(_lapsed(store, sha256, name) for name in grown):
+                continue  # review M4: only a lapsed exception acts outside a weight check
+        _weight_alert(
+            store,
+            run_id,
+            target,
+            GLOBALS_POLICY_ALERT,
+            entry,
+            cause,
+            [observation],
+            evidence_ids=[int(scan["evidence_id"])],
+        )
         alert = store.find_open_alert(
             target.model_id, weight_cause_key(GLOBALS_POLICY_ALERT, identifier)
         )

@@ -169,6 +169,9 @@ not mistake findings for failures (SC-005).
   `--fail-on`.
 - Review round 1: every `check` releases alerts whose exception was revoked or has expired, whatever the
   sources asked; recording an exception still takes effect only at a check that asks a weight source.
+- Review round 2: the same holds for a `globals_policy` finding: a global whose exception lapsed returns at
+  the next check of any sources. In text, a checked model is never followed by a "not checked" line, and
+  its uncheckable items follow its rows.
 
 - `run show RUN_ID --json` prints `{run_id, scope, trigger, started_at, finished_at, sources, overview}`;
   its text is the run's header, each source's status, then the overview block. An unknown run exits 1

@@ -290,7 +290,8 @@ whose every dangerous global is covered is shown as `excepted`, with the excepti
 and no longer counts as open. An alert with a global left uncovered stays open and lists the covered
 ones under `excepted`. When an exception is revoked, or its expiry date has passed (it covers that
 whole day in UTC), the next check, whatever sources it asks, returns the finding on the same alert,
-recording the release. A new exception, though, takes effect only at a check that asks a weight source:
+recording the release; under `--globals strict` the lapsed global also returns to the `globals_policy`
+alert. A new exception, though, takes effect only at a check that asks a weight source:
 a check with only other sources, `osv` say, does not apply it. Hub weight files are not
 covered: no source reads their globals, so an exception for a hub file's hash is listed as not in use.
 

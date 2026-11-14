@@ -215,6 +215,10 @@ version, `coverage.sources[]` items gain `last_state` (the row's state in that s
   the latter also `unlisted` and `excepted`, compared apart: only a growing list is new) and `picklescan`
   (`file_name`, `scanned_at`, `verdict`); `picklescan` evidence matches without its URL.
 - Review round 1: a carried-forward alert keeps `reopens` on every path.
+- Review round 2: a held `globals_policy` dismissal compares the new list with the dismissed alert's
+  `cause.unlisted`, and the scan's evidence row takes part in the comparison.
+- Review round 2: at a check that asks no weight source, a `globals_policy` alert opens again, or gains a
+  global, when that global's exception was revoked or has expired.
 
 - The `globals-policy` evidence record is `{model_id, identifier, globals_policy, set_by, set_at,
   safe_list_version, safe_list_sha256, unlisted, excepted}`, with `unlisted` and `excepted` sorted global

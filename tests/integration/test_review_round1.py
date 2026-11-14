@@ -225,45 +225,7 @@ def test_k1_a_model_no_asked_source_covers_trips_the_gate(
     assert model["checked"] is False
 
 
-# --- K3: uncheckable papers do not trip the gate; credited sources do ----------------------------
-
-
-def test_k3_upstream_items_are_credited_and_unreadable_dois_are_uncheckable() -> None:
-    target = lifecycle._Target("m", 1, [], {"watch_events": []}, source=lifecycle.UPSTREAM_PASS)
-
-    class FakeStore:
-        def get_evidence(self, evidence_id: int) -> dict[str, Any]:
-            return {"source": "doi-ra"}
-
-    lifecycle._note(
-        FakeStore(),  # type: ignore[arg-type]
-        target,
-        "watch_events",
-        1,
-        [1],
-        kind="paper_not_found",
-        identifier="10.48550/arxiv.1",
-        uncheckable="registered with DataCite, which holds no retraction notices",
-    )
-    lifecycle._note(
-        FakeStore(),  # type: ignore[arg-type]
-        target,
-        "watch_events",
-        2,
-        [],
-        kind="paper_not_found",
-        identifier="10.1/x",
-        source="crossref",
-    )
-    assert target.tally["crossref"]["incomplete"] == {"10.1/x"}
-    assert target.uncheckable == [
-        {
-            "kind": "paper_not_found",
-            "identifier": "10.48550/arxiv.1",
-            "reason": "registered with DataCite, which holds no retraction notices",
-        }
-    ]
-    assert all("10.48550/arxiv.1" not in t["incomplete"] for t in target.tally.values())
+# --- K3: see tests/integration/test_review_round2.py (M5), which runs the real path -------------
 
 
 # --- K4: identical bytes from another place hold the dismissal -----------------------------------

@@ -280,6 +280,10 @@ and a model none of whose relevant entries an asked source covers reads `checked
 took precedence; exit 3 prints no payload. Without `--fail-on`, the `gate` object is absent and every
 code is as today (FR-018), which the contract test of every row in the exit-code table guards (SC-005).
 
+**Review round 2 (2026-11-14)**: a check that asks no weight source also re-evaluates `globals_policy`
+alerts from the stored scans, but only for globals whose exception was revoked or has expired: such a
+global opens the alert again, or joins its list. Nothing else changes outside a weight check (M4).
+
 **Review round 1 (2026-11-14)**: the `policy` row is not coverage, so a model whose only non-failed row
 is `policy` reads `checked: false` and trips the gate (K1). An item no source can ever read (S6,
 uncheckable) does not trip it (K3, owner's ruling "uncheckable, not incomplete"). An alert whose exception
@@ -514,6 +518,11 @@ or a registration record's URL), and `VOLATILE_FIELDS` drops `file_name`, `scann
 record is new evidence only when it lists a global the dismissed alert's records did not (K2). On the OSV
 path a held check reuses the dismissed alert's identical records for the same pinned package, so it
 stores no unlinked duplicate (K6).
+
+**Review round 2 (2026-11-14)**: a globals policy record is compared with the `unlisted` list of the
+dismissed alert's cause, which is the list as it stood at dismissal (M2). A `globals_policy` alert's
+scan evidence takes part in the comparison, matched without its location as in K4, so another scanner
+version reopens it (M3).
 
 **Decision**: a store method `latest_alert(model_id, cause_key)` returns the most recent alert for the
 key in any state. In each insert path, when there is no open alert and that latest alert is `dismissed`,

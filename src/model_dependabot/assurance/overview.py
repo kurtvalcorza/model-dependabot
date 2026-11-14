@@ -233,10 +233,11 @@ def text(run_id: int, scope: str, overview: Mapping[str, Any]) -> str:
         if model["checked"]:
             lines.append(f"{model['model_id']} v{model['version']}: checked")
             lines += [_line(row) for row in model["sources"]]
-        for item in model.get("uncheckable") or []:
-            lines.append(f"  uncheckable: {item['kind']} {item['identifier']}: {item['reason']}")
         else:
             lines.append(f"{model['model_id']} v{model['version']}: not checked: {model['reason']}")
+        # Review M1: after the model's line, never between ``if`` and ``else``.
+        for item in model.get("uncheckable") or []:
+            lines.append(f"  uncheckable: {item['kind']} {item['identifier']}: {item['reason']}")
     return "\n".join(lines)
 
 
