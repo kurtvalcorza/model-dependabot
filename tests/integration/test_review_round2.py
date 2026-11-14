@@ -180,6 +180,29 @@ def test_m4_a_new_exception_still_waits_for_a_weight_source(
     assert len(_policy_alerts(cli, "m")) == 1  # FR-010: only a weight check applies it
 
 
+def test_m4_a_lapse_does_not_apply_a_new_exception_at_an_osv_check(
+    cli: Any, tmp_path: Path
+) -> None:
+    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
+    alpha, beta = ".".join(ALPHA), ".".join(BETA)
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    _, old = cli("exception", "record", "--global", alpha, "--sha256", sha,
+                 "--reason", "r", "--by", "O")  # fmt: skip
+    cli("check", "m", "--source", "picklescan")
+    [before] = _policy_alerts(cli, "m")
+    assert before["cause"]["unlisted"] == [beta]
+    cli("exception", "record", "--global", beta, "--sha256", sha, "--reason", "r", "--by", "O")
+    cli("exception", "revoke", str(old["exception_id"]), "--reason", "no", "--by", "O")
+    cli("check", "m", "--source", "osv")
+    [after] = _policy_alerts(cli, "m")
+    # FR-010: the lapsed global is back, while the new exception waits for a weight source
+    assert after["cause"]["unlisted"] == [alpha, beta]
+    assert after["cause"]["excepted"] == []
+    cli("check", "m", "--source", "picklescan")
+    [applied] = _policy_alerts(cli, "m")
+    assert applied["cause"]["unlisted"] == [alpha]
+
+
 def test_m4_a_policy_set_strict_still_waits_for_a_weight_source(
     cli: Any, tmp_path: Path, craft: Any
 ) -> None:

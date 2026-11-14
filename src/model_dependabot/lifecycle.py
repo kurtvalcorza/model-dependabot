@@ -1506,6 +1506,11 @@ def _apply_globals_policy(
         if scan is None:
             continue
         active = store.exceptions(sha256)
+        if lapse_only and open_alert is not None:
+            # FR-010 and the round 2 ruling: a new exception waits for a check that asks a weight
+            # source, so outside one only the exceptions the open alert already applies count.
+            known = {item["exception_id"] for item in open_alert["cause"].get("excepted") or []}
+            active = [e for e in active if e["exception_id"] in known]
         listed = globals_policy.unlisted(scan, safe, active)
         covered = globals_policy.excepted(scan, safe, active)
         record |= {
