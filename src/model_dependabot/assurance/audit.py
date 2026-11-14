@@ -32,7 +32,7 @@ from model_dependabot.assurance.trust import (
     measured_entries,
     needs_confirmation,
 )
-from model_dependabot.reports import alert_view, watch_view
+from model_dependabot.reports import alert_view, is_excepted, watch_view
 from model_dependabot.sources import crossref, datacite
 from model_dependabot.sources.hf import is_commit
 from model_dependabot.store import Store, utc_text
@@ -312,7 +312,17 @@ def audit_report(
         for source in SOURCE_ORDER
         if source in relevant
     ]
-    alerts = [alert_view(store, alert) for alert in store.alerts_for(model_id, ["open"])]
+    # Feature 004: the overview state of each source in its latest run for the version.
+    for item in coverage:
+        item["last_state"] = None
+        if item["last_run_id"] is not None:
+            for row in store.check_run_overview(int(item["last_run_id"])):
+                if row["model_id"] == model_id and row["source"] == item["source"]:
+                    item["last_state"] = row["state"]
+    live = store.alerts_for(model_id, ["open"])
+    # Feature 004: an excepted alert is stored open but not counted as open (research S4).
+    alerts = [alert_view(store, alert) for alert in live if not is_excepted(alert)]
+    excepted = [alert_view(store, alert) for alert in live if is_excepted(alert)]
     events = [watch_view(event) for event in store.watch_events(model_id, chosen)]
     counts = {status: sum(item["status"] == status for item in assured) for status in STATUSES}
     # The version is checked once every relevant source has succeeded in a run that checked it
@@ -329,6 +339,7 @@ def audit_report(
     summary = {
         "checked": checked,
         "alerts_open": len(alerts),
+        "alerts_excepted": len(excepted),
         "watch_events": len(events),
         "entries": len(entries),
         "verified": counts["verified"],
@@ -353,6 +364,7 @@ def audit_report(
         "findings": {
             "state": state,
             "alerts": alerts,
+            "excepted": excepted,
             "watch_events": events,
         },
         "assurance": {"entries": assured, "undeclared_kinds": _undeclared(entries)},

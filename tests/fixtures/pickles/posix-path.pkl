@@ -1,0 +1,4 @@
+€cpathlib
+PosixPath
+(S'weights'
+tR.

@@ -16,6 +16,7 @@ NOW = datetime(2026, 11, 13, 9, 0, tzinfo=UTC)
 SUMMARY = {
     "checked",
     "alerts_open",
+    "alerts_excepted",
     "watch_events",
     "entries",
     "verified",
@@ -63,7 +64,7 @@ def test_the_json_has_every_field_of_the_contract(audit) -> None:
     assert code == EXIT_OK
     assert set(report) == TOP
     assert set(report["summary"]) == SUMMARY
-    assert set(report["findings"]) == {"state", "alerts", "watch_events"}
+    assert set(report["findings"]) == {"state", "alerts", "excepted", "watch_events"}
     assert set(report["assurance"]) == {"entries", "undeclared_kinds"}
     assert set(report["coverage"]) == {"sources", "uncheckable"}
     assert report["produced_at"] == "2026-11-13T09:00:00Z"
@@ -129,3 +130,71 @@ def test_the_json_reports_partly_checked_after_a_check_of_some_sources(
     assert report["summary"]["checked"] is False
     sources = {item["source"]: item["status"] for item in report["coverage"]["sources"]}
     assert sources == {"picklescan": "ok", "hf-hub": "not checked"}
+
+
+def test_an_excepted_alert_is_counted_apart_from_the_open_ones(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], craft
+) -> None:
+    """Feature 004 (T020): ``alerts_open`` excludes excepted alerts; they are listed apart."""
+    import hashlib
+
+    db = tmp_path / "md.db"
+    handlers = make_handlers(fetcher=RecordedFetcher(tmp_path / "none"), now=lambda: NOW)
+
+    def cli(*argv: str) -> tuple[int, Any]:
+        code = main([*argv, "--db", str(db), "--json"], handlers=handlers)
+        out = capsys.readouterr().out
+        return code, json.loads(out) if out.strip() else None
+
+    model = tmp_path / "model"
+    model.mkdir()
+    reviewed = craft.protocol2_getattr()
+    (model / "reviewed.pkl").write_bytes(reviewed)
+    (model / "dangerous.pkl").write_bytes(craft.dangerous())
+    manifest = model / "model.toml"
+    manifest.write_text(
+        '[model]\nid = "m"\n\n[[weights]]\npath = "reviewed.pkl"\n\n'
+        '[[weights]]\npath = "dangerous.pkl"\n',
+        "utf-8",
+    )
+    assert cli("register", str(manifest))[0] == EXIT_OK
+    assert cli("check", "m", "--source", "picklescan")[0] == EXIT_OK
+    sha = hashlib.sha256(reviewed).hexdigest()
+    argv = ("--global", "__builtin__.getattr", "--sha256", sha, "--reason", "r", "--by", "O")
+    assert cli("exception", "record", *argv)[0] == EXIT_OK
+    assert cli("check", "m", "--source", "picklescan")[0] == EXIT_OK
+
+    code, report = cli("inventory", "audit", "m")
+    assert code == EXIT_OK
+    assert (report["summary"]["alerts_open"], report["summary"]["alerts_excepted"]) == (1, 1)
+    [open_alert] = report["findings"]["alerts"]
+    assert open_alert["cause"]["location"] == "dangerous.pkl"
+    [excepted] = report["findings"]["excepted"]
+    assert (excepted["state"], excepted["cause"]["location"]) == ("excepted", "reviewed.pkl")
+
+
+def test_coverage_items_carry_the_last_overview_state(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Feature 004 (T040): ``last_state`` is the source's overview state in its latest run."""
+    db = tmp_path / "md.db"
+    handlers = make_handlers(fetcher=RecordedFetcher(tmp_path / "none"), now=lambda: NOW)
+    model = tmp_path / "model"
+    model.mkdir()
+    pickles = Path(__file__).resolve().parent.parent / "fixtures" / "pickles"
+    (model / "i.pkl").write_bytes((pickles / "innocuous.pkl").read_bytes())
+    manifest = '[model]\nid = "m"\n\n[[weights]]\npath = "i.pkl"\n'
+    (model / "model.toml").write_text(manifest, "utf-8")
+
+    def cli(*argv: str) -> Any:
+        main([*argv, "--db", str(db), "--json"], handlers=handlers)
+        out = capsys.readouterr().out
+        return json.loads(out) if out.strip() else None
+
+    cli("register", str(model / "model.toml"))
+    before = cli("inventory", "audit", "m")
+    assert [item["last_state"] for item in before["coverage"]["sources"]] == [None]
+    cli("check", "m", "--source", "picklescan")
+    after = cli("inventory", "audit", "m")
+    [scan] = after["coverage"]["sources"]
+    assert (scan["source"], scan["last_state"]) == ("picklescan", "passed")

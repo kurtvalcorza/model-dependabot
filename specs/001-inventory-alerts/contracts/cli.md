@@ -18,7 +18,7 @@ output is plain text. No command changes a model or writes to a model's reposito
 | `policy ID --format (default\|strict) --by NAME` | Sets the model's format policy and records who set it and when (the evidence for a `format_policy` alert); takes effect at the next check. | FR-021 |
 | `alerts ID [--state open\|closed\|all]` | Lists alerts by severity, then watch events. | FR-018 |
 | `alert show ALERT_ID` | One alert with all its evidence. | FR-019 |
-| `alert dismiss ALERT_ID --reason REASON [--note TEXT] --by NAME` | Dismisses with a listed reason. | FR-015 |
+| `alert dismiss ALERT_ID --reason REASON [--note TEXT] --by NAME` | Dismisses with a listed reason. Since feature 004 the dismissal holds until a check brings new evidence ([004 contract](../../004-scan-policy-gates/contracts/cli.md)). | FR-015 |
 | `history ID` | Closed alerts with how (`fixed`, `dismissed`, `withdrawn` or `cleared`) and when they closed. | US5 |
 
 `REASON` is one of `not_used_at_runtime`, `risk_accepted`, `false_positive`, `fix_not_available`.

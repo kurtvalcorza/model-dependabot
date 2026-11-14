@@ -20,6 +20,14 @@ its canonical form (``canonical_sha256``), so two responses from the same source
 differ only in key order or whitespace count as the same evidence (``same_evidence``). The raw
 bytes are still the stored body. A database without the column gains it on open, and its rows get
 the hash from their stored bodies where the body is still there and is JSON.
+
+Feature 004 adds global exceptions (``global_exceptions``, never deleted, only revoked), what each
+applied scan saw (``file_scans``), the check overview (``check_run_overview``), the globals policy
+columns on ``models`` and ``alerts.excepted_at``. An older database gains them on open, one
+transaction per step; ``alerts`` is rebuilt once, keeping every row and id, so its kind check
+accepts ``globals_policy``. An excepted alert keeps the stored state ``open`` (``excepted_at`` is
+set), and a dismissed alert stays dismissed while checks bring no new evidence: ``latest_alert`` and
+``matching_key`` (which drops each source's ``VOLATILE_FIELDS``) serve that comparison only.
 """
 
 from __future__ import annotations
@@ -30,7 +38,7 @@ import json
 import os
 import re
 import sqlite3
-from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import TracebackType
@@ -54,9 +62,13 @@ ALERT_KINDS = (
     "licence_changed",
     "base_model_disabled",
     "base_model_unavailable",
+    # feature 004 (data-model.md, Alert)
+    "globals_policy",
 )
 ALERT_STATES = ("open", "fixed", "dismissed", "withdrawn", "cleared")
 FORMAT_POLICIES = ("default", "strict")
+GLOBALS_POLICIES = ("default", "strict")
+OVERVIEW_STATES = ("passed", "alerted", "incomplete", "failed")
 DISMISSAL_REASONS = ("not_used_at_runtime", "risk_accepted", "false_positive", "fix_not_available")
 WATCH_KINDS = (
     "pickle_format",
@@ -120,7 +132,10 @@ CREATE TABLE IF NOT EXISTS models (
     format_policy TEXT NOT NULL DEFAULT 'default' CHECK (format_policy IN ('default', 'strict')),
     format_policy_set_by TEXT,
     format_policy_set_at TEXT,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    globals_policy TEXT NOT NULL DEFAULT 'default' CHECK (globals_policy IN ('default', 'strict')),
+    globals_policy_set_by TEXT,
+    globals_policy_set_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS model_versions (
@@ -256,6 +271,7 @@ CREATE TABLE IF NOT EXISTS alerts (
         {_in(DISMISSAL_REASONS)}),
     dismissed_by TEXT,
     note TEXT,
+    excepted_at TEXT,
     CHECK (state != 'dismissed' OR (dismissal_reason IS NOT NULL AND dismissed_by IS NOT NULL))
 );
 
@@ -339,6 +355,78 @@ CREATE TABLE IF NOT EXISTS etag_cache (
     used_at TEXT
 );
 
+-- Feature 004 (data-model.md, Global exception): an owner's acceptance of one global in the file
+-- with this SHA-256, wherever it is registered. Never deleted; only its revocation can be set,
+-- once.
+CREATE TABLE IF NOT EXISTS global_exceptions (
+    exception_id INTEGER PRIMARY KEY,
+    module TEXT NOT NULL CHECK (module != '' AND instr(module, '*') = 0
+        AND instr(module, 'unknown') = 0),
+    name TEXT NOT NULL CHECK (name != '' AND instr(name, '*') = 0 AND instr(name, 'unknown') = 0),
+    sha256 TEXT NOT NULL CHECK (length(sha256) = 64 AND sha256 NOT GLOB '*[^0-9a-f]*'),
+    reason TEXT NOT NULL CHECK (length(trim(reason)) > 0),
+    accepted_by TEXT NOT NULL CHECK (length(trim(accepted_by)) > 0),
+    recorded_at TEXT NOT NULL,
+    expires_on TEXT CHECK (expires_on IS NULL
+        OR expires_on GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+    revoked_at TEXT,
+    revoked_by TEXT CHECK (revoked_by IS NULL OR length(trim(revoked_by)) > 0),
+    revoke_reason TEXT CHECK (revoke_reason IS NULL OR length(trim(revoke_reason)) > 0),
+    evidence_id INTEGER NOT NULL REFERENCES evidence (evidence_id),
+    CHECK ((revoked_at IS NULL) = (revoked_by IS NULL)
+        AND (revoked_at IS NULL) = (revoke_reason IS NULL))
+);
+
+CREATE INDEX IF NOT EXISTS global_exceptions_by_file ON global_exceptions (sha256, module, name);
+
+-- Feature 004 (data-model.md, File scan): what one applied static scan of a file's bytes saw, in a
+-- check run (``run_id``) or recorded at registration (``run_id`` null). The latest row per hash
+-- decides.
+CREATE TABLE IF NOT EXISTS file_scans (
+    file_scan_id INTEGER PRIMARY KEY,
+    sha256 TEXT NOT NULL CHECK (length(sha256) = 64 AND sha256 NOT GLOB '*[^0-9a-f]*'),
+    scanner TEXT NOT NULL,
+    scanner_version TEXT NOT NULL,
+    complete INTEGER NOT NULL CHECK (complete IN (0, 1)),
+    globals TEXT NOT NULL,
+    scanned_at TEXT NOT NULL,
+    run_id INTEGER REFERENCES check_runs (run_id),
+    evidence_id INTEGER NOT NULL REFERENCES evidence (evidence_id)
+);
+
+CREATE INDEX IF NOT EXISTS file_scans_by_hash ON file_scans (sha256, file_scan_id);
+
+-- Feature 004 (data-model.md, Check overview): one row per run, model and source, plus one row per
+-- source for the run as a whole, stored with ``model_id = ''`` so the key holds for it too.
+CREATE TABLE IF NOT EXISTS check_run_overview (
+    run_id INTEGER NOT NULL REFERENCES check_runs (run_id),
+    model_id TEXT NOT NULL,
+    version INTEGER,
+    source TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN {_in(OVERVIEW_STATES)}),
+    reason TEXT,
+    entries INTEGER,
+    incomplete INTEGER,
+    alerts_open INTEGER,
+    alerts_excepted INTEGER,
+    watch_events INTEGER,
+    dismissals_held INTEGER,
+    PRIMARY KEY (run_id, model_id, source)
+);
+
+CREATE TRIGGER IF NOT EXISTS global_exceptions_no_delete BEFORE DELETE ON global_exceptions
+BEGIN SELECT RAISE(ABORT, 'a recorded exception is never deleted'); END;
+CREATE TRIGGER IF NOT EXISTS global_exceptions_revoke_only BEFORE UPDATE ON global_exceptions
+WHEN NOT (
+    OLD.revoked_at IS NULL AND NEW.revoked_at IS NOT NULL AND NEW.revoked_by IS NOT NULL
+    AND NEW.revoke_reason IS NOT NULL
+    AND NEW.exception_id = OLD.exception_id AND NEW.module = OLD.module
+    AND NEW.name = OLD.name AND NEW.sha256 = OLD.sha256 AND NEW.reason = OLD.reason
+    AND NEW.accepted_by = OLD.accepted_by AND NEW.recorded_at = OLD.recorded_at
+    AND NEW.expires_on IS OLD.expires_on AND NEW.evidence_id = OLD.evidence_id
+)
+BEGIN SELECT RAISE(ABORT, 'only the revocation of an exception can be set, once'); END;
+
 -- FR-005: a recorded model version and its inventory never change.
 CREATE TRIGGER IF NOT EXISTS model_versions_no_update BEFORE UPDATE ON model_versions
 BEGIN SELECT RAISE(ABORT, 'a recorded model version is immutable (FR-005)'); END;
@@ -403,6 +491,36 @@ def _loads(text: str | None) -> Any:
     return None if text is None else json.loads(text)
 
 
+EXCEPTION_SOURCE = "exception"
+
+
+def _canonical_json(record: Mapping[str, Any]) -> bytes:
+    return json.dumps(record, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+_MODEL_DEFAULTS = {
+    "globals_policy": "default",
+    "globals_policy_set_by": None,
+    "globals_policy_set_at": None,
+}
+
+
+def exception_state(record: Mapping[str, Any], at: datetime) -> str:
+    """``active``, ``expired`` or ``revoked`` at ``at`` (data-model.md, Global exception).
+
+    An exception expiring on a date covers that whole day in UTC: it is expired from 00:00Z on the
+    next day.
+    """
+    if record.get("revoked_at"):
+        return "revoked"
+    expires = record.get("expires_on")
+    if expires:
+        end = datetime.fromisoformat(expires).replace(tzinfo=UTC) + timedelta(days=1)
+        if at >= end:
+            return "expired"
+    return "active"
+
+
 def canonical_sha256(body: bytes) -> str | None:
     """The SHA-256 of a JSON body in canonical form, or ``None`` for a body that is not JSON.
 
@@ -427,6 +545,69 @@ def same_evidence(evidence: Mapping[str, Any], source: str, url: str, body: byte
     if evidence["source"] != source or evidence["url"] != url:
         return False
     return content_key(evidence) == (canonical_sha256(body) or hashlib.sha256(body).hexdigest())
+
+
+_HUB_COUNTERS = ("downloads", "likes", "lastModified")
+_DATACITE_COUNTERS = tuple(
+    f"data.attributes.{name}"
+    for name in (
+        "viewCount",
+        "viewsOverTime",
+        "downloadCount",
+        "downloadsOverTime",
+        "citationCount",
+        "citationsOverTime",
+        "referenceCount",
+        "partCount",
+        "partOfCount",
+        "versionCount",
+        "versionOfCount",
+    )
+)
+# Feature 004 (research S13, owner's ruling 2026-11-14): fields of a source's JSON answer that move
+# on requests that change nothing else, by the evidence row's ``source`` exactly as stored, as
+# dotted paths (nested keys included). Used only to decide whether evidence is new for a held
+# dismissal (``matching_key``); stored evidence and its ``canonical_sha256`` stay whole.
+VOLATILE_FIELDS: dict[str, tuple[str, ...]] = {
+    "huggingface.co": _HUB_COUNTERS,  # the hub's answers kept by hf-scan (``source_of``)
+    "hf-hub": _HUB_COUNTERS,  # the hub's answers kept by the upstream watch
+    "zenodo": ("stats",),
+    "crossref": ("message.indexed", "message.is-referenced-by-count"),
+    "datacite": _DATACITE_COUNTERS,
+    # Review K2 and K4: who set a policy and when, and where or when bytes were scanned, are not
+    # new evidence; a globals policy record's lists are compared apart (only a growing list is).
+    "format-policy": ("set_by", "set_at"),
+    "globals-policy": ("set_by", "set_at", "unlisted", "excepted"),
+    "picklescan": ("file_name", "scanned_at", "verdict"),
+}
+
+
+def _drop(value: Any, path: Sequence[str]) -> None:
+    if not isinstance(value, dict) or not path:
+        return
+    if len(path) == 1:
+        value.pop(path[0], None)
+        return
+    _drop(value.get(path[0]), path[1:])
+
+
+def matching_key(source: str, body: bytes) -> str:
+    """The content key of ``body`` from ``source`` with the source's volatile fields removed.
+
+    It serves a stored row (its source and stored body) and an observation not yet stored alike.
+    A body that is not a JSON object keys by its canonical or raw hash, as ``content_key`` does.
+    """
+    paths = VOLATILE_FIELDS.get(source, ())
+    try:
+        parsed = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        return hashlib.sha256(body).hexdigest()
+    if paths and isinstance(parsed, dict):
+        for path in paths:
+            _drop(parsed, path.split("."))
+        canonical = json.dumps(parsed, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return canonical_sha256(body) or hashlib.sha256(body).hexdigest()
 
 
 class OutdatedDatabaseError(ValueError):
@@ -493,6 +674,8 @@ class Store:
             self._add_canonical_hashes()
         self._add_origins()
         self._widen_watch_kinds()
+        self._widen_alert_kinds()
+        self._add_globals_columns()
         self._rekey_repository_alerts()
 
     def _mark_first_linked_run(self, had_targets: bool) -> None:
@@ -624,36 +807,86 @@ class Store:
     def _widen_watch_kinds(self) -> None:
         """Rebuild ``watch_events`` when its ``kind`` check predates a kind in ``WATCH_KINDS``.
 
-        SQLite cannot change a CHECK constraint in place, so a database written before a watch kind
-        was added (``base_model_moved``, held-out scoring 2026-10-25) has its table rebuilt with
-        the current schema, every row and id kept (the SQLite twelve-step procedure). The rebuild
-        is one transaction (``_atomic``), so an interrupted open leaves the old table as it was.
+        A database written before a watch kind was added (``base_model_moved``, held-out scoring
+        2026-10-25) has its table rebuilt with the current schema (``_rebuild_for_kinds``).
         """
         self._resolve_interrupted_widening()
-        row = self.conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'watch_events'"
-        ).fetchone()
-        if row is None or all(f"'{kind}'" in row["sql"] for kind in WATCH_KINDS):
+        self._rebuild_for_kinds("watch_events", WATCH_KINDS, "watch_events_widened")
+
+    def _widen_alert_kinds(self) -> None:
+        """Rebuild ``alerts`` when its ``kind`` check predates ``globals_policy`` (research S2).
+
+        The rebuilt table also has ``excepted_at``. Dropping the old table drops the partial unique
+        index ``one_open_alert_per_cause``, so it is recreated in the same transaction.
+        """
+        self._rebuild_for_kinds("alerts", ALERT_KINDS, "alerts_rebuilt")
+
+    def _rebuild_for_kinds(self, table: str, kinds: tuple[str, ...], copy: str) -> None:
+        """Rebuild ``table`` with the current schema when its ``kind`` check lacks one of ``kinds``.
+
+        SQLite cannot change a CHECK constraint in place, so the table is rebuilt by the SQLite
+        twelve-step procedure: every row and id is kept, copied by explicit column list (the
+        columns the old table has), and every index ``SCHEMA`` defines on the table is recreated.
+        The rebuild is one transaction (``_atomic``), so an interrupted open leaves the old table
+        and its indexes as they were.
+        """
+        sql = "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?"
+        row = self.conn.execute(sql, (table,)).fetchone()
+        if row is None or all(f"'{kind}'" in row["sql"] for kind in kinds):
             return
-        start = SCHEMA.index("CREATE TABLE IF NOT EXISTS watch_events (")
+        start = SCHEMA.index(f"CREATE TABLE IF NOT EXISTS {table} (")
         ddl = SCHEMA[start : SCHEMA.index(");", start) + 2]
-        ddl = ddl.replace("IF NOT EXISTS watch_events (", "watch_events_widened (", 1)
+        ddl = ddl.replace(f"IF NOT EXISTS {table} (", f"{copy} (", 1)
+        indexes = re.findall(
+            rf"CREATE (?:UNIQUE )?INDEX IF NOT EXISTS \w+\s+ON {table} [^;]*;", SCHEMA
+        )
         self.conn.execute("PRAGMA foreign_keys = OFF")
         try:
             with self._atomic():
-                row = self.conn.execute(
-                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'watch_events'"
-                ).fetchone()
-                if all(f"'{kind}'" in row["sql"] for kind in WATCH_KINDS):
+                row = self.conn.execute(sql, (table,)).fetchone()
+                if all(f"'{kind}'" in row["sql"] for kind in kinds):
                     return  # another process rebuilt it while this one waited (G4)
                 self.conn.execute(ddl)
-                self.conn.execute("INSERT INTO watch_events_widened SELECT * FROM watch_events")
-                self.conn.execute("DROP TABLE watch_events")
-                self.conn.execute("ALTER TABLE watch_events_widened RENAME TO watch_events")
+                names = ", ".join(sorted(self.columns(table) & self.columns(copy)))
+                self.conn.execute(f"INSERT INTO {copy} ({names}) SELECT {names} FROM {table}")
+                self.conn.execute(f"DROP TABLE {table}")
+                self.conn.execute(f"ALTER TABLE {copy} RENAME TO {table}")
+                for index in indexes:
+                    self.conn.execute(index)
                 if self.conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
-                    raise sqlite3.IntegrityError("watch_events rebuild broke a foreign key")
+                    raise sqlite3.IntegrityError(f"{table} rebuild broke a foreign key")
         finally:
             self.conn.execute("PRAGMA foreign_keys = ON")
+
+    def _add_globals_columns(self) -> None:
+        """Add feature 004's globals policy columns and ``alerts.excepted_at`` to an older database.
+
+        Every existing model reads policy ``default`` and every existing alert reads not excepted
+        (FR-007). One transaction, which decides what to add under the write lock (G4).
+        """
+        wanted = {
+            "models": (
+                "globals_policy TEXT NOT NULL DEFAULT 'default'"
+                f" CHECK (globals_policy IN {_in(GLOBALS_POLICIES)})",
+                "globals_policy_set_by TEXT",
+                "globals_policy_set_at TEXT",
+            ),
+            "alerts": ("excepted_at TEXT",),
+        }
+
+        def missing() -> list[tuple[str, str]]:
+            return [
+                (table, column)
+                for table, columns in wanted.items()
+                for column in columns
+                if column.split()[0] not in self.columns(table)
+            ]
+
+        if not missing():
+            return
+        with self._atomic():
+            for table, column in missing():
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column}")
 
     def _resolve_interrupted_widening(self) -> None:
         """Settle a ``watch_events_widened`` left by a rebuild an earlier release did not finish.
@@ -762,7 +995,10 @@ class Store:
 
     def get_model(self, model_id: str) -> dict[str, Any] | None:
         row = self.conn.execute("SELECT * FROM models WHERE model_id = ?", (model_id,)).fetchone()
-        return None if row is None else dict(row)
+        if row is None:
+            return None
+        # A database older than feature 004, opened read-only, reads the default globals policy.
+        return {**_MODEL_DEFAULTS, **dict(row)}
 
     def set_format_policy(self, model_id: str, policy: str, *, set_by: str) -> dict[str, Any]:
         """Record the model's format policy, who set it and when (FR-021, constitution I)."""
@@ -781,6 +1017,301 @@ class Store:
         model = self.get_model(model_id)
         assert model is not None
         return model
+
+    def set_globals_policy(self, model_id: str, policy: str, *, set_by: str) -> dict[str, Any]:
+        """Record the model's globals policy, who set it and when (feature 004, FR-006).
+
+        Separate from the format policy; takes effect at the next check that asks a weight source.
+        """
+        if policy not in GLOBALS_POLICIES:
+            raise ValueError(f"globals policy must be one of {GLOBALS_POLICIES}, got {policy!r}")
+        if not set_by.strip():
+            raise ValueError("a globals policy needs the name of who set it")
+        with self.conn:
+            cursor = self.conn.execute(
+                "UPDATE models SET globals_policy = ?, globals_policy_set_by = ?,"
+                " globals_policy_set_at = ? WHERE model_id = ?",
+                (policy, set_by.strip(), self._stamp(), model_id),
+            )
+        if cursor.rowcount != 1:
+            raise KeyError(model_id)
+        model = self.get_model(model_id)
+        assert model is not None
+        return model
+
+    # --- feature 004: file scans, exceptions and the check overview ----------------------------
+
+    def add_file_scan(
+        self,
+        *,
+        sha256: str,
+        scanner: str,
+        scanner_version: str,
+        complete: bool,
+        globals: Iterable[Mapping[str, str]],
+        scanned_at: datetime | str,
+        run_id: int | None,
+        evidence_id: int,
+    ) -> int:
+        """Record what one applied scan of the bytes with this SHA-256 saw (data-model.md)."""
+        items = [{"module": g["module"], "name": g["name"], "safety": g["safety"]} for g in globals]
+        stamp = scanned_at if isinstance(scanned_at, str) else utc_text(scanned_at)
+        with self.conn:
+            cursor = self.conn.execute(
+                "INSERT INTO file_scans (sha256, scanner, scanner_version, complete, globals,"
+                " scanned_at, run_id, evidence_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    sha256,
+                    scanner,
+                    scanner_version,
+                    int(bool(complete)),
+                    json.dumps(items),
+                    stamp,
+                    run_id,
+                    evidence_id,
+                ),
+            )
+        return int(cursor.lastrowid)
+
+    def latest_file_scan(self, sha256: str) -> dict[str, Any] | None:
+        """The latest scan of the bytes with this SHA-256 (by ``file_scan_id``), or ``None``."""
+        if "file_scans" not in self.tables():
+            return None  # a database older than feature 004, opened read-only
+        row = self.conn.execute(
+            "SELECT * FROM file_scans WHERE sha256 = ? ORDER BY file_scan_id DESC LIMIT 1",
+            (sha256,),
+        ).fetchone()
+        if row is None:
+            return None
+        record = dict(row)
+        record["complete"] = bool(record["complete"])
+        record["globals"] = json.loads(record["globals"])
+        return record
+
+    def exceptions(
+        self, sha256: str | None = None, *, include_inactive: bool = False
+    ) -> list[dict[str, Any]]:
+        """Global exceptions, oldest first, each with its ``state`` at the store's clock.
+
+        Only active ones unless ``include_inactive``; only those for ``sha256`` when it is given.
+        """
+        if "global_exceptions" not in self.tables():
+            return []  # a database older than feature 004, opened read-only
+        query = "SELECT * FROM global_exceptions"
+        params: tuple[Any, ...] = ()
+        if sha256 is not None:
+            query += " WHERE sha256 = ?"
+            params = (sha256,)
+        rows = self.conn.execute(query + " ORDER BY exception_id", params).fetchall()
+        now = self.now()
+        records = []
+        for row in rows:
+            record = dict(row)
+            record["state"] = exception_state(record, now)
+            if include_inactive or record["state"] == "active":
+                records.append(record)
+        return records
+
+    def add_exception(
+        self,
+        *,
+        module: str,
+        name: str,
+        sha256: str,
+        reason: str,
+        accepted_by: str,
+        expires_on: str | None = None,
+    ) -> dict[str, Any]:
+        """Record an exception with its evidence row, in one transaction (data-model.md).
+
+        The evidence (source ``exception``, URL ``exception:<id>``) is the record as canonical
+        JSON. A second exception for the same global and hash is refused while one is active.
+        """
+        now = self.now()
+        recorded_at = utc_text(now)
+        with self._atomic():
+            for row in self.conn.execute(
+                "SELECT * FROM global_exceptions WHERE sha256 = ? AND module = ? AND name = ?",
+                (sha256, module, name),
+            ).fetchall():
+                if exception_state(dict(row), now) == "active":
+                    raise ValueError(
+                        f"an active exception ({row['exception_id']}) already covers"
+                        f" {module}.{name} in {sha256}"
+                    )
+            exception_id = self.conn.execute(
+                "SELECT coalesce(max(exception_id), 0) + 1 FROM global_exceptions"
+            ).fetchone()[0]
+            record = {
+                "exception_id": exception_id,
+                "module": module,
+                "name": name,
+                "global": f"{module}.{name}",
+                "sha256": sha256,
+                "reason": reason,
+                "accepted_by": accepted_by,
+                "recorded_at": recorded_at,
+                "expires_on": expires_on,
+            }
+            evidence_id = self._insert_evidence(
+                source=EXCEPTION_SOURCE,
+                url=f"{EXCEPTION_SOURCE}:{exception_id}",
+                retrieved_at=now,
+                matched_identifier=f"sha256:{sha256}",
+                body=_canonical_json(record),
+            )
+            self.conn.execute(
+                "INSERT INTO global_exceptions (exception_id, module, name, sha256, reason,"
+                " accepted_by, recorded_at, expires_on, evidence_id)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    exception_id,
+                    module,
+                    name,
+                    sha256,
+                    reason,
+                    accepted_by,
+                    recorded_at,
+                    expires_on,
+                    evidence_id,
+                ),
+            )
+        made = self.get_exception(exception_id)
+        assert made is not None
+        return made
+
+    def get_exception(self, exception_id: int) -> dict[str, Any] | None:
+        if "global_exceptions" not in self.tables():
+            return None
+        row = self.conn.execute(
+            "SELECT * FROM global_exceptions WHERE exception_id = ?", (exception_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        record = dict(row)
+        record["state"] = exception_state(record, self.now())
+        return record
+
+    def revoke_exception(self, exception_id: int, *, by: str, reason: str) -> dict[str, Any]:
+        """Revoke an active exception, recording who, when and why, with the revocation as a
+        second evidence row of the exception (source ``exception``, URL ``exception:<id>``)."""
+        if not by.strip():
+            raise ValueError("a revocation needs the name of who revoked it")
+        if not reason.strip():
+            raise ValueError("a revocation needs a reason")
+        now = self.now()
+        with self._atomic():
+            row = self.conn.execute(
+                "SELECT * FROM global_exceptions WHERE exception_id = ?", (exception_id,)
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"no exception {exception_id}")
+            state = exception_state(dict(row), now)
+            if state != "active":
+                raise ValueError(f"exception {exception_id} is not active (it is {state})")
+            record = {
+                "exception_id": exception_id,
+                "global": f"{row['module']}.{row['name']}",
+                "sha256": row["sha256"],
+                "revoked_at": utc_text(now),
+                "revoked_by": by.strip(),
+                "revoke_reason": reason.strip(),
+            }
+            self._insert_evidence(
+                source=EXCEPTION_SOURCE,
+                url=f"{EXCEPTION_SOURCE}:{exception_id}",
+                retrieved_at=now,
+                matched_identifier=f"sha256:{row['sha256']}",
+                body=_canonical_json(record),
+            )
+            self.conn.execute(
+                "UPDATE global_exceptions SET revoked_at = ?, revoked_by = ?, revoke_reason = ?"
+                " WHERE exception_id = ?",
+                (record["revoked_at"], record["revoked_by"], record["revoke_reason"], exception_id),
+            )
+        revoked = self.get_exception(exception_id)
+        assert revoked is not None
+        return revoked
+
+    def exception_evidence(self, exception_id: int) -> list[int]:
+        """The exception's evidence rows, oldest first: its record, then any revocation."""
+        rows = self.conn.execute(
+            "SELECT evidence_id FROM evidence WHERE source = ? AND url = ? ORDER BY evidence_id",
+            (EXCEPTION_SOURCE, f"{EXCEPTION_SOURCE}:{exception_id}"),
+        )
+        return [int(row["evidence_id"]) for row in rows]
+
+    def set_alert_exception(
+        self, alert_id: int, *, excepted_at: str | None, cause: Mapping[str, Any]
+    ) -> None:
+        """Mark an open alert excepted (``excepted_at`` set) or not, with its cause (S4, S8)."""
+        with self.conn:
+            cursor = self.conn.execute(
+                "UPDATE alerts SET excepted_at = ?, cause = ?"
+                " WHERE alert_id = ? AND state = 'open'",
+                (excepted_at, json.dumps(cause), alert_id),
+            )
+        if cursor.rowcount != 1:
+            raise ValueError(f"alert {alert_id} is not open")
+
+    def pinned_to(self, sha256: str) -> list[dict[str, Any]]:
+        """The model versions with a pinned weight entry for these bytes, and where it is."""
+        rows = self.conn.execute(
+            "SELECT model_id, version, location, hub_repo, hub_file FROM inventory_entries"
+            " WHERE kind = 'weight_file' AND pinned = 1 AND identifier = ?"
+            " ORDER BY model_id, version, entry_id",
+            (f"sha256:{sha256}",),
+        )
+        return [
+            {
+                "model_id": row["model_id"],
+                "version": row["version"],
+                "location": row["location"] or f"hf:{row['hub_repo']}/{row['hub_file']}",
+            }
+            for row in rows
+        ]
+
+    def add_overview_rows(self, run_id: int, rows: Iterable[Mapping[str, Any]]) -> None:
+        """Store a run's overview; a run-wide row (``model_id`` ``None``) is stored as ``''``."""
+        columns = (
+            "version", "source", "state", "reason", "entries", "incomplete", "alerts_open",
+            "alerts_excepted", "watch_events", "dismissals_held",
+        )  # fmt: skip
+        with self.conn:
+            self.conn.executemany(
+                "INSERT OR REPLACE INTO check_run_overview (run_id, model_id,"
+                f" {', '.join(columns)}) VALUES (?, ?, {', '.join('?' for _ in columns)})",
+                [
+                    (run_id, row["model_id"] or "", *(row.get(key) for key in columns))
+                    for row in rows
+                ],
+            )
+
+    def check_run_target_versions(self, run_id: int) -> list[tuple[str, int]]:
+        """The models and versions a run checked, in model order."""
+        if "check_run_targets" not in self.tables():
+            return []  # a database older than feature 003, opened read-only
+        rows = self.conn.execute(
+            "SELECT model_id, version FROM check_run_targets WHERE run_id = ? ORDER BY model_id",
+            (run_id,),
+        )
+        return [(row["model_id"], int(row["version"])) for row in rows]
+
+    def check_run_source_order(self, run_id: int) -> list[str]:
+        """The sources a run asked, in the order asked, then ``policy``."""
+        run = self.get_check_run(run_id)
+        sources = list((run or {}).get("sources") or {})
+        return [*sources, "policy"]
+
+    def check_run_overview(self, run_id: int) -> list[dict[str, Any]]:
+        """The overview rows of a run; the run-wide rows read ``model_id`` as ``None``."""
+        if "check_run_overview" not in self.tables():
+            return []  # a database older than feature 004, opened read-only
+        rows = self.conn.execute(
+            "SELECT * FROM check_run_overview WHERE run_id = ? ORDER BY model_id, source",
+            (run_id,),
+        ).fetchall()
+        return [{**dict(row), "model_id": row["model_id"] or None} for row in rows]
 
     def latest_version(self, model_id: str) -> int | None:
         row = self.conn.execute(
@@ -1039,25 +1570,51 @@ class Store:
         body's hash, which is right for every source with nothing to redact. A JSON body also gets
         its ``canonical_sha256`` (feature 006).
         """
-        digest = self.put_body(body)
         with self.conn:
-            cursor = self.conn.execute(
-                "INSERT INTO evidence (source, url, retrieved_at, matched_identifier, body_sha256,"
-                " detail, run_id, original_sha256, redacted_fields, canonical_sha256)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    source,
-                    url,
-                    utc_text(retrieved_at),
-                    matched_identifier,
-                    digest,
-                    None if detail is None else json.dumps(detail),
-                    run_id,
-                    original_sha256 or digest,
-                    json.dumps(sorted(redacted_fields)),
-                    canonical_sha256(body),
-                ),
+            return self._insert_evidence(
+                source=source,
+                url=url,
+                retrieved_at=retrieved_at,
+                matched_identifier=matched_identifier,
+                body=body,
+                detail=detail,
+                run_id=run_id,
+                original_sha256=original_sha256,
+                redacted_fields=redacted_fields,
             )
+
+    def _insert_evidence(
+        self,
+        *,
+        source: str,
+        url: str,
+        retrieved_at: datetime,
+        matched_identifier: str,
+        body: bytes,
+        detail: Mapping[str, Any] | None = None,
+        run_id: int | None = None,
+        original_sha256: str | None = None,
+        redacted_fields: Iterable[str] = (),
+    ) -> int:
+        """The evidence insert of ``add_evidence``, inside the caller's transaction."""
+        digest = self.put_body(body)
+        cursor = self.conn.execute(
+            "INSERT INTO evidence (source, url, retrieved_at, matched_identifier, body_sha256,"
+            " detail, run_id, original_sha256, redacted_fields, canonical_sha256)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                source,
+                url,
+                utc_text(retrieved_at),
+                matched_identifier,
+                digest,
+                None if detail is None else json.dumps(detail),
+                run_id,
+                original_sha256 or digest,
+                json.dumps(sorted(redacted_fields)),
+                canonical_sha256(body),
+            ),
+        )
         return int(cursor.lastrowid)
 
     def add_response_evidence(
@@ -1166,7 +1723,7 @@ class Store:
         row = self.conn.execute("SELECT * FROM alerts WHERE alert_id = ?", (alert_id,)).fetchone()
         if row is None:
             return None
-        record = dict(row)
+        record = {"excepted_at": None, **dict(row)}  # null before feature 004 (read-only)
         record["cause"] = json.loads(record["cause"])
         record["evidence_ids"] = [
             link["evidence_id"]
@@ -1272,6 +1829,14 @@ class Store:
             row["model_id"]
             for row in self.conn.execute("SELECT model_id FROM models ORDER BY model_id")
         ]
+
+    def latest_alert(self, model_id: str, cause_key: str) -> dict[str, Any] | None:
+        """The most recent alert for the model and cause, in any state (FR-020, research S13)."""
+        row = self.conn.execute(
+            "SELECT max(alert_id) AS alert_id FROM alerts WHERE model_id = ? AND cause_key = ?",
+            (model_id, cause_key),
+        ).fetchone()
+        return None if row["alert_id"] is None else self.get_alert(row["alert_id"])
 
     def find_open_alert(self, model_id: str, cause_key: str) -> dict[str, Any] | None:
         row = self.conn.execute(

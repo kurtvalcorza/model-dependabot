@@ -87,16 +87,31 @@ def test_no_command_writes_to_a_model_or_its_repository(
     assert cli("register", str(manifest))[0] == EXIT_OK
     assert _state(watched) == before
 
-    code, _ = cli("check", MODEL)
+    code, checked = cli("check", MODEL)
     assert code == EXIT_OK
+    assert _state(watched) == before
+    assert cli("run", "show", str(checked["run_id"]))[0] == EXIT_OK  # feature 004, T039
     assert _state(watched) == before
 
     assert cli("policy", MODEL, "--format", "strict", "--by", "Owner")[0] == EXIT_OK
+    assert cli("policy", MODEL, "--globals", "strict", "--by", "Owner")[0] == EXIT_OK
     _, listed = cli("alerts", MODEL)
     assert listed["alerts"], "the affected pillow raises an alert to dismiss"
     first = listed["alerts"][0]["alert_id"]
     reason = ["--reason", "risk_accepted", "--by", "Owner"]
     assert cli("alert", "dismiss", str(first), *reason)[0] == EXIT_OK
+    # Feature 004 (T021, FR-005): the exception commands change no version, entry or manifest.
+    weight = next(path for path in watched if path.suffix in (".pkl", ".pt", ".bin"))
+    digest = hashlib.sha256(weight.read_bytes()).hexdigest()
+    global_ = ("--global", "__builtin__.getattr", "--sha256", digest)
+    code, made = cli("exception", "record", *global_, "--reason", "reviewed", "--by", "Owner")
+    assert code == EXIT_OK
+    assert cli("exception", "list", "--all")[0] == EXIT_OK
+    revoke = ("--reason", "replaced", "--by", "Owner")
+    assert cli("exception", "revoke", str(made["exception_id"]), *revoke)[0] == EXIT_OK
+    assert _state(watched) == before
+    _, shown = cli("inventory", "show", MODEL)
+    assert shown["version"] == 1
     out = tmp_path / "export" / "bom.json"
     out.parent.mkdir()
     assert cli("inventory", "export", MODEL, "-o", str(out))[0] == EXIT_OK

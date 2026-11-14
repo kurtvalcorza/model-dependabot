@@ -75,6 +75,80 @@ def dangerous() -> bytes:
     )
 
 
+def mixed() -> bytes:
+    """Imports an innocuous, a suspicious and a dangerous global: built at test time only."""
+    return (
+        PROTO_2
+        + _global("collections", "OrderedDict")
+        + EMPTY_TUPLE
+        + REDUCE
+        + POP
+        + _global(*SUSPICIOUS_GLOBAL)
+        + EMPTY_TUPLE
+        + REDUCE
+        + POP
+        + _global(*DANGEROUS_GLOBAL)
+        + MARK
+        + _string("echo model-dependabot fixture")
+        + TUPLE
+        + REDUCE
+        + STOP
+    )
+
+
+def protocol2_getattr() -> bytes:
+    """A protocol 2 pickle as older checkpoints write it: ``__builtin__.getattr`` (dangerous),
+    ``__builtin__.set``, ``torch.Size`` and a custom layer class. Built at test time only."""
+    return (
+        PROTO_2
+        + _global("__builtin__", "set")
+        + EMPTY_TUPLE
+        + REDUCE
+        + POP
+        + _global("torch", "Size")
+        + EMPTY_TUPLE
+        + REDUCE
+        + POP
+        + _global(*SUSPICIOUS_GLOBAL)
+        + EMPTY_TUPLE
+        + REDUCE
+        + POP
+        + _global("__builtin__", "getattr")
+        + POP
+        + STOP
+    )
+
+
+def two_dangerous() -> bytes:
+    """Imports two dangerous globals, ``os.system`` and ``builtins.eval``: built at test time."""
+    return PROTO_2 + _global(*DANGEROUS_GLOBAL) + POP + _global("builtins", "eval") + POP + STOP
+
+
+PROTO_4 = b"\x80\x04"
+BININT1 = b"K"
+SHORT_BINUNICODE = b"\x8c"
+STACK_GLOBAL = b"\x93"
+
+
+def unresolved() -> bytes:
+    """A ``STACK_GLOBAL`` whose module operand is an integer, not a string constant, so the
+    scanner cannot resolve it and reports the module as ``unknown``. Built at test time only."""
+    return PROTO_4 + BININT1 + b"\x01" + SHORT_BINUNICODE + b"\x04eval" + STACK_GLOBAL + POP + STOP
+
+
+def posix_path() -> bytes:
+    """Builds ``pathlib.PosixPath`` from a string: a global on neither scanner list."""
+    return (
+        PROTO_2
+        + _global("pathlib", "PosixPath")
+        + MARK
+        + _string("weights")
+        + TUPLE
+        + REDUCE
+        + STOP
+    )
+
+
 def pytorch_zip(data_pkl: bytes, folder: str = "archive") -> bytes:
     """A PyTorch zip archive (``folder/data.pkl`` and ``folder/version``), stored, fixed dates."""
     buffer = io.BytesIO()
@@ -99,6 +173,7 @@ COMMITTED = {
     "innocuous.pkl": innocuous,
     "suspicious.pkl": suspicious,
     "joblib-style.joblib": joblib_style,
+    "posix-path.pkl": posix_path,
 }
 
 

@@ -1,0 +1,992 @@
+{
+ "recorded_from": "b642c4c",
+ "scenarios": {
+  "check_weights.dangerous_benign_and_onnx": {
+   "md": {
+    "alerts": [
+     {
+      "cause": "{\"identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\", \"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"dangerous.pkl\", \"format\": \"pickle\", \"dangerous\": [\"os.system\"], \"suspicious\": [], \"complete\": true, \"position\": 48}",
+      "cause_key": "weight_file_scan:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546",
+      "closed_by_version": null,
+      "current_version": 1,
+      "dismissal_reason": null,
+      "dismissed_by": null,
+      "evidence": [
+       {
+        "body_sha256": "eca35da615fec8722c60d98d280f859a72dd2d8f16481c0269f956de4ccb6793",
+        "canonical_sha256": "eca35da615fec8722c60d98d280f859a72dd2d8f16481c0269f956de4ccb6793",
+        "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"dangerous.pkl\", \"format\": \"pickle\", \"dangerous\": [\"os.system\"], \"suspicious\": [], \"complete\": true, \"position\": 48}",
+        "matched_identifier": "sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546",
+        "original_sha256": "eca35da615fec8722c60d98d280f859a72dd2d8f16481c0269f956de4ccb6793",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "<work>/model/dangerous.pkl"
+       }
+      ],
+      "kind": "weight_file_scan",
+      "model_id": "weights-model",
+      "note": null,
+      "opened_in_version": 1,
+      "severity": "HIGH",
+      "severity_origin": "policy",
+      "state": "open"
+     }
+    ],
+    "watch_events": [
+     {
+      "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"dangerous.pkl\"}",
+      "entry_identifier": "sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546",
+      "evidence": [
+       {
+        "body_sha256": "c7997030a4d396f4d83aba4cceaf3326b5279ad052e046fcd1fa214a124150ad",
+        "canonical_sha256": "c7997030a4d396f4d83aba4cceaf3326b5279ad052e046fcd1fa214a124150ad",
+        "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"dangerous.pkl\"}",
+        "matched_identifier": "sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546",
+        "original_sha256": "c7997030a4d396f4d83aba4cceaf3326b5279ad052e046fcd1fa214a124150ad",
+        "redacted_fields": "[]",
+        "source": "format-rule",
+        "url": ""
+       }
+      ],
+      "kind": "pickle_format",
+      "model_id": "weights-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"innocuous.pkl\"}",
+      "entry_identifier": "sha256:1eada679b4330b6c01fdfa6ce305f9f3d240354baa94d38d75111bcf226cc2f1",
+      "evidence": [
+       {
+        "body_sha256": "1c95b81d26a5c816ab23ea32f849acb5f9542a62a22b27c21498818d7780770d",
+        "canonical_sha256": "1c95b81d26a5c816ab23ea32f849acb5f9542a62a22b27c21498818d7780770d",
+        "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"innocuous.pkl\"}",
+        "matched_identifier": "sha256:1eada679b4330b6c01fdfa6ce305f9f3d240354baa94d38d75111bcf226cc2f1",
+        "original_sha256": "1c95b81d26a5c816ab23ea32f849acb5f9542a62a22b27c21498818d7780770d",
+        "redacted_fields": "[]",
+        "source": "format-rule",
+        "url": ""
+       }
+      ],
+      "kind": "pickle_format",
+      "model_id": "weights-model",
+      "version": 1
+     }
+    ]
+   }
+  },
+  "check_weights.hub_fails_at_registration": {
+   "md": {
+    "alerts": [
+     {
+      "cause": "{\"identifier\": \"sha256:f9343d7d7ec5c3d8bcced056c438fc9f1d3819e9ca3d42418a40857050e10e20\", \"scanner\": \"hf-scan\", \"verdict\": \"unsafe\", \"level\": \"unsafe\", \"scanners\": {\"avScan\": \"safe\", \"jFrogScan\": \"unscanned\", \"pickleImportScan\": \"safe\", \"protectAiScan\": \"safe\", \"virusTotalScan\": \"safe\"}, \"hub_repo\": \"mcpotato/42-eicar-street\", \"hub_file\": \"pytorch_model.bin\", \"hub_commit\": \"8fb61c4d511e9aaff0ea55396a124aa292830efc\", \"location\": \"https://huggingface.co/mcpotato/42-eicar-street/resolve/8fb61c4d511e9aaff0ea55396a124aa292830efc/pytorch_model.bin\"}",
+      "cause_key": "hub_scan:f9343d7d7ec5c3d8bcced056c438fc9f1d3819e9ca3d42418a40857050e10e20",
+      "closed_by_version": null,
+      "current_version": 1,
+      "dismissal_reason": null,
+      "dismissed_by": null,
+      "evidence": [
+       {
+        "body_sha256": "cfb42188a269d1a917e5db413beb12361acd178351304e2b222c297aa52d6313",
+        "canonical_sha256": "abe47b9bda761765db3f7418c9216149221d6ae2b5e8cd09e1f9eceaef2ecc23",
+        "detail": "{\"scanner\": \"hf-scan\", \"verdict\": \"unsafe\", \"level\": \"unsafe\", \"scanners\": {\"avScan\": \"safe\", \"jFrogScan\": \"unscanned\", \"pickleImportScan\": \"safe\", \"protectAiScan\": \"safe\", \"virusTotalScan\": \"safe\"}, \"hub_repo\": \"mcpotato/42-eicar-street\", \"hub_file\": \"pytorch_model.bin\", \"hub_commit\": \"8fb61c4d511e9aaff0ea55396a124aa292830efc\", \"location\": \"https://huggingface.co/mcpotato/42-eicar-street/resolve/8fb61c4d511e9aaff0ea55396a124aa292830efc/pytorch_model.bin\"}",
+        "matched_identifier": "sha256:f9343d7d7ec5c3d8bcced056c438fc9f1d3819e9ca3d42418a40857050e10e20",
+        "original_sha256": "cfb42188a269d1a917e5db413beb12361acd178351304e2b222c297aa52d6313",
+        "redacted_fields": "[]",
+        "source": "huggingface.co",
+        "url": "https://huggingface.co/api/models/mcpotato/42-eicar-street?securityStatus=true"
+       },
+       {
+        "body_sha256": "985cfb6d8ea248465c0ac7f424d43ac6d359286973b00eaf7d92e09a78861c4c",
+        "canonical_sha256": "40d1ef17f168da8a6fc9cbe1390fb62e4d4da6275f38ca84424851ac7555e77e",
+        "detail": "{\"scanner\": \"hf-scan\", \"verdict\": \"unsafe\", \"level\": \"unsafe\", \"scanners\": {\"avScan\": \"safe\", \"jFrogScan\": \"unscanned\", \"pickleImportScan\": \"safe\", \"protectAiScan\": \"safe\", \"virusTotalScan\": \"safe\"}, \"hub_repo\": \"mcpotato/42-eicar-street\", \"hub_file\": \"pytorch_model.bin\", \"hub_commit\": \"8fb61c4d511e9aaff0ea55396a124aa292830efc\", \"location\": \"https://huggingface.co/mcpotato/42-eicar-street/resolve/8fb61c4d511e9aaff0ea55396a124aa292830efc/pytorch_model.bin\"}",
+        "matched_identifier": "sha256:f9343d7d7ec5c3d8bcced056c438fc9f1d3819e9ca3d42418a40857050e10e20",
+        "original_sha256": "985cfb6d8ea248465c0ac7f424d43ac6d359286973b00eaf7d92e09a78861c4c",
+        "redacted_fields": "[]",
+        "source": "huggingface.co",
+        "url": "https://huggingface.co/api/models/mcpotato/42-eicar-street/tree/8fb61c4d511e9aaff0ea55396a124aa292830efc?expand=true"
+       }
+      ],
+      "kind": "hub_scan",
+      "model_id": "hub-model",
+      "note": null,
+      "opened_in_version": 1,
+      "severity": "HIGH",
+      "severity_origin": "policy",
+      "state": "open"
+     }
+    ],
+    "watch_events": [
+     {
+      "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"https://huggingface.co/mcpotato/42-eicar-street/resolve/8fb61c4d511e9aaff0ea55396a124aa292830efc/pytorch_model.bin\"}",
+      "entry_identifier": "sha256:f9343d7d7ec5c3d8bcced056c438fc9f1d3819e9ca3d42418a40857050e10e20",
+      "evidence": [
+       {
+        "body_sha256": "c793c7e99e485a5f707faaf94f5fa3f2c9ab12981af2437257375f62e746f492",
+        "canonical_sha256": "c793c7e99e485a5f707faaf94f5fa3f2c9ab12981af2437257375f62e746f492",
+        "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"https://huggingface.co/mcpotato/42-eicar-street/resolve/8fb61c4d511e9aaff0ea55396a124aa292830efc/pytorch_model.bin\"}",
+        "matched_identifier": "sha256:f9343d7d7ec5c3d8bcced056c438fc9f1d3819e9ca3d42418a40857050e10e20",
+        "original_sha256": "c793c7e99e485a5f707faaf94f5fa3f2c9ab12981af2437257375f62e746f492",
+        "redacted_fields": "[]",
+        "source": "format-rule",
+        "url": ""
+       }
+      ],
+      "kind": "pickle_format",
+      "model_id": "hub-model",
+      "version": 1
+     }
+    ]
+   }
+  },
+  "check_weights.hub_verdicts": {
+   "md": {
+    "alerts": [
+     {
+      "cause": "{\"identifier\": \"sha256:f9343d7d7ec5c3d8bcced056c438fc9f1d3819e9ca3d42418a40857050e10e20\", \"scanner\": \"hf-scan\", \"verdict\": \"unsafe\", \"level\": \"unsafe\", \"scanners\": {\"avScan\": \"safe\", \"jFrogScan\": \"unscanned\", \"pickleImportScan\": \"safe\", \"protectAiScan\": \"safe\", \"virusTotalScan\": \"safe\"}, \"hub_repo\": \"mcpotato/42-eicar-street\", \"hub_file\": \"pytorch_model.bin\", \"hub_commit\": \"8fb61c4d511e9aaff0ea55396a124aa292830efc\", \"location\": \"https://huggingface.co/mcpotato/42-eicar-street/resolve/8fb61c4d511e9aaff0ea55396a124aa292830efc/pytorch_model.bin\"}",
+      "cause_key": "hub_scan:f9343d7d7ec5c3d8bcced056c438fc9f1d3819e9ca3d42418a40857050e10e20",
+      "closed_by_version": null,
+      "current_version": 1,
+      "dismissal_reason": null,
+      "dismissed_by": null,
+      "evidence": [
+       {
+        "body_sha256": "cfb42188a269d1a917e5db413beb12361acd178351304e2b222c297aa52d6313",
+        "canonical_sha256": "abe47b9bda761765db3f7418c9216149221d6ae2b5e8cd09e1f9eceaef2ecc23",
+        "detail": "{\"scanner\": \"hf-scan\", \"verdict\": \"unsafe\", \"level\": \"unsafe\", \"scanners\": {\"avScan\": \"safe\", \"jFrogScan\": \"unscanned\", \"pickleImportScan\": \"safe\", \"protectAiScan\": \"safe\", \"virusTotalScan\": \"safe\"}, \"hub_repo\": \"mcpotato/42-eicar-street\", \"hub_file\": \"pytorch_model.bin\", \"hub_commit\": \"8fb61c4d511e9aaff0ea55396a124aa292830efc\", \"location\": \"https://huggingface.co/mcpotato/42-eicar-street/resolve/8fb61c4d511e9aaff0ea55396a124aa292830efc/pytorch_model.bin\"}",
+        "matched_identifier": "sha256:f9343d7d7ec5c3d8bcced056c438fc9f1d3819e9ca3d42418a40857050e10e20",
+        "original_sha256": "cfb42188a269d1a917e5db413beb12361acd178351304e2b222c297aa52d6313",
+        "redacted_fields": "[]",
+        "source": "huggingface.co",
+        "url": "https://huggingface.co/api/models/mcpotato/42-eicar-street?securityStatus=true"
+       },
+       {
+        "body_sha256": "985cfb6d8ea248465c0ac7f424d43ac6d359286973b00eaf7d92e09a78861c4c",
+        "canonical_sha256": "40d1ef17f168da8a6fc9cbe1390fb62e4d4da6275f38ca84424851ac7555e77e",
+        "detail": "{\"scanner\": \"hf-scan\", \"verdict\": \"unsafe\", \"level\": \"unsafe\", \"scanners\": {\"avScan\": \"safe\", \"jFrogScan\": \"unscanned\", \"pickleImportScan\": \"safe\", \"protectAiScan\": \"safe\", \"virusTotalScan\": \"safe\"}, \"hub_repo\": \"mcpotato/42-eicar-street\", \"hub_file\": \"pytorch_model.bin\", \"hub_commit\": \"8fb61c4d511e9aaff0ea55396a124aa292830efc\", \"location\": \"https://huggingface.co/mcpotato/42-eicar-street/resolve/8fb61c4d511e9aaff0ea55396a124aa292830efc/pytorch_model.bin\"}",
+        "matched_identifier": "sha256:f9343d7d7ec5c3d8bcced056c438fc9f1d3819e9ca3d42418a40857050e10e20",
+        "original_sha256": "985cfb6d8ea248465c0ac7f424d43ac6d359286973b00eaf7d92e09a78861c4c",
+        "redacted_fields": "[]",
+        "source": "huggingface.co",
+        "url": "https://huggingface.co/api/models/mcpotato/42-eicar-street/tree/8fb61c4d511e9aaff0ea55396a124aa292830efc?expand=true"
+       }
+      ],
+      "kind": "hub_scan",
+      "model_id": "hub-model",
+      "note": null,
+      "opened_in_version": 1,
+      "severity": "HIGH",
+      "severity_origin": "policy",
+      "state": "open"
+     }
+    ],
+    "watch_events": [
+     {
+      "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"https://huggingface.co/mcpotato/42-eicar-street/resolve/8fb61c4d511e9aaff0ea55396a124aa292830efc/pytorch_model.bin\"}",
+      "entry_identifier": "sha256:f9343d7d7ec5c3d8bcced056c438fc9f1d3819e9ca3d42418a40857050e10e20",
+      "evidence": [
+       {
+        "body_sha256": "c793c7e99e485a5f707faaf94f5fa3f2c9ab12981af2437257375f62e746f492",
+        "canonical_sha256": "c793c7e99e485a5f707faaf94f5fa3f2c9ab12981af2437257375f62e746f492",
+        "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"https://huggingface.co/mcpotato/42-eicar-street/resolve/8fb61c4d511e9aaff0ea55396a124aa292830efc/pytorch_model.bin\"}",
+        "matched_identifier": "sha256:f9343d7d7ec5c3d8bcced056c438fc9f1d3819e9ca3d42418a40857050e10e20",
+        "original_sha256": "c793c7e99e485a5f707faaf94f5fa3f2c9ab12981af2437257375f62e746f492",
+        "redacted_fields": "[]",
+        "source": "format-rule",
+        "url": ""
+       }
+      ],
+      "kind": "pickle_format",
+      "model_id": "hub-model",
+      "version": 1
+     }
+    ]
+   }
+  },
+  "check_weights.joblib_incomplete": {
+   "md": {
+    "alerts": [],
+    "watch_events": [
+     {
+      "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"model.joblib\", \"format\": \"joblib\", \"suspicious\": [\"joblib.numpy_pickle.NumpyArrayWrapper\"]}",
+      "entry_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+      "evidence": [
+       {
+        "body_sha256": "e5dac71dd515de4237f5da14e6253383bc3111ec8a70c910e4e99478a21c05b2",
+        "canonical_sha256": "e5dac71dd515de4237f5da14e6253383bc3111ec8a70c910e4e99478a21c05b2",
+        "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"model.joblib\", \"format\": \"joblib\", \"suspicious\": [\"joblib.numpy_pickle.NumpyArrayWrapper\"]}",
+        "matched_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+        "original_sha256": "e5dac71dd515de4237f5da14e6253383bc3111ec8a70c910e4e99478a21c05b2",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "<work>/model/model.joblib"
+       }
+      ],
+      "kind": "scan_suspicious",
+      "model_id": "joblib-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"model.joblib\", \"format\": \"joblib\", \"position\": 43, \"size\": 61, \"reason\": \"scanner stopped before the end of the file\"}",
+      "entry_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+      "evidence": [
+       {
+        "body_sha256": "e5dac71dd515de4237f5da14e6253383bc3111ec8a70c910e4e99478a21c05b2",
+        "canonical_sha256": "e5dac71dd515de4237f5da14e6253383bc3111ec8a70c910e4e99478a21c05b2",
+        "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"model.joblib\", \"format\": \"joblib\", \"position\": 43, \"size\": 61, \"reason\": \"scanner stopped before the end of the file\"}",
+        "matched_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+        "original_sha256": "e5dac71dd515de4237f5da14e6253383bc3111ec8a70c910e4e99478a21c05b2",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "<work>/model/model.joblib"
+       }
+      ],
+      "kind": "scan_incomplete",
+      "model_id": "joblib-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"format\": \"joblib\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"model.joblib\"}",
+      "entry_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+      "evidence": [
+       {
+        "body_sha256": "f68df5513785747a96433430c252de1b155a8df25d910a74d46bd92c25d68824",
+        "canonical_sha256": "f68df5513785747a96433430c252de1b155a8df25d910a74d46bd92c25d68824",
+        "detail": "{\"format\": \"joblib\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"model.joblib\"}",
+        "matched_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+        "original_sha256": "f68df5513785747a96433430c252de1b155a8df25d910a74d46bd92c25d68824",
+        "redacted_fields": "[]",
+        "source": "format-rule",
+        "url": ""
+       }
+      ],
+      "kind": "pickle_format",
+      "model_id": "joblib-model",
+      "version": 1
+     }
+    ]
+   }
+  },
+  "posix_path.picklescan": {
+   "md": {
+    "alerts": [],
+    "watch_events": [
+     {
+      "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"posix-path.pkl\", \"format\": \"pickle\", \"suspicious\": [\"pathlib.PosixPath\"]}",
+      "entry_identifier": "sha256:9cd1878017cdaf8768955aec343f78ea2c3b47c31ab46e9c89df12009ea4815d",
+      "evidence": [
+       {
+        "body_sha256": "8919922a23c567c58bb5fc4bc2a37c15683161b0744292257dd37722d8c473ab",
+        "canonical_sha256": "8919922a23c567c58bb5fc4bc2a37c15683161b0744292257dd37722d8c473ab",
+        "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"posix-path.pkl\", \"format\": \"pickle\", \"suspicious\": [\"pathlib.PosixPath\"]}",
+        "matched_identifier": "sha256:9cd1878017cdaf8768955aec343f78ea2c3b47c31ab46e9c89df12009ea4815d",
+        "original_sha256": "8919922a23c567c58bb5fc4bc2a37c15683161b0744292257dd37722d8c473ab",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "<work>/model/posix-path.pkl"
+       }
+      ],
+      "kind": "scan_suspicious",
+      "model_id": "posix-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"posix-path.pkl\"}",
+      "entry_identifier": "sha256:9cd1878017cdaf8768955aec343f78ea2c3b47c31ab46e9c89df12009ea4815d",
+      "evidence": [
+       {
+        "body_sha256": "7fcbbdc17dd8ec32a963a59ffca32f68b1ce6a385bd1e2156dc68829143b4e43",
+        "canonical_sha256": "7fcbbdc17dd8ec32a963a59ffca32f68b1ce6a385bd1e2156dc68829143b4e43",
+        "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"posix-path.pkl\"}",
+        "matched_identifier": "sha256:9cd1878017cdaf8768955aec343f78ea2c3b47c31ab46e9c89df12009ea4815d",
+        "original_sha256": "7fcbbdc17dd8ec32a963a59ffca32f68b1ce6a385bd1e2156dc68829143b4e43",
+        "redacted_fields": "[]",
+        "source": "format-rule",
+        "url": ""
+       }
+      ],
+      "kind": "pickle_format",
+      "model_id": "posix-model",
+      "version": 1
+     }
+    ]
+   }
+  },
+  "register_from_record.check_osv_only": {
+   "md": {
+    "alerts": [
+     {
+      "cause": "{\"identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\", \"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/dangerous.pkl\", \"format\": \"pickle\", \"dangerous\": [\"os.system\"], \"suspicious\": [], \"complete\": true, \"position\": 48}",
+      "cause_key": "weight_file_scan:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546",
+      "closed_by_version": null,
+      "current_version": 1,
+      "dismissal_reason": null,
+      "dismissed_by": null,
+      "evidence": [
+       {
+        "body_sha256": "50666024f8f908874582f14ad36ed57dee5d8f46c5e2f5fbfbeb8a1ef2598819",
+        "canonical_sha256": "50666024f8f908874582f14ad36ed57dee5d8f46c5e2f5fbfbeb8a1ef2598819",
+        "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/dangerous.pkl\", \"format\": \"pickle\", \"dangerous\": [\"os.system\"], \"suspicious\": [], \"complete\": true, \"position\": 48}",
+        "matched_identifier": "sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546",
+        "original_sha256": "50666024f8f908874582f14ad36ed57dee5d8f46c5e2f5fbfbeb8a1ef2598819",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "registration-record:sha256:dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f"
+       }
+      ],
+      "kind": "weight_file_scan",
+      "model_id": "record-model",
+      "note": null,
+      "opened_in_version": 1,
+      "severity": "HIGH",
+      "severity_origin": "policy",
+      "state": "open"
+     }
+    ],
+    "watch_events": [
+     {
+      "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/suspicious.pkl\", \"format\": \"pickle\", \"suspicious\": [\"model_dependabot_fixture.layers.CustomLayer\"]}",
+      "entry_identifier": "sha256:9962334dbcceb41eda11f800e7af80a84742bc10688224357cab2e4a8a268f8c",
+      "evidence": [
+       {
+        "body_sha256": "5c94db8e023a481ad16432ff3f370d54f6da1170d81fe58701c65ee5c9155bd9",
+        "canonical_sha256": "5c94db8e023a481ad16432ff3f370d54f6da1170d81fe58701c65ee5c9155bd9",
+        "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/suspicious.pkl\", \"format\": \"pickle\", \"suspicious\": [\"model_dependabot_fixture.layers.CustomLayer\"]}",
+        "matched_identifier": "sha256:9962334dbcceb41eda11f800e7af80a84742bc10688224357cab2e4a8a268f8c",
+        "original_sha256": "5c94db8e023a481ad16432ff3f370d54f6da1170d81fe58701c65ee5c9155bd9",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "registration-record:sha256:dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f"
+       }
+      ],
+      "kind": "scan_suspicious",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/model.joblib\", \"format\": \"joblib\", \"suspicious\": [\"joblib.numpy_pickle.NumpyArrayWrapper\"]}",
+      "entry_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+      "evidence": [
+       {
+        "body_sha256": "ba447311d55ac5c1f5b932c0f0cbc38b3055ddfeb67fe5c454b397d37e52e40c",
+        "canonical_sha256": "ba447311d55ac5c1f5b932c0f0cbc38b3055ddfeb67fe5c454b397d37e52e40c",
+        "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/model.joblib\", \"format\": \"joblib\", \"suspicious\": [\"joblib.numpy_pickle.NumpyArrayWrapper\"]}",
+        "matched_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+        "original_sha256": "ba447311d55ac5c1f5b932c0f0cbc38b3055ddfeb67fe5c454b397d37e52e40c",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "registration-record:sha256:dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f"
+       }
+      ],
+      "kind": "scan_suspicious",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/model.joblib\", \"format\": \"joblib\", \"position\": 43, \"size\": 61, \"reason\": \"scanner stopped before the end of the file\"}",
+      "entry_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+      "evidence": [
+       {
+        "body_sha256": "ba447311d55ac5c1f5b932c0f0cbc38b3055ddfeb67fe5c454b397d37e52e40c",
+        "canonical_sha256": "ba447311d55ac5c1f5b932c0f0cbc38b3055ddfeb67fe5c454b397d37e52e40c",
+        "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/model.joblib\", \"format\": \"joblib\", \"position\": 43, \"size\": 61, \"reason\": \"scanner stopped before the end of the file\"}",
+        "matched_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+        "original_sha256": "ba447311d55ac5c1f5b932c0f0cbc38b3055ddfeb67fe5c454b397d37e52e40c",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "registration-record:sha256:dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f"
+       }
+      ],
+      "kind": "scan_incomplete",
+      "model_id": "record-model",
+      "version": 1
+     }
+    ]
+   }
+  },
+  "register_from_record.hub_files": {
+   "md": {
+    "alerts": [],
+    "watch_events": []
+   }
+  },
+  "register_from_record.picklescan_absent": {
+   "md": {
+    "alerts": [
+     {
+      "cause": "{\"identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\", \"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/dangerous.pkl\", \"format\": \"pickle\", \"dangerous\": [\"os.system\"], \"suspicious\": [], \"complete\": true, \"position\": 48}",
+      "cause_key": "weight_file_scan:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546",
+      "closed_by_version": null,
+      "current_version": 1,
+      "dismissal_reason": null,
+      "dismissed_by": null,
+      "evidence": [
+       {
+        "body_sha256": "50666024f8f908874582f14ad36ed57dee5d8f46c5e2f5fbfbeb8a1ef2598819",
+        "canonical_sha256": "50666024f8f908874582f14ad36ed57dee5d8f46c5e2f5fbfbeb8a1ef2598819",
+        "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/dangerous.pkl\", \"format\": \"pickle\", \"dangerous\": [\"os.system\"], \"suspicious\": [], \"complete\": true, \"position\": 48}",
+        "matched_identifier": "sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546",
+        "original_sha256": "50666024f8f908874582f14ad36ed57dee5d8f46c5e2f5fbfbeb8a1ef2598819",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "registration-record:sha256:dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f"
+       }
+      ],
+      "kind": "weight_file_scan",
+      "model_id": "record-model",
+      "note": null,
+      "opened_in_version": 1,
+      "severity": "HIGH",
+      "severity_origin": "policy",
+      "state": "open"
+     }
+    ],
+    "watch_events": [
+     {
+      "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/suspicious.pkl\", \"format\": \"pickle\", \"suspicious\": [\"model_dependabot_fixture.layers.CustomLayer\"]}",
+      "entry_identifier": "sha256:9962334dbcceb41eda11f800e7af80a84742bc10688224357cab2e4a8a268f8c",
+      "evidence": [
+       {
+        "body_sha256": "5c94db8e023a481ad16432ff3f370d54f6da1170d81fe58701c65ee5c9155bd9",
+        "canonical_sha256": "5c94db8e023a481ad16432ff3f370d54f6da1170d81fe58701c65ee5c9155bd9",
+        "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/suspicious.pkl\", \"format\": \"pickle\", \"suspicious\": [\"model_dependabot_fixture.layers.CustomLayer\"]}",
+        "matched_identifier": "sha256:9962334dbcceb41eda11f800e7af80a84742bc10688224357cab2e4a8a268f8c",
+        "original_sha256": "5c94db8e023a481ad16432ff3f370d54f6da1170d81fe58701c65ee5c9155bd9",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "registration-record:sha256:dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f"
+       }
+      ],
+      "kind": "scan_suspicious",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/model.joblib\", \"format\": \"joblib\", \"suspicious\": [\"joblib.numpy_pickle.NumpyArrayWrapper\"]}",
+      "entry_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+      "evidence": [
+       {
+        "body_sha256": "ba447311d55ac5c1f5b932c0f0cbc38b3055ddfeb67fe5c454b397d37e52e40c",
+        "canonical_sha256": "ba447311d55ac5c1f5b932c0f0cbc38b3055ddfeb67fe5c454b397d37e52e40c",
+        "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/model.joblib\", \"format\": \"joblib\", \"suspicious\": [\"joblib.numpy_pickle.NumpyArrayWrapper\"]}",
+        "matched_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+        "original_sha256": "ba447311d55ac5c1f5b932c0f0cbc38b3055ddfeb67fe5c454b397d37e52e40c",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "registration-record:sha256:dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f"
+       }
+      ],
+      "kind": "scan_suspicious",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/model.joblib\", \"format\": \"joblib\", \"position\": 43, \"size\": 61, \"reason\": \"scanner stopped before the end of the file\"}",
+      "entry_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+      "evidence": [
+       {
+        "body_sha256": "ba447311d55ac5c1f5b932c0f0cbc38b3055ddfeb67fe5c454b397d37e52e40c",
+        "canonical_sha256": "ba447311d55ac5c1f5b932c0f0cbc38b3055ddfeb67fe5c454b397d37e52e40c",
+        "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/model.joblib\", \"format\": \"joblib\", \"position\": 43, \"size\": 61, \"reason\": \"scanner stopped before the end of the file\"}",
+        "matched_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+        "original_sha256": "ba447311d55ac5c1f5b932c0f0cbc38b3055ddfeb67fe5c454b397d37e52e40c",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "registration-record:sha256:dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f"
+       }
+      ],
+      "kind": "scan_incomplete",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"scanner\": \"picklescan\", \"location\": \"weights/dangerous.pkl\", \"reason\": \"the weight file's bytes are not on this machine: it was registered from a registration record and scanned where the weights are\", \"record_sha256\": \"dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f\"}",
+      "entry_identifier": "sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546",
+      "evidence": [
+       {
+        "body_sha256": "d4f66e3638b8fb6940a2c97367631f775ae60ab22a224355836f6db897e7c8e9",
+        "canonical_sha256": "d4f66e3638b8fb6940a2c97367631f775ae60ab22a224355836f6db897e7c8e9",
+        "detail": "{\"scanner\": \"picklescan\", \"location\": \"weights/dangerous.pkl\", \"reason\": \"the weight file's bytes are not on this machine: it was registered from a registration record and scanned where the weights are\", \"record_sha256\": \"dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f\"}",
+        "matched_identifier": "sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546",
+        "original_sha256": "d4f66e3638b8fb6940a2c97367631f775ae60ab22a224355836f6db897e7c8e9",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "registration-record:sha256:dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f"
+       }
+      ],
+      "kind": "weight_file_absent",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"scanner\": \"picklescan\", \"location\": \"weights/suspicious.pkl\", \"reason\": \"the weight file's bytes are not on this machine: it was registered from a registration record and scanned where the weights are\", \"record_sha256\": \"dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f\"}",
+      "entry_identifier": "sha256:9962334dbcceb41eda11f800e7af80a84742bc10688224357cab2e4a8a268f8c",
+      "evidence": [
+       {
+        "body_sha256": "0db024618af00491efb3bd632f95a54e3f2651f281a01737734f60261a522a4d",
+        "canonical_sha256": "0db024618af00491efb3bd632f95a54e3f2651f281a01737734f60261a522a4d",
+        "detail": "{\"scanner\": \"picklescan\", \"location\": \"weights/suspicious.pkl\", \"reason\": \"the weight file's bytes are not on this machine: it was registered from a registration record and scanned where the weights are\", \"record_sha256\": \"dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f\"}",
+        "matched_identifier": "sha256:9962334dbcceb41eda11f800e7af80a84742bc10688224357cab2e4a8a268f8c",
+        "original_sha256": "0db024618af00491efb3bd632f95a54e3f2651f281a01737734f60261a522a4d",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "registration-record:sha256:dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f"
+       }
+      ],
+      "kind": "weight_file_absent",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"scanner\": \"picklescan\", \"location\": \"weights/innocuous.pkl\", \"reason\": \"the weight file's bytes are not on this machine: it was registered from a registration record and scanned where the weights are\", \"record_sha256\": \"dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f\"}",
+      "entry_identifier": "sha256:1eada679b4330b6c01fdfa6ce305f9f3d240354baa94d38d75111bcf226cc2f1",
+      "evidence": [
+       {
+        "body_sha256": "9cfd0682f4184e1e2884327aa3179f8e54065b080deeae9f55039e2dc27219cd",
+        "canonical_sha256": "9cfd0682f4184e1e2884327aa3179f8e54065b080deeae9f55039e2dc27219cd",
+        "detail": "{\"scanner\": \"picklescan\", \"location\": \"weights/innocuous.pkl\", \"reason\": \"the weight file's bytes are not on this machine: it was registered from a registration record and scanned where the weights are\", \"record_sha256\": \"dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f\"}",
+        "matched_identifier": "sha256:1eada679b4330b6c01fdfa6ce305f9f3d240354baa94d38d75111bcf226cc2f1",
+        "original_sha256": "9cfd0682f4184e1e2884327aa3179f8e54065b080deeae9f55039e2dc27219cd",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "registration-record:sha256:dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f"
+       }
+      ],
+      "kind": "weight_file_absent",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"scanner\": \"picklescan\", \"location\": \"weights/model.joblib\", \"reason\": \"the weight file's bytes are not on this machine: it was registered from a registration record and scanned where the weights are\", \"record_sha256\": \"dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f\"}",
+      "entry_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+      "evidence": [
+       {
+        "body_sha256": "a2d5588cb79dea47b6e5a3a970f83969d29d842769359591bef2b5b73521ef7a",
+        "canonical_sha256": "a2d5588cb79dea47b6e5a3a970f83969d29d842769359591bef2b5b73521ef7a",
+        "detail": "{\"scanner\": \"picklescan\", \"location\": \"weights/model.joblib\", \"reason\": \"the weight file's bytes are not on this machine: it was registered from a registration record and scanned where the weights are\", \"record_sha256\": \"dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f\"}",
+        "matched_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+        "original_sha256": "a2d5588cb79dea47b6e5a3a970f83969d29d842769359591bef2b5b73521ef7a",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "registration-record:sha256:dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f"
+       }
+      ],
+      "kind": "weight_file_absent",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/dangerous.pkl\"}",
+      "entry_identifier": "sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546",
+      "evidence": [
+       {
+        "body_sha256": "b253236568239b023efe551b0f0292eaacdbb42ef973bcd4313ec94b0ab56025",
+        "canonical_sha256": "b253236568239b023efe551b0f0292eaacdbb42ef973bcd4313ec94b0ab56025",
+        "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/dangerous.pkl\"}",
+        "matched_identifier": "sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546",
+        "original_sha256": "b253236568239b023efe551b0f0292eaacdbb42ef973bcd4313ec94b0ab56025",
+        "redacted_fields": "[]",
+        "source": "format-rule",
+        "url": ""
+       }
+      ],
+      "kind": "pickle_format",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/suspicious.pkl\"}",
+      "entry_identifier": "sha256:9962334dbcceb41eda11f800e7af80a84742bc10688224357cab2e4a8a268f8c",
+      "evidence": [
+       {
+        "body_sha256": "3b05647136a9a515c1f8331690e3f5db3768346361cf5d8adf6455505f2827d8",
+        "canonical_sha256": "3b05647136a9a515c1f8331690e3f5db3768346361cf5d8adf6455505f2827d8",
+        "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/suspicious.pkl\"}",
+        "matched_identifier": "sha256:9962334dbcceb41eda11f800e7af80a84742bc10688224357cab2e4a8a268f8c",
+        "original_sha256": "3b05647136a9a515c1f8331690e3f5db3768346361cf5d8adf6455505f2827d8",
+        "redacted_fields": "[]",
+        "source": "format-rule",
+        "url": ""
+       }
+      ],
+      "kind": "pickle_format",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/innocuous.pkl\"}",
+      "entry_identifier": "sha256:1eada679b4330b6c01fdfa6ce305f9f3d240354baa94d38d75111bcf226cc2f1",
+      "evidence": [
+       {
+        "body_sha256": "bb4fc9298213ac68c321cd4ceb0299644823cae2a71617ad368bf3f6201667f4",
+        "canonical_sha256": "bb4fc9298213ac68c321cd4ceb0299644823cae2a71617ad368bf3f6201667f4",
+        "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/innocuous.pkl\"}",
+        "matched_identifier": "sha256:1eada679b4330b6c01fdfa6ce305f9f3d240354baa94d38d75111bcf226cc2f1",
+        "original_sha256": "bb4fc9298213ac68c321cd4ceb0299644823cae2a71617ad368bf3f6201667f4",
+        "redacted_fields": "[]",
+        "source": "format-rule",
+        "url": ""
+       }
+      ],
+      "kind": "pickle_format",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"format\": \"joblib\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/model.joblib\"}",
+      "entry_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+      "evidence": [
+       {
+        "body_sha256": "a95179fe86a59193aa9d49c13749a8801de74a90526eacac26266ce4e4358cf1",
+        "canonical_sha256": "a95179fe86a59193aa9d49c13749a8801de74a90526eacac26266ce4e4358cf1",
+        "detail": "{\"format\": \"joblib\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/model.joblib\"}",
+        "matched_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+        "original_sha256": "a95179fe86a59193aa9d49c13749a8801de74a90526eacac26266ce4e4358cf1",
+        "redacted_fields": "[]",
+        "source": "format-rule",
+        "url": ""
+       }
+      ],
+      "kind": "pickle_format",
+      "model_id": "record-model",
+      "version": 1
+     }
+    ]
+   }
+  },
+  "register_from_record.round_trip": {
+   "ci": {
+    "alerts": [
+     {
+      "cause": "{\"identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\", \"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/dangerous.pkl\", \"format\": \"pickle\", \"dangerous\": [\"os.system\"], \"suspicious\": [], \"complete\": true, \"position\": 48}",
+      "cause_key": "weight_file_scan:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546",
+      "closed_by_version": null,
+      "current_version": 1,
+      "dismissal_reason": null,
+      "dismissed_by": null,
+      "evidence": [
+       {
+        "body_sha256": "50666024f8f908874582f14ad36ed57dee5d8f46c5e2f5fbfbeb8a1ef2598819",
+        "canonical_sha256": "50666024f8f908874582f14ad36ed57dee5d8f46c5e2f5fbfbeb8a1ef2598819",
+        "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/dangerous.pkl\", \"format\": \"pickle\", \"dangerous\": [\"os.system\"], \"suspicious\": [], \"complete\": true, \"position\": 48}",
+        "matched_identifier": "sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546",
+        "original_sha256": "50666024f8f908874582f14ad36ed57dee5d8f46c5e2f5fbfbeb8a1ef2598819",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "registration-record:sha256:dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f"
+       }
+      ],
+      "kind": "weight_file_scan",
+      "model_id": "record-model",
+      "note": null,
+      "opened_in_version": 1,
+      "severity": "HIGH",
+      "severity_origin": "policy",
+      "state": "open"
+     }
+    ],
+    "watch_events": [
+     {
+      "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/suspicious.pkl\", \"format\": \"pickle\", \"suspicious\": [\"model_dependabot_fixture.layers.CustomLayer\"]}",
+      "entry_identifier": "sha256:9962334dbcceb41eda11f800e7af80a84742bc10688224357cab2e4a8a268f8c",
+      "evidence": [
+       {
+        "body_sha256": "5c94db8e023a481ad16432ff3f370d54f6da1170d81fe58701c65ee5c9155bd9",
+        "canonical_sha256": "5c94db8e023a481ad16432ff3f370d54f6da1170d81fe58701c65ee5c9155bd9",
+        "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/suspicious.pkl\", \"format\": \"pickle\", \"suspicious\": [\"model_dependabot_fixture.layers.CustomLayer\"]}",
+        "matched_identifier": "sha256:9962334dbcceb41eda11f800e7af80a84742bc10688224357cab2e4a8a268f8c",
+        "original_sha256": "5c94db8e023a481ad16432ff3f370d54f6da1170d81fe58701c65ee5c9155bd9",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "registration-record:sha256:dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f"
+       }
+      ],
+      "kind": "scan_suspicious",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/model.joblib\", \"format\": \"joblib\", \"suspicious\": [\"joblib.numpy_pickle.NumpyArrayWrapper\"]}",
+      "entry_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+      "evidence": [
+       {
+        "body_sha256": "ba447311d55ac5c1f5b932c0f0cbc38b3055ddfeb67fe5c454b397d37e52e40c",
+        "canonical_sha256": "ba447311d55ac5c1f5b932c0f0cbc38b3055ddfeb67fe5c454b397d37e52e40c",
+        "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/model.joblib\", \"format\": \"joblib\", \"suspicious\": [\"joblib.numpy_pickle.NumpyArrayWrapper\"]}",
+        "matched_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+        "original_sha256": "ba447311d55ac5c1f5b932c0f0cbc38b3055ddfeb67fe5c454b397d37e52e40c",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "registration-record:sha256:dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f"
+       }
+      ],
+      "kind": "scan_suspicious",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/model.joblib\", \"format\": \"joblib\", \"position\": 43, \"size\": 61, \"reason\": \"scanner stopped before the end of the file\"}",
+      "entry_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+      "evidence": [
+       {
+        "body_sha256": "ba447311d55ac5c1f5b932c0f0cbc38b3055ddfeb67fe5c454b397d37e52e40c",
+        "canonical_sha256": "ba447311d55ac5c1f5b932c0f0cbc38b3055ddfeb67fe5c454b397d37e52e40c",
+        "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/model.joblib\", \"format\": \"joblib\", \"position\": 43, \"size\": 61, \"reason\": \"scanner stopped before the end of the file\"}",
+        "matched_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+        "original_sha256": "ba447311d55ac5c1f5b932c0f0cbc38b3055ddfeb67fe5c454b397d37e52e40c",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "registration-record:sha256:dc2fcb235459f266e19471368b70859c9e70426295193d071e4b4d354d54426f"
+       }
+      ],
+      "kind": "scan_incomplete",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/dangerous.pkl\"}",
+      "entry_identifier": "sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546",
+      "evidence": [
+       {
+        "body_sha256": "b253236568239b023efe551b0f0292eaacdbb42ef973bcd4313ec94b0ab56025",
+        "canonical_sha256": "b253236568239b023efe551b0f0292eaacdbb42ef973bcd4313ec94b0ab56025",
+        "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/dangerous.pkl\"}",
+        "matched_identifier": "sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546",
+        "original_sha256": "b253236568239b023efe551b0f0292eaacdbb42ef973bcd4313ec94b0ab56025",
+        "redacted_fields": "[]",
+        "source": "format-rule",
+        "url": ""
+       }
+      ],
+      "kind": "pickle_format",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/suspicious.pkl\"}",
+      "entry_identifier": "sha256:9962334dbcceb41eda11f800e7af80a84742bc10688224357cab2e4a8a268f8c",
+      "evidence": [
+       {
+        "body_sha256": "3b05647136a9a515c1f8331690e3f5db3768346361cf5d8adf6455505f2827d8",
+        "canonical_sha256": "3b05647136a9a515c1f8331690e3f5db3768346361cf5d8adf6455505f2827d8",
+        "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/suspicious.pkl\"}",
+        "matched_identifier": "sha256:9962334dbcceb41eda11f800e7af80a84742bc10688224357cab2e4a8a268f8c",
+        "original_sha256": "3b05647136a9a515c1f8331690e3f5db3768346361cf5d8adf6455505f2827d8",
+        "redacted_fields": "[]",
+        "source": "format-rule",
+        "url": ""
+       }
+      ],
+      "kind": "pickle_format",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/innocuous.pkl\"}",
+      "entry_identifier": "sha256:1eada679b4330b6c01fdfa6ce305f9f3d240354baa94d38d75111bcf226cc2f1",
+      "evidence": [
+       {
+        "body_sha256": "bb4fc9298213ac68c321cd4ceb0299644823cae2a71617ad368bf3f6201667f4",
+        "canonical_sha256": "bb4fc9298213ac68c321cd4ceb0299644823cae2a71617ad368bf3f6201667f4",
+        "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/innocuous.pkl\"}",
+        "matched_identifier": "sha256:1eada679b4330b6c01fdfa6ce305f9f3d240354baa94d38d75111bcf226cc2f1",
+        "original_sha256": "bb4fc9298213ac68c321cd4ceb0299644823cae2a71617ad368bf3f6201667f4",
+        "redacted_fields": "[]",
+        "source": "format-rule",
+        "url": ""
+       }
+      ],
+      "kind": "pickle_format",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"format\": \"joblib\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/model.joblib\"}",
+      "entry_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+      "evidence": [
+       {
+        "body_sha256": "a95179fe86a59193aa9d49c13749a8801de74a90526eacac26266ce4e4358cf1",
+        "canonical_sha256": "a95179fe86a59193aa9d49c13749a8801de74a90526eacac26266ce4e4358cf1",
+        "detail": "{\"format\": \"joblib\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/model.joblib\"}",
+        "matched_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+        "original_sha256": "a95179fe86a59193aa9d49c13749a8801de74a90526eacac26266ce4e4358cf1",
+        "redacted_fields": "[]",
+        "source": "format-rule",
+        "url": ""
+       }
+      ],
+      "kind": "pickle_format",
+      "model_id": "record-model",
+      "version": 1
+     }
+    ]
+   },
+   "direct": {
+    "alerts": [
+     {
+      "cause": "{\"identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\", \"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/dangerous.pkl\", \"format\": \"pickle\", \"dangerous\": [\"os.system\"], \"suspicious\": [], \"complete\": true, \"position\": 48}",
+      "cause_key": "weight_file_scan:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546",
+      "closed_by_version": null,
+      "current_version": 1,
+      "dismissal_reason": null,
+      "dismissed_by": null,
+      "evidence": [
+       {
+        "body_sha256": "eca35da615fec8722c60d98d280f859a72dd2d8f16481c0269f956de4ccb6793",
+        "canonical_sha256": "eca35da615fec8722c60d98d280f859a72dd2d8f16481c0269f956de4ccb6793",
+        "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/dangerous.pkl\", \"format\": \"pickle\", \"dangerous\": [\"os.system\"], \"suspicious\": [], \"complete\": true, \"position\": 48}",
+        "matched_identifier": "sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546",
+        "original_sha256": "eca35da615fec8722c60d98d280f859a72dd2d8f16481c0269f956de4ccb6793",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "<work>/owner/weights/dangerous.pkl"
+       }
+      ],
+      "kind": "weight_file_scan",
+      "model_id": "record-model",
+      "note": null,
+      "opened_in_version": 1,
+      "severity": "HIGH",
+      "severity_origin": "policy",
+      "state": "open"
+     }
+    ],
+    "watch_events": [
+     {
+      "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/suspicious.pkl\", \"format\": \"pickle\", \"suspicious\": [\"model_dependabot_fixture.layers.CustomLayer\"]}",
+      "entry_identifier": "sha256:9962334dbcceb41eda11f800e7af80a84742bc10688224357cab2e4a8a268f8c",
+      "evidence": [
+       {
+        "body_sha256": "b3c6f2cef22534afe80722a7aec58c489489e6fd1fe01591d1418af37b2e8ccc",
+        "canonical_sha256": "b3c6f2cef22534afe80722a7aec58c489489e6fd1fe01591d1418af37b2e8ccc",
+        "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/suspicious.pkl\", \"format\": \"pickle\", \"suspicious\": [\"model_dependabot_fixture.layers.CustomLayer\"]}",
+        "matched_identifier": "sha256:9962334dbcceb41eda11f800e7af80a84742bc10688224357cab2e4a8a268f8c",
+        "original_sha256": "b3c6f2cef22534afe80722a7aec58c489489e6fd1fe01591d1418af37b2e8ccc",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "<work>/owner/weights/suspicious.pkl"
+       }
+      ],
+      "kind": "scan_suspicious",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/model.joblib\", \"format\": \"joblib\", \"suspicious\": [\"joblib.numpy_pickle.NumpyArrayWrapper\"]}",
+      "entry_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+      "evidence": [
+       {
+        "body_sha256": "e5dac71dd515de4237f5da14e6253383bc3111ec8a70c910e4e99478a21c05b2",
+        "canonical_sha256": "e5dac71dd515de4237f5da14e6253383bc3111ec8a70c910e4e99478a21c05b2",
+        "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/model.joblib\", \"format\": \"joblib\", \"suspicious\": [\"joblib.numpy_pickle.NumpyArrayWrapper\"]}",
+        "matched_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+        "original_sha256": "e5dac71dd515de4237f5da14e6253383bc3111ec8a70c910e4e99478a21c05b2",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "<work>/owner/weights/model.joblib"
+       }
+      ],
+      "kind": "scan_suspicious",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/model.joblib\", \"format\": \"joblib\", \"position\": 43, \"size\": 61, \"reason\": \"scanner stopped before the end of the file\"}",
+      "entry_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+      "evidence": [
+       {
+        "body_sha256": "e5dac71dd515de4237f5da14e6253383bc3111ec8a70c910e4e99478a21c05b2",
+        "canonical_sha256": "e5dac71dd515de4237f5da14e6253383bc3111ec8a70c910e4e99478a21c05b2",
+        "detail": "{\"scanner\": \"picklescan\", \"scanner_version\": \"1.0.5\", \"location\": \"weights/model.joblib\", \"format\": \"joblib\", \"position\": 43, \"size\": 61, \"reason\": \"scanner stopped before the end of the file\"}",
+        "matched_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+        "original_sha256": "e5dac71dd515de4237f5da14e6253383bc3111ec8a70c910e4e99478a21c05b2",
+        "redacted_fields": "[]",
+        "source": "picklescan",
+        "url": "<work>/owner/weights/model.joblib"
+       }
+      ],
+      "kind": "scan_incomplete",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/dangerous.pkl\"}",
+      "entry_identifier": "sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546",
+      "evidence": [
+       {
+        "body_sha256": "b253236568239b023efe551b0f0292eaacdbb42ef973bcd4313ec94b0ab56025",
+        "canonical_sha256": "b253236568239b023efe551b0f0292eaacdbb42ef973bcd4313ec94b0ab56025",
+        "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/dangerous.pkl\"}",
+        "matched_identifier": "sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546",
+        "original_sha256": "b253236568239b023efe551b0f0292eaacdbb42ef973bcd4313ec94b0ab56025",
+        "redacted_fields": "[]",
+        "source": "format-rule",
+        "url": ""
+       }
+      ],
+      "kind": "pickle_format",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/suspicious.pkl\"}",
+      "entry_identifier": "sha256:9962334dbcceb41eda11f800e7af80a84742bc10688224357cab2e4a8a268f8c",
+      "evidence": [
+       {
+        "body_sha256": "3b05647136a9a515c1f8331690e3f5db3768346361cf5d8adf6455505f2827d8",
+        "canonical_sha256": "3b05647136a9a515c1f8331690e3f5db3768346361cf5d8adf6455505f2827d8",
+        "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/suspicious.pkl\"}",
+        "matched_identifier": "sha256:9962334dbcceb41eda11f800e7af80a84742bc10688224357cab2e4a8a268f8c",
+        "original_sha256": "3b05647136a9a515c1f8331690e3f5db3768346361cf5d8adf6455505f2827d8",
+        "redacted_fields": "[]",
+        "source": "format-rule",
+        "url": ""
+       }
+      ],
+      "kind": "pickle_format",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/innocuous.pkl\"}",
+      "entry_identifier": "sha256:1eada679b4330b6c01fdfa6ce305f9f3d240354baa94d38d75111bcf226cc2f1",
+      "evidence": [
+       {
+        "body_sha256": "bb4fc9298213ac68c321cd4ceb0299644823cae2a71617ad368bf3f6201667f4",
+        "canonical_sha256": "bb4fc9298213ac68c321cd4ceb0299644823cae2a71617ad368bf3f6201667f4",
+        "detail": "{\"format\": \"pickle\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/innocuous.pkl\"}",
+        "matched_identifier": "sha256:1eada679b4330b6c01fdfa6ce305f9f3d240354baa94d38d75111bcf226cc2f1",
+        "original_sha256": "bb4fc9298213ac68c321cd4ceb0299644823cae2a71617ad368bf3f6201667f4",
+        "redacted_fields": "[]",
+        "source": "format-rule",
+        "url": ""
+       }
+      ],
+      "kind": "pickle_format",
+      "model_id": "record-model",
+      "version": 1
+     },
+     {
+      "detail": "{\"format\": \"joblib\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/model.joblib\"}",
+      "entry_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+      "evidence": [
+       {
+        "body_sha256": "a95179fe86a59193aa9d49c13749a8801de74a90526eacac26266ce4e4358cf1",
+        "canonical_sha256": "a95179fe86a59193aa9d49c13749a8801de74a90526eacac26266ce4e4358cf1",
+        "detail": "{\"format\": \"joblib\", \"reason\": \"the format can run code when loaded\", \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\", \"location\": \"weights/model.joblib\"}",
+        "matched_identifier": "sha256:24e8e140fd2542e0dcf48f4152a3a9ded674a60e24872e57e8561df59bc8af79",
+        "original_sha256": "a95179fe86a59193aa9d49c13749a8801de74a90526eacac26266ce4e4358cf1",
+        "redacted_fields": "[]",
+        "source": "format-rule",
+        "url": ""
+       }
+      ],
+      "kind": "pickle_format",
+      "model_id": "record-model",
+      "version": 1
+     }
+    ]
+   }
+  }
+ },
+ "src_tree": "433d2d1665fd627e14e9bbffcd37b696e2285458"
+}
