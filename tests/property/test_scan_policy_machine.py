@@ -8,7 +8,7 @@ globals policy, advancing the clock, letting OSV fail or answer and checking a r
 sources, for the model or ``--all``, with or without ``--fail-on``. Two compound rules make the
 short default run reach excepted alerts and lapsed exceptions: one excepts the current file's
 dangerous globals and asks picklescan, the other lets an exception expire or revokes one,
-sometimes records a new one, and asks OSV only. The guided tour and
+sometimes records a new one and asks OSV only. The guided tour and
 ``tests/integration/test_review_round2.py`` pin the rest, such as a new exception waiting while a
 lapse acts. The
 pickles are opcode bytes: ``mixed`` and ``dangerous`` are built by
@@ -42,10 +42,11 @@ e. an alert marked excepted is covered by exceptions active at the check's time,
    ``exception list`` shows exactly the active exceptions;
 f. at most one open alert per cause, and every alert has evidence;
 g. a check that asks no weight source applies no new exception and no policy change (FR-010),
-   judged against the machine's own record of the last check that asked one (its policy, when that
-   policy was set and the exceptions then active): no alert becomes excepted and no open
-   ``globals_policy`` alert closes or loses a global; with no record, or under a policy changed
-   since, no ``globals_policy`` alert changes; otherwise the current file's alert lists exactly
+   judged against the machine's own record of the last check that asked one (its policy value, the
+   exceptions then active and whether it judged the current file on a scan): no alert becomes
+   excepted and no open ``globals_policy`` alert closes or loses a global; with no record, under
+   another policy value or for a file it did not judge, no ``globals_policy`` alert changes;
+   otherwise the current file's alert lists exactly
    the globals that recorded exceptions still active leave unlisted, and opens or grows only for
    a recorded exception that has lapsed since.
 
@@ -159,11 +160,12 @@ class ScanPolicyMachine(RuleBasedStateMachine):
         # alert, its list at dismissal.
         self.dismissed: dict[str, dict[str, Any]] = {}
         self.versions = 0
-        # When the globals policy was last set (the clock then; None until first set) and what the
-        # last check that asked a weight source applied: (strict, set at) and the active exception
-        # ids. The oracles of (g) read this, never the product's mark.
-        self.policy_set_at: datetime | None = None
+        # What the last check that asked a weight source applied: the policy value, the active
+        # exception ids and the files it judged on a scan. A file registered since from a record
+        # may carry another scan, so it is unsure until the next such check. The oracles of (g)
+        # read this, never the product's mark.
         self.mark: dict[str, Any] | None = None
+        self.unsure: set[str] = set()
         self.last: tuple[int, Any] = (0, None)
         self.register(file="mixed", folder="a", via_record=False)
 
@@ -254,6 +256,8 @@ class ScanPolicyMachine(RuleBasedStateMachine):
             self.strict_scan = None
         self.file = file
         self.from_record = via_record  # the weights stay behind: picklescan cannot read them
+        if via_record:
+            self.unsure.add(self._sha())
         self._held_invariant()
 
     @rule(
@@ -322,7 +326,6 @@ class ScanPolicyMachine(RuleBasedStateMachine):
     def globals(self, strict: bool) -> None:
         self.ok("policy", MODEL, "--globals", "strict" if strict else "default", "--by", "O")
         self.strict = strict
-        self.policy_set_at = self.now
 
     @rule(days=st.integers(min_value=1, max_value=20))
     def advance(self, days: int) -> None:
@@ -499,12 +502,20 @@ class ScanPolicyMachine(RuleBasedStateMachine):
                 assert expected <= set(live[0]["cause"]["unlisted"]), (live, expected)
         if weight_asked:
             self.mark = {
-                "policy": (self.strict, self.policy_set_at),
+                "policy": self.strict,
                 "ids": {i for i, e in self.exceptions.items() if self._is_active(e)},
+                "files": {self._sha()} if scanned else set(),
             }
+            self.unsure = set()
 
     def _mark_matches(self) -> bool:
-        return self.mark is not None and self.mark["policy"] == (self.strict, self.policy_set_at)
+        """The last weight check ran under the current policy value and judged this file."""
+        return (
+            self.mark is not None
+            and self.mark["policy"] == self.strict
+            and self._sha() in self.mark["files"]
+            and self._sha() not in self.unsure
+        )
 
     def _policy_view(self, alerts: Any) -> set[tuple[str, tuple[str, ...]]]:
         return {
@@ -518,8 +529,11 @@ class ScanPolicyMachine(RuleBasedStateMachine):
     ) -> None:
         """(g) at a check without a weight source, against the model's record of the last one."""
         key = f"globals_policy:{self._sha()}"
+        if self.strict and self._sha() in self.unsure:
+            return  # a record's scan may or may not be the one the weight check judged
         if not (self.strict and self._mark_matches() and scanned):
-            # no record, a policy changed since, the default policy or no scan: nothing changes
+            # no record, another policy value, the default policy or a file not judged: nothing
+            # changes
             assert self._policy_view(alerts) == self._policy_view(before.values()), key
             return
         if key in self.dismissed:
@@ -610,7 +624,7 @@ def test_the_machine_reaches_excepted_held_and_gated_states() -> None:
     held ``globals_policy`` dismissal under a re-applied policy (K2), a lapsed exception at a
     packages-only check (K5), an expiry that turns exit 0 into exit 4, a policy set strict that
     waits even for a lapse and a lapse that opens the alert while its re-recorded exception waits
-    (both review 3), the refusals of an
+    (both review 3), a policy set again that lets a lapse act (review 4), the refusals of an
     unresolved global and of a past expiry, the default policy clearing the alert, an unchecked
     model and an incomplete source.
     """
@@ -756,5 +770,12 @@ def test_the_machine_reaches_excepted_held_and_gated_states() -> None:
         assert unlisted() == {alpha}
         step(machine.check, sources=["picklescan"], fail_on=None)
         assert not open_alerts("globals_policy")
+        # Review 4: setting the same policy again later is no change, so a lapse still acts
+        third = max(machine.exceptions)  # Alpha, applied by the weight check above
+        step(machine.advance, days=1)
+        step(machine.globals, strict=True)
+        revoke(third)
+        step(machine.check, sources=["osv"], fail_on=None)
+        assert unlisted() == {alpha}
     finally:
         machine.teardown()
