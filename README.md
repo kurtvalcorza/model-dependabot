@@ -305,6 +305,14 @@ use; the trade-off is that `_codecs.encode` can rebuild arbitrary bytes, as that
 alert cites the list's version and hash, and closes when the policy returns to `default` or nothing is
 left unlisted.
 
+Each check that asks a weight source records, for every local pickle file and under either policy, one
+`globals-snapshot` evidence row: the policy in force, the unlisted globals and the exceptions that took
+globals off the list (so the store grows by one row per file per weight check). A check that asks no
+weight source reads the file's latest snapshot and changes only the globals whose exception has lapsed
+since: it adds them to the open alert, or opens one if the snapshot was `strict`. A policy change, a new
+exception and a new scan still wait for the next weight check, and a file whose latest snapshot is
+`default`, or that has none (a database from before the snapshots), opens nothing until then.
+
 ### Auditing an inventory
 
 `inventory audit ID` answers three questions separately, from the stored data:

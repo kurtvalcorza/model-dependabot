@@ -492,6 +492,9 @@ def _loads(text: str | None) -> Any:
 
 
 EXCEPTION_SOURCE = "exception"
+# Issue #18: what the globals policy applied to one file at a weight check (one row per file per
+# weight check, URL ``globals-snapshot:<model_id>``, matched on the file's identifier).
+GLOBALS_SNAPSHOT_SOURCE = "globals-snapshot"
 
 
 def _canonical_json(record: Mapping[str, Any]) -> bytes:
@@ -1232,6 +1235,16 @@ class Store:
         revoked = self.get_exception(exception_id)
         assert revoked is not None
         return revoked
+
+    def latest_globals_snapshot(self, model_id: str, identifier: str) -> dict[str, Any] | None:
+        """The record of the latest ``globals-snapshot`` row for this model's file, by row id
+        (so a policy change in the same second as a check does not tie), or ``None``."""
+        row = self.conn.execute(
+            "SELECT detail FROM evidence WHERE source = ? AND url = ? AND matched_identifier = ?"
+            " ORDER BY evidence_id DESC LIMIT 1",
+            (GLOBALS_SNAPSHOT_SOURCE, f"{GLOBALS_SNAPSHOT_SOURCE}:{model_id}", identifier),
+        ).fetchone()
+        return None if row is None else _loads(row["detail"])
 
     def exception_evidence(self, exception_id: int) -> list[int]:
         """The exception's evidence rows, oldest first: its record, then any revocation."""

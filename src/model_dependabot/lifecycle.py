@@ -112,6 +112,7 @@ from model_dependabot.sources.osv import (
 )
 from model_dependabot.store import (
     DISMISSAL_REASONS,
+    GLOBALS_SNAPSHOT_SOURCE,
     Store,
     content_key,
     matching_key,
@@ -1433,12 +1434,134 @@ def _exception_item(record: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _lapsed(store: Store, sha256: str, name: str) -> bool:
-    """Whether an exception for this global in these bytes was revoked or has expired."""
-    return any(
-        f"{e['module']}.{e['name']}" == name and e["state"] != "active"
-        for e in store.exceptions(sha256, include_inactive=True)
-    )
+def _policy_files(store: Store, target: _Target) -> list[Mapping[str, Any]]:
+    """The version's local pickle files the globals policy covers (hub files have no scan)."""
+    return [
+        entry
+        for entry in _code_capable(_measured_target(store, target))
+        if not entry.get("hub_repo") and entry.get("location") and entry.get("identifier")
+    ]
+
+
+def _record_globals_snapshots(
+    store: Store, run_id: int, target: _Target, model: Mapping[str, Any], policy: str
+) -> None:
+    """One ``globals-snapshot`` evidence row per local pickle file at a weight check (issue #18).
+
+    It records what the globals policy applied there, under either policy and even with nothing
+    unlisted: the policy, the unlisted globals and the exceptions that took globals off the list.
+    A check that asks no weight source reads the latest one, so it changes only what lapsed since.
+    """
+    safe = globals_policy.current_safe_list()
+    now = store.now()
+    for entry in _policy_files(store, target):
+        identifier = entry["identifier"]
+        sha256 = identifier.removeprefix("sha256:")
+        scan = store.latest_file_scan(sha256)
+        active = store.exceptions(sha256)
+        covered = [] if scan is None else globals_policy.excepted(scan, safe, active)
+        record = {
+            "model_id": target.model_id,
+            "identifier": identifier,
+            "globals_policy": policy,
+            "set_by": model.get("globals_policy_set_by"),
+            "set_at": model.get("globals_policy_set_at"),
+            "safe_list_version": safe.version,
+            "safe_list_sha256": safe.sha256,
+            "scan_evidence_id": None if scan is None else int(scan["evidence_id"]),
+            "unlisted": [] if scan is None else globals_policy.unlisted(scan, safe, active),
+            "exception_ids": sorted({int(e["exception_id"]) for e in covered}),
+        }
+        store.add_evidence(
+            source=GLOBALS_SNAPSHOT_SOURCE,
+            url=f"{GLOBALS_SNAPSHOT_SOURCE}:{target.model_id}",
+            retrieved_at=now,
+            matched_identifier=identifier,
+            body=_json_body(record),
+            detail=record,
+            run_id=run_id,
+        )
+
+
+def _apply_globals_lapses(store: Store, run_id: int, target: _Target) -> None:
+    """At a check that asks no weight source, return the globals whose exception lapsed.
+
+    Review M4 and issue #18: the latest ``globals-snapshot`` of each file is what the last weight
+    check applied. Only a global whose exception was applied there and has since been revoked or
+    expired is added to the file's alert (opened if none is open); everything else, the policy
+    included, stays as that check left it. A snapshot under the default policy, or none at all (a
+    store from before the snapshots), opens nothing: the next weight check decides (FR-010).
+    """
+    now = store.now()
+    for entry in _policy_files(store, target):
+        identifier = entry["identifier"]
+        sha256 = identifier.removeprefix("sha256:")
+        snapshot = store.latest_globals_snapshot(target.model_id, identifier)
+        if snapshot is None or snapshot.get("globals_policy") != "strict":
+            continue
+        scan = store.latest_file_scan(sha256)
+        if scan is None:
+            continue
+        known = {int(e["exception_id"]): e for e in store.exceptions(sha256, include_inactive=True)}
+        applied = [known[i] for i in snapshot.get("exception_ids") or [] if i in known]
+        still = [e for e in applied if e["state"] == "active"]
+        lapsed = {f"{e['module']}.{e['name']}" for e in applied if e["state"] != "active"}
+        if not lapsed:
+            continue
+        open_alert = store.find_open_alert(
+            target.model_id, weight_cause_key(GLOBALS_POLICY_ALERT, identifier)
+        )
+        before = set((open_alert or {}).get("cause", {}).get("unlisted") or [])
+        listed = sorted(set(snapshot.get("unlisted") or []) | before | lapsed)
+        if not set(listed) - before:
+            continue  # what lapsed is listed already
+        record: dict[str, Any] = {
+            "model_id": target.model_id,
+            "identifier": identifier,
+            "globals_policy": "strict",
+            "set_by": snapshot.get("set_by"),
+            "set_at": snapshot.get("set_at"),
+            "safe_list_version": snapshot.get("safe_list_version"),
+            "safe_list_sha256": snapshot.get("safe_list_sha256"),
+            "unlisted": listed,
+            "excepted": sorted(f"{e['module']}.{e['name']}" for e in still),
+        }
+        observation = _Observation(GLOBALS_POLICY_SOURCE, "", now, _json_body(record), record)
+        cause = {
+            "identifier": identifier,
+            "location": entry["location"],
+            "format": entry.get("format"),
+            "unlisted": listed,
+            "excepted": [_exception_item(e) for e in still],
+            "safe_list_version": record["safe_list_version"],
+            "safe_list_sha256": record["safe_list_sha256"],
+            "policy": "strict",
+            "set_by": record["set_by"],
+            "set_at": record["set_at"],
+            "scan": {
+                "scanner": scan["scanner"],
+                "scanner_version": scan["scanner_version"],
+                "complete": scan["complete"],
+                "scanned_at": scan["scanned_at"],
+            },
+        }
+        _weight_alert(
+            store,
+            run_id,
+            target,
+            GLOBALS_POLICY_ALERT,
+            entry,
+            cause,
+            [observation],
+            evidence_ids=[int(scan["evidence_id"])],
+        )
+        alert = store.find_open_alert(
+            target.model_id, weight_cause_key(GLOBALS_POLICY_ALERT, identifier)
+        )
+        if alert is not None:
+            linked = [int(scan["evidence_id"]), *(int(e["evidence_id"]) for e in still)]
+            for evidence_id in linked:
+                store.link_alert_evidence(alert["alert_id"], evidence_id)
 
 
 def _apply_globals_policy(
@@ -1454,12 +1577,14 @@ def _apply_globals_policy(
     note names ``safe_list`` and/or ``exception``, whichever took the last globals off). A file with
     no scan raises nothing.
     """
+    if lapse_only:
+        _apply_globals_lapses(store, run_id, target)
+        return
     model = store.get_model(target.model_id) or {}
     policy = model.get("globals_policy") or "default"
     now = store.now()
     safe = globals_policy.current_safe_list() if policy == "strict" else None
-    if lapse_only and safe is None:
-        return  # a policy change waits for a check that asks a weight source
+    _record_globals_snapshots(store, run_id, target, model, policy)
     if safe is None:
         # Review X4: the policy is the alert's source, so its change clears every open
         # ``globals_policy`` alert of the model, whatever its entry has become.
@@ -1479,9 +1604,7 @@ def _apply_globals_policy(
             ids = _store_observations(store, run_id, identifier, [observation], linked)
             _close(store, target, open_alert, "cleared", ids, note="cleared: policy")
         return
-    for entry in _code_capable(_measured_target(store, target)):
-        if entry.get("hub_repo") or not entry.get("location") or not entry.get("identifier"):
-            continue
+    for entry in _policy_files(store, target):
         identifier = entry["identifier"]
         sha256 = identifier.removeprefix("sha256:")
         open_alert = store.find_open_alert(
@@ -1517,7 +1640,7 @@ def _apply_globals_policy(
         observation = _Observation(GLOBALS_POLICY_SOURCE, "", now, _json_body(record), record)
         exception_ids = [int(e["evidence_id"]) for e in covered]
         if not listed and scan["complete"]:
-            if open_alert is None or lapse_only:
+            if open_alert is None:
                 continue
             before = set(open_alert["cause"].get("unlisted") or [])
             excepted_now = set(record["excepted"])
@@ -1549,10 +1672,6 @@ def _apply_globals_policy(
                 "scanned_at": scan["scanned_at"],
             },
         }
-        if lapse_only:
-            grown = set(listed) - set((open_alert or {}).get("cause", {}).get("unlisted") or [])
-            if not any(_lapsed(store, sha256, name) for name in grown):
-                continue  # review M4: only a lapsed exception acts outside a weight check
         _weight_alert(
             store,
             run_id,

@@ -118,6 +118,13 @@ Rulings by the owner on the plan's open decisions (research.md, Decisions on the
   the stored scans, like the HIGH alert. A new exception, a policy change and a new scan still wait for a check
   that asks a weight source (FR-010).
 
+### Session 2026-11-14 (pull request review, round 3; issue #18)
+
+- Q: Against what does a check without a weight source decide that an exception lapsed? → A: Against what the
+  last weight check applied, which each weight check records per file (a `globals-snapshot` evidence row).
+  Only the globals of exceptions applied there and since revoked or expired change; a policy change or an
+  exception recorded since waits. With no snapshot, or a `default` one, nothing opens until a weight check.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Accept a reviewed global in one exact file (Priority: P1)
