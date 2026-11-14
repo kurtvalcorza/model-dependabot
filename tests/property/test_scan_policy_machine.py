@@ -8,8 +8,9 @@ globals policy, advancing the clock, letting OSV fail or answer and checking a r
 sources with or without ``--fail-on``. The pickles are opcode bytes built by
 ``tests/fixtures/pickles/craft.py``; nothing is ever loaded and nothing reaches the network.
 
-After every check these hold, judged against the machine's own model of the exceptions (pair,
-expiry and revocation) and of which sources can cover the model, never against the product's view:
+After every check these hold. Which exceptions are active (pair, expiry and revocation) and which
+sources can cover the model come from the machine's own model, never from the product; alert
+states and severities are read from the store:
 
 a. an excepted alert never counts as open: not in ``alerts``, not in the audit's ``alerts_open``
    and not in the gate;
@@ -127,7 +128,8 @@ class ScanPolicyMachine(RuleBasedStateMachine):
         # exception_id -> the file's SHA-256, the global, the last day it covers (None: no
         # expiry) and whether it was revoked. The oracles read this model, never the store.
         self.exceptions: dict[int, dict[str, Any]] = {}
-        # The file a weight source last checked under the strict policy, while it is current.
+        # The SHA-256 of the file a weight source last checked under the strict policy, while that
+        # file is current.
         self.strict_scan: str | None = None
         # cause_key -> what the dismissed alert stood on: its id and, for a globals policy
         # alert, its list at dismissal.
