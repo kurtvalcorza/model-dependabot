@@ -4,25 +4,32 @@ A sibling of ``test_alert_lifecycle_machine.py``. Hypothesis drives one model th
 line (``cli.main``, an injected clock, recorded or failing OSV answers) with random sequences of:
 registering one of three crafted pickles from one of three folders or from a registration record,
 dismissing an alert, recording an exception (optionally expiring) or revoking one, setting the
-globals policy, advancing the clock, letting OSV fail or answer, and checking a random subset of
+globals policy, advancing the clock, letting OSV fail or answer and checking a random subset of
 sources with or without ``--fail-on``. The pickles are opcode bytes built by
 ``tests/fixtures/pickles/craft.py``; nothing is ever loaded and nothing reaches the network.
 
-After every check these hold:
+After every check these hold, judged against the machine's own model of the exceptions (pair,
+expiry and revocation) and of which sources can cover the model, never against the product's view:
 
 a. an excepted alert never counts as open: not in ``alerts``, not in the audit's ``alerts_open``
    and not in the gate;
-b. the gate: a failed source exits 2; exit 0 with ``--fail-on`` means nothing tripped it (no alert
-   at or above the severity, no incomplete source, no unchecked model, a scope that matched); exit 4
-   only with ``--fail-on``;
+b. the exit code: 2 exactly when a source failed; otherwise, with ``--fail-on``, 4 exactly when the
+   gate tripped and 0 when it did not, and the gate lists exactly the open alerts at or above the
+   severity that are not excepted, the incomplete source (``picklescan`` on a model registered
+   from a record, whose files are not on disk) and the unchecked model (no asked source that can
+   read it answered); without ``--fail-on`` never 4;
 c. a dismissal holds unless the evidence is new: the same bytes (from any folder or record) and the
    same advisory never reopen a dismissed alert, while a globals list that grows past the list at
    dismissal does reopen it;
 d. after a check that asks a weight source under the strict policy, the ``globals_policy`` alert of
    the current file lists exactly its scanned globals that are neither on the safe list nor
-   excepted;
-e. an alert marked excepted is covered by exceptions active at the check's time, so a lapsed
-   exception's finding is back by the next check of any sources;
+   excepted, and no other file has one open; under the default policy no ``globals_policy`` alert
+   is left open (FR-010); after a packages-only check that follows such a strict check, every
+   global the model expects is still listed, so a lapsed exception's finding is back;
+e. an alert marked excepted is covered by exceptions active at the check's time, and after a check
+   that asks a weight source a ``weight_file_scan`` alert whose dangerous globals are all covered
+   is excepted; ``exception record`` is refused exactly when an active exception covers the same
+   pair and ``exception list`` shows exactly the active exceptions;
 f. at most one open alert per cause, and every alert has evidence.
 
 The default run is derandomised and short; ``MODEL_DEPENDABOT_PROPERTY_EXAMPLES`` set to a number
@@ -116,10 +123,17 @@ class ScanPolicyMachine(RuleBasedStateMachine):
         self.osv_down = False
         self.file = "mixed"
         self.strict = False
+        self.from_record = False
+        # exception_id -> the file's SHA-256, the global, the last day it covers (None: no
+        # expiry) and whether it was revoked. The oracles read this model, never the store.
+        self.exceptions: dict[int, dict[str, Any]] = {}
+        # The file a weight source last checked under the strict policy, while it is current.
+        self.strict_scan: str | None = None
         # cause_key -> what the dismissed alert stood on: its id and, for a globals policy
         # alert, its list at dismissal.
         self.dismissed: dict[str, dict[str, Any]] = {}
         self.versions = 0
+        self.last: tuple[int, Any] = (0, None)
         self.register(file="mixed", folder="a", via_record=False)
 
     def teardown(self) -> None:
@@ -150,6 +164,25 @@ class ScanPolicyMachine(RuleBasedStateMachine):
 
     def _sha(self) -> str:
         return hashlib.sha256(FILES[self.file][0]).hexdigest()
+
+    # -- the model of the exceptions --
+
+    def _is_active(self, exception: dict[str, Any]) -> bool:
+        """Active until revoked or past its expiry date: that whole day in UTC is covered."""
+        expires = exception["expires_on"]
+        return not exception["revoked"] and (expires is None or self.now.date() <= expires)
+
+    def _active(self) -> set[tuple[str, str]]:
+        """The (SHA-256, ``module.name``) pairs that active exceptions cover now."""
+        return {(e["sha"], e["global"]) for e in self.exceptions.values() if self._is_active(e)}
+
+    def _expected_unlisted(self) -> set[str]:
+        active = self._active()
+        return {
+            f"{m}.{n}"
+            for m, n, _ in FILES[self.file][1]
+            if (m, n) not in SAFE and (self._sha(), f"{m}.{n}") not in active
+        }
 
     # -- the rules --
 
@@ -186,7 +219,10 @@ class ScanPolicyMachine(RuleBasedStateMachine):
         else:
             argv = ("register", str(manifest))
         self.ok(*argv, "--model-id", MODEL)
+        if file != self.file:
+            self.strict_scan = None
         self.file = file
+        self.from_record = via_record  # the weights stay behind: picklescan cannot read them
         self._held_invariant()
 
     @rule(
@@ -216,20 +252,36 @@ class ScanPolicyMachine(RuleBasedStateMachine):
     def record_exception(self, pick: int, days: int | None) -> None:
         names = [(m, n) for m, n, _ in FILES[self.file][1]]
         module, name = names[pick % len(names)]
-        argv = ["exception", "record", "--global", f"{module}:{name}", "--sha256", self._sha()]
+        sha = self._sha()
+        argv = ["exception", "record", "--global", f"{module}:{name}", "--sha256", sha]
         argv += ["--reason", "reviewed", "--by", "O"]
+        expires = None
         if days is not None:
-            argv += ["--expires", (self.now + timedelta(days=days)).date().isoformat()]
-        code, _ = self.cli(*argv)
-        assert code in (0, 1)  # refused while an active exception covers the same pair
+            expires = (self.now + timedelta(days=days)).date()
+            argv += ["--expires", expires.isoformat()]
+        code, recorded = self.cli(*argv)
+        # (e) refused exactly while an active exception covers the same pair
+        duplicate = (sha, f"{module}.{name}") in self._active()
+        assert code == (1 if duplicate else 0), (argv, code, recorded)
+        if code == 0:
+            self.exceptions[int(recorded["exception_id"])] = {
+                "sha": sha,
+                "global": f"{module}.{name}",
+                "expires_on": expires,
+                "revoked": False,
+            }
 
     @rule(pick=st.integers(min_value=0, max_value=7))
     def revoke(self, pick: int) -> None:
         _, listed = self.cli("exception", "list")
-        if not listed["exceptions"]:
+        active = sorted(i for i, e in self.exceptions.items() if self._is_active(e))
+        # (e) the list shows exactly the active exceptions
+        assert sorted(item["exception_id"] for item in listed["exceptions"]) == active, listed
+        if not active:
             return
-        item = listed["exceptions"][pick % len(listed["exceptions"])]
-        self.ok("exception", "revoke", str(item["exception_id"]), "--reason", "r", "--by", "O")
+        chosen = active[pick % len(active)]
+        self.ok("exception", "revoke", str(chosen), "--reason", "r", "--by", "O")
+        self.exceptions[chosen]["revoked"] = True
 
     @rule(strict=st.booleans())
     def globals(self, strict: bool) -> None:
@@ -254,28 +306,39 @@ class ScanPolicyMachine(RuleBasedStateMachine):
         if fail_on is not None:
             argv += ["--fail-on", fail_on.lower()]
         code, checked = self.cli(*argv)
+        self.last = (code, checked)
         assert code in (0, 2, 4), (code, checked)
+        # (b) only OSV can fail, and a failed source decides the exit, both ways
         failed = any(status.startswith("failed") for status in checked["sources"].values())
-        # (b)
-        if failed:
-            assert code == 2, code
+        assert failed == ("osv" in sources and self.osv_down), checked["sources"]
+        assert (code == 2) == failed, (code, checked["sources"])
         if fail_on is None:
             assert code != 4 and "gate" not in checked
         else:
             gate = checked["gate"]
             assert gate["decided_exit"] is (not failed)
-            if code == 0:
-                assert not gate["tripped"]
-                assert not (gate["alerts"] or gate["incomplete"] or gate["unchecked"])
-                assert not gate["empty_scope"]
-                for alert in self._alerts():
-                    if alert["state"] == "open" and not alert["excepted_at"]:
-                        assert severity_rank(alert["severity"]) > severity_rank(fail_on), alert
-            if code == 4:
-                assert gate["tripped"] and gate["decided_exit"]
-            # (a): the gate never counts an excepted alert
-            excepted = {a["alert_id"] for a in self._alerts() if a["excepted_at"]}
-            assert not excepted & {a["alert_id"] for a in gate["alerts"]}
+            # (a) and (b): the gate counts exactly the open alerts at or above the severity that
+            # are not excepted
+            gating = {
+                a["alert_id"]
+                for a in self._alerts()
+                if a["state"] == "open"
+                and not a["excepted_at"]
+                and severity_rank(a["severity"]) <= severity_rank(fail_on)
+            }
+            assert {a["alert_id"] for a in gate["alerts"]} == gating, (gate, gating)
+            # FR-021: hf-scan reads hub files only and this model has none; a failed OSV reads
+            # nothing; a model registered from a record has no weights on disk for picklescan.
+            unchecked = "picklescan" not in sources and ("osv" not in sources or self.osv_down)
+            assert gate["unchecked"] == ([MODEL] if unchecked else []), (sources, gate)
+            incomplete = self.from_record and "picklescan" in sources
+            want = [{"model_id": MODEL, "source": "picklescan"}] if incomplete else []
+            assert gate["incomplete"] == want, (sources, gate)
+            assert not gate["empty_scope"]
+            tripped = bool(gating) or unchecked or incomplete
+            assert gate["tripped"] is tripped, gate
+            if not failed:
+                assert code == (4 if tripped else 0), (code, gate)
         self._after_check(set(sources), before)
 
     @rule(fail_on=st.none() | st.sampled_from(SEVERITIES))
@@ -285,28 +348,26 @@ class ScanPolicyMachine(RuleBasedStateMachine):
 
     # -- checks after a run --
 
-    def _expected_unlisted(self, store: Store) -> set[str]:
-        active = store.exceptions(self._sha())
-        return {
-            f"{m}.{n}"
-            for m, n, _ in FILES[self.file][1]
-            if (m, n) not in SAFE and not any(e["module"] == m and e["name"] == n for e in active)
-        }
-
     def _after_check(self, sources: set[str], before: set[int]) -> None:
         alerts = self._alerts()
         new = [a for a in alerts if a["alert_id"] not in before]
-        with self._store() as store:
-            expected = self._expected_unlisted(store)
-            scanned = store.latest_file_scan(self._sha()) is not None
-            # (e) every excepted alert is covered by exceptions active now
-            for alert in alerts:
-                if alert["state"] == "open" and alert["excepted_at"]:
-                    sha = alert["cause"]["identifier"].removeprefix("sha256:")
-                    active = {f"{e['module']}.{e['name']}" for e in store.exceptions(sha)}
-                    assert set(alert["cause"]["dangerous"]) <= active, (alert["cause"], active)
-        # (c) a dismissal holds unless the evidence is new
+        active = self._active()
+        expected = self._expected_unlisted()
         weight_asked = bool(sources & WEIGHT_SOURCES)
+        with self._store() as store:
+            scanned = store.latest_file_scan(self._sha()) is not None
+        # (e) excepted exactly when the model's active exceptions cover every dangerous global
+        for alert in alerts:
+            if alert["state"] != "open":
+                continue
+            sha = alert["cause"].get("identifier", "").removeprefix("sha256:")
+            names = set(alert["cause"].get("dangerous") or [])
+            covered = bool(names) and all((sha, name) in active for name in names)
+            if alert["excepted_at"]:
+                assert covered, (alert["cause"], active)
+            elif weight_asked and alert["kind"] == "weight_file_scan":
+                assert not covered, (alert["cause"], active)
+        # (c) a dismissal holds unless the evidence is new
         for key, gone in list(self.dismissed.items()):
             reopened = [a for a in new if a["cause_key"] == key]
             if gone["kind"] in ("weight_file_scan", "package_advisory"):
@@ -323,16 +384,27 @@ class ScanPolicyMachine(RuleBasedStateMachine):
             if reopened:
                 del self.dismissed[key]
         # (d) the globals policy lists exactly what is neither safe-listed nor excepted
-        if weight_asked and self.strict and scanned:
-            key = f"globals_policy:{self._sha()}"
-            live = [a for a in alerts if a["state"] == "open" and a["cause_key"] == key]
-            if key in self.dismissed and not live:
-                return
+        key = f"globals_policy:{self._sha()}"
+        policy_open = [a for a in alerts if a["state"] == "open" and a["kind"] == "globals_policy"]
+        live = [a for a in policy_open if a["cause_key"] == key]
+        if weight_asked and not self.strict:
+            assert not policy_open, policy_open  # FR-010: the default policy clears them
+            self.strict_scan = None
+        elif weight_asked:
+            assert all(a["cause_key"] == key for a in policy_open), policy_open
+            self.strict_scan = self._sha() if scanned else None
+            if scanned and not (key in self.dismissed and not live):
+                if expected:
+                    assert len(live) == 1, (live, expected)
+                    assert set(live[0]["cause"]["unlisted"]) == expected, (live, expected)
+                else:
+                    assert not live, live
+        elif self.strict and self.strict_scan == self._sha() and key not in self.dismissed:
+            # Round 2: a lapsed exception's global is back at a packages-only check; one recorded
+            # since the last weight check waits for the next, so the list may be longer.
             if expected:
-                [alert] = live
-                assert set(alert["cause"]["unlisted"]) == expected, (alert["cause"], expected)
-            else:
-                assert not live, live
+                assert len(live) == 1, (live, expected)
+                assert expected <= set(live[0]["cause"]["unlisted"]), (live, expected)
 
     def _held_invariant(self) -> None:
         """Registration applies a record's scans: the same bytes never reopen a dismissal."""
@@ -368,35 +440,106 @@ class ScanPolicyMachine(RuleBasedStateMachine):
 
 EXPLORE = os.environ.get("MODEL_DEPENDABOT_PROPERTY_EXAMPLES")
 ScanPolicyMachine.TestCase.settings = settings(
-    # The default run stays short (about a minute). On the code before the pull request review
-    # fixes, the guided tour below caught a dismissal reopened by identical bytes from a fresh
-    # record (round 1, K4); deeper random searches (``MODEL_DEPENDABOT_PROPERTY_EXAMPLES=150`` and
-    # up) also found a re-asserted policy reopening a dismissal (K2) and an expired exception still
-    # silencing its alert at a packages-only check (K5).
-    max_examples=int(EXPLORE or "20"),
+    # Every step runs the command line, so the default run is ten derandomised sequences: about two
+    # minutes on a development machine, though wall time varies. The guided tour reaches
+    # the states that matter deterministically: on the code before the pull request review fixes
+    # it caught a dismissal reopened by identical bytes from a fresh record (round 1, K4), and it
+    # now also pins a re-applied policy holding a dismissal (K2) and a lapsed exception returning
+    # its finding at a packages-only check (K5), which before only deeper random searches
+    # (``MODEL_DEPENDABOT_PROPERTY_EXAMPLES=150`` and up) found.
+    max_examples=int(EXPLORE or "10"),
     stateful_step_count=20,
     deadline=None,
     derandomize=EXPLORE is None,
     database=None,
-    suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large],
+    suppress_health_check=[HealthCheck.too_slow],
 )
 TestScanPolicyMachine = ScanPolicyMachine.TestCase
 
+CUSTOM_LAYER = "model_dependabot_fixture.layers.CustomLayer"
+
 
 def test_the_machine_reaches_excepted_held_and_gated_states() -> None:
-    """The world above does except, hold and gate, so the properties are not vacuous."""
+    """The world above does except, hold, lapse and gate, so the properties are not vacuous.
+
+    Every step runs the machine's own checks; the asserts here pin the states the default random
+    run does not reach: a held ``globals_policy`` dismissal under a re-applied policy (K2), a
+    lapsed exception at a packages-only check (K5), an expiry that changes the outcome, the
+    default policy clearing the alert, an unchecked model and an incomplete source.
+    """
     machine = ScanPolicyMachine()
+
+    def policy_alerts() -> list[dict[str, Any]]:
+        return [
+            a for a in machine._alerts() if a["state"] == "open" and a["kind"] == "globals_policy"
+        ]
+
+    def unlisted() -> set[str]:
+        live = policy_alerts()
+        assert len(live) == 1, live
+        return set(live[0]["cause"]["unlisted"])
+
+    def weight_alert() -> dict[str, Any]:
+        live = [
+            a for a in machine._alerts() if a["state"] == "open" and a["kind"] == "weight_file_scan"
+        ]
+        assert len(live) == 1, live
+        return live[0]
+
     try:
+        machine.check(sources=["hf-scan"], fail_on="LOW")
+        code, checked = machine.last
+        assert code == 4 and checked["gate"]["unchecked"] == [MODEL]
         machine.globals(strict=True)
         machine.check(sources=["picklescan", "osv"], fail_on=None)
         kinds = {a["kind"] for a in machine._alerts() if a["state"] == "open"}
         assert {"weight_file_scan", "globals_policy", "package_advisory"} <= kinds
-        machine.record_exception(pick=2, days=None)  # os.system in the mixed file
+        assert unlisted() == {CUSTOM_LAYER, "os.system"}
+        machine.record_exception(pick=1, days=None)  # CustomLayer in the mixed file
+        machine.check(sources=["picklescan"], fail_on=None)
+        assert unlisted() == {"os.system"}
+        # FR-010: the default policy clears the alert; strict raises it again
+        machine.globals(strict=False)
+        machine.check(sources=["picklescan"], fail_on=None)
+        assert not policy_alerts()
+        machine.globals(strict=True)
         machine.check(sources=["picklescan"], fail_on="HIGH")
-        assert any(a["excepted_at"] for a in machine._alerts())
-        machine.dismiss(pick=0)
+        assert unlisted() == {"os.system"}
+        # K2: neither re-applying the same policy nor default and back reopens the dismissal
+        machine.dismiss(pick=0, kind="globals_policy")
+        machine.globals(strict=True)
+        machine.check(sources=["picklescan"], fail_on=None)
+        assert not policy_alerts()
+        machine.globals(strict=False)
+        machine.check(sources=["picklescan"], fail_on=None)
+        machine.globals(strict=True)
+        machine.check(sources=["picklescan", "osv"], fail_on=None)
+        assert not policy_alerts()
+        # K5: the revoked exception's global is back at a packages-only check, past the dismissal
+        machine.revoke(pick=0)
+        machine.check(sources=["osv"], fail_on=None)
+        assert unlisted() == {CUSTOM_LAYER, "os.system"}
+        assert f"globals_policy:{machine._sha()}" not in machine.dismissed
+        # Exceptions expiring today cover the whole day; a second one for the pair is refused
+        machine.record_exception(pick=1, days=0)
+        machine.record_exception(pick=2, days=0)  # os.system
+        machine.record_exception(pick=2, days=None)
+        machine.check(sources=["picklescan"], fail_on="HIGH")
+        assert weight_alert()["excepted_at"] and not policy_alerts()
+        # The next day both have expired: the finding and the globals are back without a scan
+        machine.advance(days=1)
+        machine.check(sources=["osv"], fail_on="HIGH")
+        assert not weight_alert()["excepted_at"]
+        assert unlisted() == {CUSTOM_LAYER, "os.system"}
+        assert machine.last[0] == 4
+        # K4: identical bytes from a fresh record never reopen a dismissal
+        machine.dismiss(pick=0, kind="weight_file_scan")
         machine.check(sources=["picklescan", "osv"], fail_on="CRITICAL")
         machine.register(file="mixed", folder="b", via_record=True)
         machine.check(sources=["osv"], fail_on="LOW")
+        machine.check(sources=["picklescan"], fail_on="CRITICAL")
+        code, checked = machine.last
+        assert code == 4
+        assert checked["gate"]["incomplete"] == [{"model_id": MODEL, "source": "picklescan"}]
     finally:
         machine.teardown()
