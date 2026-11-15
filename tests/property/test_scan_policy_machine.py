@@ -42,13 +42,15 @@ e. an alert marked excepted is covered by exceptions active at the check's time,
    ``exception list`` shows exactly the active exceptions;
 f. at most one open alert per cause, and every alert has evidence;
 g. a check that asks no weight source applies no new exception and no policy change (FR-010),
-   judged against the machine's own record of the last check that asked one (its policy value, the
-   exceptions then active and whether it judged the current file on a scan): no alert becomes
-   excepted and no open ``globals_policy`` alert closes or loses a global; with no record, under
-   another policy value or for a file it did not judge, no ``globals_policy`` alert changes;
-   otherwise the current file's alert lists exactly
-   the globals that recorded exceptions still active leave unlisted, and opens or grows only for
-   a recorded exception that has lapsed since.
+   judged against the machine's own record of what each weight check applied to each file (its
+   ``globals-snapshot``: the policy then, the globals left unlisted and the exceptions that took
+   globals off the list, ``lifecycle.py`` ``_record_globals_snapshots``): no alert becomes
+   excepted and no open ``globals_policy`` alert closes or loses a global; with no snapshot of the
+   current file, one under the default policy, or no exception of it lapsed since without a
+   renewal, no ``globals_policy`` alert changes; otherwise the file's alert lists exactly the
+   snapshot's globals, what it listed before and the lapsed globals (``_apply_globals_lapses``).
+   A renewal, an active exception for a global whose snapshot exception lapsed, opens nothing
+   (``_renewals``).
 
 The default run is derandomised and short; ``MODEL_DEPENDABOT_PROPERTY_EXAMPLES`` set to a number
 runs that many random sequences instead (unset or empty: the default run).
@@ -160,11 +162,11 @@ class ScanPolicyMachine(RuleBasedStateMachine):
         # alert, its list at dismissal.
         self.dismissed: dict[str, dict[str, Any]] = {}
         self.versions = 0
-        # What the last check that asked a weight source applied: the policy value, the active
-        # exception ids and the files it judged on a scan. An identical scan read elsewhere, as a
-        # registration record's, is the same scan (review 5). The oracles of (g) read this, never
-        # the product's mark.
-        self.mark: dict[str, Any] | None = None
+        # file SHA-256 -> what the model's last check that asked a weight source applied to it
+        # (lifecycle.py, _record_globals_snapshots): strict or not, the unlisted globals and the
+        # ids of the exceptions that took globals off the list. The oracles of (g) read this, never
+        # the product's snapshot rows.
+        self.snapshots: dict[str, dict[str, Any]] = {}
         self.last: tuple[int, Any] = (0, None)
         self.register(file="mixed", folder="a", via_record=False)
 
@@ -468,7 +470,7 @@ class ScanPolicyMachine(RuleBasedStateMachine):
                 assert after is not None, (prior, sorted(open_now))
                 kept = set(prior["cause"]["unlisted"])
                 assert kept <= set(after["cause"]["unlisted"]), (prior["cause"], after["cause"])
-            self._judge_against_mark(alerts, before, scanned)
+            self._judge_against_snapshot(alerts, before, scanned)
         # (d) the globals policy lists exactly what is neither safe-listed nor excepted
         key = f"globals_policy:{self._sha()}"
         policy_open = [a for a in alerts if a["state"] == "open" and a["kind"] == "globals_policy"]
@@ -489,7 +491,7 @@ class ScanPolicyMachine(RuleBasedStateMachine):
             self.strict
             and self.strict_scan == self._sha()
             and key not in self.dismissed
-            and self._mark_matches()
+            and self._snapshot_is_strict()
         ):
             # Round 2: a lapsed exception's global is back at a packages-only check; one recorded
             # since the last weight check waits for the next, so the list may be longer ((g) pins
@@ -498,19 +500,21 @@ class ScanPolicyMachine(RuleBasedStateMachine):
                 assert len(live) == 1, (live, expected)
                 assert expected <= set(live[0]["cause"]["unlisted"]), (live, expected)
         if weight_asked:
-            self.mark = {
-                "policy": self.strict,
-                "ids": {i for i, e in self.exceptions.items() if self._is_active(e)},
-                "files": {self._sha()} if scanned else set(),
-            }
+            # one snapshot per local pickle file of the version, with or without a scan
+            sha = self._sha()
+            names = {f"{m}.{n}" for m, n, _ in FILES[self.file][1] if (m, n) not in SAFE}
+            self.snapshots[sha] = {
+                "strict": self.strict,
+                "unlisted": expected if scanned else set(),
+                "ids": {
+                    i for i, e in self.exceptions.items()
+                    if scanned and self._is_active(e) and e["sha"] == sha and e["global"] in names
+                },
+            }  # fmt: skip
 
-    def _mark_matches(self) -> bool:
-        """The last weight check ran under the current policy value and judged this file."""
-        return (
-            self.mark is not None
-            and self.mark["policy"] == self.strict
-            and self._sha() in self.mark["files"]
-        )
+    def _snapshot_is_strict(self) -> bool:
+        snapshot = self.snapshots.get(self._sha())
+        return snapshot is not None and snapshot["strict"]
 
     def _policy_view(self, alerts: Any) -> set[tuple[str, tuple[str, ...]]]:
         return {
@@ -519,39 +523,33 @@ class ScanPolicyMachine(RuleBasedStateMachine):
             if a["state"] == "open" and a["kind"] == "globals_policy"
         }
 
-    def _judge_against_mark(
+    def _judge_against_snapshot(
         self, alerts: list[dict[str, Any]], before: dict[int, dict[str, Any]], scanned: bool
     ) -> None:
-        """(g) at a check without a weight source, against the model's record of the last one."""
+        """(g) at a check without a weight source, against the file's last snapshot."""
         key = f"globals_policy:{self._sha()}"
-        if not (self.strict and self._mark_matches() and scanned):
-            # no record, another policy value, the default policy or a file not judged: nothing
-            # changes
-            assert self._policy_view(alerts) == self._policy_view(before.values()), key
-            return
-        if key in self.dismissed:
-            return  # a held dismissal decides; (c) judges it at the next weight check
-        assert self.mark is not None
-        applied = self.mark["ids"]
-        sha = self._sha()
-        live = {
-            e["global"] for i, e in self.exceptions.items()
-            if i in applied and e["sha"] == sha and self._is_active(e)
-        }  # fmt: skip
-        lapsed = {
-            e["global"] for i, e in self.exceptions.items()
-            if i in applied and e["sha"] == sha and not self._is_active(e)
-        }  # fmt: skip
-        want = {f"{m}.{n}" for m, n, _ in FILES[self.file][1] if (m, n) not in SAFE} - live
+        others = {k for k in self._policy_view(alerts) if k[0] != key}
+        assert others == {k for k in self._policy_view(before.values()) if k[0] != key}, key
+        snapshot = self.snapshots.get(self._sha())
+        lapsed: set[str] = set()
+        if snapshot is not None and snapshot["strict"] and scanned:
+            active = self._active()
+            lapsed = {
+                e["global"] for i, e in self.exceptions.items()
+                if i in snapshot["ids"] and not self._is_active(e)
+                and (e["sha"], e["global"]) not in active  # a renewal opens nothing
+            }  # fmt: skip
         prior = [a for a in before.values() if a["state"] == "open" and a["cause_key"] == key]
         now = [a for a in alerts if a["state"] == "open" and a["cause_key"] == key]
         base = set(prior[0]["cause"]["unlisted"]) if prior else set()
-        if (want - base) & lapsed:
-            assert len(now) == 1 and set(now[0]["cause"]["unlisted"]) == want, (now, want)
-        elif prior:
-            assert len(now) == 1 and set(now[0]["cause"]["unlisted"]) == base, (now, base)
-        else:
-            assert not now, (now, want, lapsed)
+        assert snapshot is not None or not lapsed
+        listed = (snapshot["unlisted"] if snapshot else set()) | base | lapsed
+        if not lapsed or listed <= base:
+            assert self._policy_view(now) == self._policy_view(prior), (key, now, prior)
+            return
+        if key in self.dismissed:
+            return  # a held dismissal decides; (c) judges it at the next weight check
+        assert len(now) == 1 and set(now[0]["cause"]["unlisted"]) == listed, (now, listed)
 
     def _held_invariant(self) -> None:
         """Registration applies a record's scans: the same bytes never reopen a dismissal."""
@@ -751,8 +749,8 @@ def test_the_machine_reaches_excepted_held_and_gated_states() -> None:
         assert not open_alerts("globals_policy")
         step(machine.check, sources=["picklescan"], fail_on=None)
         assert unlisted() == {alpha, beta}
-        # Review 3: with every global covered, a lapse opens the alert while the exception
-        # recorded again for the same global waits for a weight check
+        # Issue #18: with every global covered, an exception revoked and recorded again for the
+        # same global is a renewal, which opens nothing at a check without a weight source
         second = record(0)
         record(1)  # Beta
         step(machine.check, sources=["picklescan"], fail_on=None)
@@ -760,18 +758,17 @@ def test_the_machine_reaches_excepted_held_and_gated_states() -> None:
         revoke(second)
         record(0)
         step(machine.check, sources=["osv"], fail_on=None)
-        assert unlisted() == {alpha}
+        assert not open_alerts("globals_policy")
         step(machine.check, sources=["picklescan"], fail_on=None)
         assert not open_alerts("globals_policy")
-        # Review 4: setting the same policy again later is no change, so a lapse still acts
+        # Setting the same policy again later changes nothing the snapshot holds, so a lapse acts
         third = max(machine.exceptions)  # Alpha, applied by the weight check above
         step(machine.advance, days=1)
         step(machine.globals, strict=True)
         revoke(third)
         step(machine.check, sources=["osv"], fail_on=None)
         assert unlisted() == {alpha}
-        # Review 5, t1: a file the last weight check did not judge waits, even when it was judged
-        # before and its exception lapses
+        # A file reads its own last snapshot, even after the model held other bytes in between
         alpha_again = record(0)
         step(machine.check, sources=["picklescan"], fail_on=None)
         assert not open_alerts("globals_policy")
@@ -780,17 +777,16 @@ def test_the_machine_reaches_excepted_held_and_gated_states() -> None:
         step(machine.register, file="two", folder="f", via_record=False)
         revoke(alpha_again)
         step(machine.check, sources=["osv"], fail_on=None)
-        assert not [
-            a for a in open_alerts("globals_policy") if a["cause_key"].endswith(machine._sha())
-        ]
+        back = [a for a in open_alerts("globals_policy") if a["cause_key"].endswith(machine._sha())]
+        assert [set(a["cause"]["unlisted"]) for a in back] == [{alpha}]
     finally:
         machine.teardown()
 
 
 def test_a_scan_the_weight_check_did_not_see_waits() -> None:
-    """Review 5: a weight check that read no scan of the file judged nothing, so a scan a record
-    brings later waits for the next weight check, lapse or not; the invariants run after every
-    step."""
+    """A weight check that read no scan of the file applied no exception to it (its snapshot lists
+    none), so after a record brings a scan a lapse waits for the next weight check; the invariants
+    run after every step."""
     machine = ScanPolicyMachine()  # mixed, registered and never scanned
 
     def step(rule: Any, **kwargs: Any) -> None:

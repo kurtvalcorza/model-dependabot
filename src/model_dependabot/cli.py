@@ -730,7 +730,7 @@ def make_handlers(
         output = Path(args.output) if args.output else None
         if output is not None:
             try:
-                refuse_link(output)  # before anything is read (PR #15 round 3, T1)
+                refuse_link(output, root)  # before anything is read (PR #15 round 3, T1)
             except OutputLinkError as error:
                 raise InvalidInputError(str(error)) from None
         if output is not None and output.exists() and not args.force:

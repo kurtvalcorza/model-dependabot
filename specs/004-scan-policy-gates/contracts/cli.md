@@ -169,12 +169,21 @@ not mistake findings for failures (SC-005).
   `--fail-on`.
 - Review round 1: every `check` releases alerts whose exception was revoked or has expired, whatever the
   sources asked; recording an exception still takes effect only at a check that asks a weight source.
-- Review round 2, narrowed by PR #19 reviews 3 to 5: a `globals_policy` finding returns in the same
-  way only for an exception that the model's last check asking a weight source applied under the strict
-  policy, to a file that check judged on a scan that saw the same as the file's latest scan (wherever
-  either was read), while the policy has not changed since; otherwise the global waits for the next
-  check that asks a weight source (after an upgrade, every model waits once). In text, a checked model
-  is never followed by a "not checked" line, and its uncheckable items follow its rows.
+- Review round 2: the same holds for a `globals_policy` finding: a global whose exception lapsed returns at
+  the next check of any sources. In text, a checked model is never followed by a "not checked" line, and
+  its uncheckable items follow its rows.
+- Review round 3 (issue #18): "lapsed" is judged against the file's latest `globals-snapshot` row, written
+  by each check that asks a weight source; only those globals change, under the policy that check
+  applied, and a file with no snapshot or a `default` one waits for the next weight check. A lapsed
+  global that an active exception covers now (a renewal: revoked or expired, then recorded again) is
+  skipped, so renewing never opens or extends an alert, neither the `globals_policy` alert nor a dangerous
+  global's `weight_file_scan` alert; this is the one exception to "a new exception waits for a weight
+  check".
+- Issue #23: a `globals_policy` alert, whether a weight check or a lapse opens it, links the scan of this
+  model's own file, so models sharing identical bytes in one `check --all` each link their own scan. Its
+  `cause.scan` gains `identical_bytes_elsewhere: true` only when no scan was made where this model's file is
+  and the scan of identical bytes elsewhere (which may carry another model's path) was used instead; the
+  key is absent otherwise.
 
 - `run show RUN_ID --json` prints `{run_id, scope, trigger, started_at, finished_at, sources, overview}`;
   its text is the run's header, each source's status, then the overview block. An unknown run exits 1

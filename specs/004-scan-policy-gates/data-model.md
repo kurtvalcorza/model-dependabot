@@ -46,30 +46,6 @@ fields from null. *Applies to*: the model versions with a pinned weight entry wh
 | `globals_policy_set_by` | text \| null | who set it; null until first set |
 | `globals_policy_set_at` | timestamp \| null | |
 
-## Weight check mark (new, PR #19 reviews 3 and 4)
-
-The table is created when the database is opened. Every check that asks a weight source
-(`picklescan`, `hf-scan` or `format-check`) writes the model's one row; a check that asks none reads
-it, so that only a lapse since that check acts (FR-010).
-
-| Field | Type | Notes |
-| :-- | :-- | :-- |
-| `model_id` | text | key |
-| `run_id` | integer | the check run that wrote it |
-| `globals_policy` | `default` \| `strict` | the model's policy value at that check |
-| `exception_ids` | JSON | the ids of every exception in the store active at that check, sorted |
-| `scan_digests` | JSON | each local pickle file the check judged: its SHA-256 to a digest of what its latest scan then saw (scanner, scanner version, whether it completed and the sorted globals), or null when it had none; not an evidence id |
-
-Rule: a check that asks no weight source changes no `globals_policy` alert when the model has no mark,
-when the policy value differs from the mark's or when the policy is `default`. Otherwise, for each file in
-`scan_digests` whose latest scan saw the same (an identical scan read elsewhere counts, spec.md
-clarifications of round 1 on new evidence), it counts only the exceptions in
-`exception_ids` that are still active, and a global returns (opening the alert or joining its list) only
-when an exception in `exception_ids` covering it has been revoked or has expired. A new exception, a
-policy change, a file the check did not judge and a newer scan wait for the next check that asks a weight
-source. Setting the same policy value again is not a change. A database that gains the table has no
-marks, so after an upgrade every model waits once for its next check that asks a weight source.
-
 ## File scan (new)
 
 What one applied static scan of a file's bytes saw, so exceptions and the strict policy can be applied
@@ -131,6 +107,9 @@ The loader also computes the SHA-256 of the file as read, which alerts cite.
            "scanned_at": "2026-11-13T09:05:00Z"}
 }
 ```
+
+`cause.scan` also holds `"identical_bytes_elsewhere": true` when the scan is not of this model's own file
+but of identical bytes elsewhere (issue #23); the key is absent otherwise.
 
 `unlisted` holds every global the scan reported, whatever the scanner's label, that is neither on the
 safe list nor excepted, so a dangerous global is listed here and in its `weight_file_scan` alert (D3).
@@ -243,6 +222,29 @@ version, `coverage.sources[]` items gain `last_state` (the row's state in that s
   `cause.unlisted`, and the scan's evidence row takes part in the comparison.
 - Review round 2: at a check that asks no weight source, a `globals_policy` alert opens again, or gains a
   global, when that global's exception was revoked or has expired.
+- Review round 3 (issue #18): every check that asks a weight source stores one `globals-snapshot` evidence
+  row per local pickle file of the version, under either policy and even when nothing is unlisted (URL
+  `globals-snapshot:<model_id>`, matched identifier the file's `sha256:<hex>`, linked to no alert). Its
+  record is `{model_id, identifier, globals_policy, set_by, set_at, safe_list_version, safe_list_sha256,
+  scan_evidence_id, unlisted, exception_ids}`: what that check applied. A check that asks no weight source
+  reads the latest one by `evidence_id` (never by timestamp, so a policy change in the same second as a
+  check does not tie) and adds to the file's alert, or opens it, only the globals of `exception_ids` that
+  have been revoked or have expired since, skipping any such global an active exception covers now (a
+  renewal never opens or extends an alert, the one exception to "a new exception waits"; the same holds
+  for an excepted `weight_file_scan` alert, which a renewal keeps excepted); the policy, the
+  rest of the list and the other exceptions recorded since stay as they were. A `default` snapshot, or none (a database from before this row), opens nothing.
+  The evidence table grows by one row per file per weight check. No table changes; one index,
+  `evidence_by_source_url_match` on evidence (source, url, matched_identifier), serves the lookup and is
+  created with `CREATE INDEX IF NOT EXISTS` when a database is opened for writing, so no migration is
+  needed.
+- Issue #23: a `globals_policy` alert, its `globals-snapshot` row and a lapse all take the scan made where
+  this model's file is: the latest file scan of the bytes whose evidence URL is the file's own URL (or, for a
+  version registered from a record, the record's URL), never merely the latest scan of the bytes, so one
+  `check --all` over models with identical bytes links each model's own scan. A lapse prefers the snapshot's
+  `scan_evidence_id` when that scan was made at the file's URL. Only when the file was never scanned where it
+  is (its copy could not be read, say) is the latest scan of identical bytes anywhere taken; it may carry
+  another model's file path, the snapshot then records `scan_identical_bytes_elsewhere: true` and the
+  alert's `cause.scan` holds `identical_bytes_elsewhere: true`. The key is absent otherwise.
 
 - The `globals-policy` evidence record is `{model_id, identifier, globals_policy, set_by, set_at,
   safe_list_version, safe_list_sha256, unlisted, excepted}`, with `unlisted` and `excepted` sorted global

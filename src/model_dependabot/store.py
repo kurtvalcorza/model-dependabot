@@ -341,19 +341,6 @@ CREATE TABLE IF NOT EXISTS store_marks (
     value TEXT NOT NULL
 );
 
--- PR #19 reviews 3 to 5: what the model's last check that asked a weight source applied, so a
--- check that asks none acts only on a lapse since then (FR-010). ``exception_ids`` is a JSON list
--- of the store's active exceptions; ``scan_digests`` a JSON object from each judged file's SHA-256
--- to a digest of what its latest scan saw (scanner, version, completeness and globals; null: no
--- scan), so an identical scan read elsewhere counts as the one judged. Not an evidence id.
-CREATE TABLE IF NOT EXISTS weight_check_marks (
-    model_id TEXT PRIMARY KEY,
-    run_id INTEGER NOT NULL REFERENCES check_runs (run_id),
-    globals_policy TEXT NOT NULL,
-    exception_ids TEXT NOT NULL,
-    scan_digests TEXT NOT NULL
-);
-
 -- Review C2, research U13: the ETag cache, kept across runs so a later run revalidates with
 -- If-None-Match. One row per URL; the body is the redacted one, kept in the evidence store.
 CREATE TABLE IF NOT EXISTS etag_cache (
@@ -408,6 +395,11 @@ CREATE TABLE IF NOT EXISTS file_scans (
 );
 
 CREATE INDEX IF NOT EXISTS file_scans_by_hash ON file_scans (sha256, file_scan_id);
+
+-- Issue #18: the latest ``globals-snapshot`` row of a model's file (``latest_globals_snapshot``).
+-- Created on open like every index here, so an existing database gains it without a migration.
+CREATE INDEX IF NOT EXISTS evidence_by_source_url_match
+    ON evidence (source, url, matched_identifier);
 
 -- Feature 004 (data-model.md, Check overview): one row per run, model and source, plus one row per
 -- source for the run as a whole, stored with ``model_id = ''`` so the key holds for it too.
@@ -505,6 +497,9 @@ def _loads(text: str | None) -> Any:
 
 
 EXCEPTION_SOURCE = "exception"
+# Issue #18: what the globals policy applied to one file at a weight check (one row per file per
+# weight check, URL ``globals-snapshot:<model_id>``, matched on the file's identifier).
+GLOBALS_SNAPSHOT_SOURCE = "globals-snapshot"
 
 
 def _canonical_json(record: Mapping[str, Any]) -> bytes:
@@ -1090,10 +1085,41 @@ class Store:
         """The latest scan of the bytes with this SHA-256 (by ``file_scan_id``), or ``None``."""
         if "file_scans" not in self.tables():
             return None  # a database older than feature 004, opened read-only
-        row = self.conn.execute(
+        return self._file_scan(
             "SELECT * FROM file_scans WHERE sha256 = ? ORDER BY file_scan_id DESC LIMIT 1",
             (sha256,),
-        ).fetchone()
+        )
+
+    def file_scan_with_evidence(self, sha256: str, evidence_id: int) -> dict[str, Any] | None:
+        """The latest scan of these bytes whose evidence is row ``evidence_id``, with that row's
+        URL as ``evidence_url``, or ``None``. Issue #23: the scan a ``globals-snapshot`` names."""
+        if "file_scans" not in self.tables():
+            return None
+        return self._file_scan(
+            "SELECT s.*, e.url AS evidence_url FROM file_scans s JOIN evidence e"
+            " ON e.evidence_id = s.evidence_id WHERE s.sha256 = ? AND s.evidence_id = ?"
+            " ORDER BY s.file_scan_id DESC LIMIT 1",
+            (sha256, evidence_id),
+        )
+
+    def latest_file_scan_at(self, sha256: str, urls: Sequence[str]) -> dict[str, Any] | None:
+        """The latest scan of these bytes whose evidence URL is one of ``urls`` (where one model's
+        file was scanned: its file URL, or its registration record), or ``None``.
+
+        Issue #23: unlike ``latest_file_scan``, never a scan of identical bytes at another place.
+        """
+        if "file_scans" not in self.tables() or not urls:
+            return None
+        marks = ", ".join("?" for _ in urls)
+        return self._file_scan(
+            "SELECT s.*, e.url AS evidence_url FROM file_scans s JOIN evidence e"
+            f" ON e.evidence_id = s.evidence_id WHERE s.sha256 = ? AND e.url IN ({marks})"
+            " ORDER BY s.file_scan_id DESC LIMIT 1",
+            (sha256, *urls),
+        )
+
+    def _file_scan(self, query: str, params: tuple[Any, ...]) -> dict[str, Any] | None:
+        row = self.conn.execute(query, params).fetchone()
         if row is None:
             return None
         record = dict(row)
@@ -1193,46 +1219,6 @@ class Store:
         assert made is not None
         return made
 
-    def set_weight_check_mark(
-        self,
-        model_id: str,
-        *,
-        run_id: int,
-        globals_policy: str,
-        exception_ids: Sequence[int],
-        scan_digests: Mapping[str, str | None],
-    ) -> None:
-        """Record what a check that asked a weight source applied to the model (FR-010)."""
-        with self.conn:
-            self.conn.execute(
-                "INSERT INTO weight_check_marks"
-                " (model_id, run_id, globals_policy, exception_ids, scan_digests)"
-                " VALUES (?, ?, ?, ?, ?) ON CONFLICT (model_id) DO UPDATE SET"
-                " run_id = excluded.run_id, globals_policy = excluded.globals_policy,"
-                " exception_ids = excluded.exception_ids, scan_digests = excluded.scan_digests",
-                (
-                    model_id,
-                    run_id,
-                    globals_policy,
-                    json.dumps(sorted(exception_ids)),
-                    json.dumps(dict(sorted(scan_digests.items()))),
-                ),
-            )
-
-    def weight_check_mark(self, model_id: str) -> dict[str, Any] | None:
-        """The model's mark from its last check that asked a weight source, or ``None``."""
-        if "weight_check_marks" not in self.tables():
-            return None  # an older database opened read-only
-        row = self.conn.execute(
-            "SELECT * FROM weight_check_marks WHERE model_id = ?", (model_id,)
-        ).fetchone()
-        if row is None:
-            return None
-        mark = dict(row)
-        mark["exception_ids"] = [int(i) for i in json.loads(mark["exception_ids"])]
-        mark["scan_digests"] = json.loads(mark["scan_digests"])
-        return mark
-
     def get_exception(self, exception_id: int) -> dict[str, Any] | None:
         if "global_exceptions" not in self.tables():
             return None
@@ -1285,6 +1271,16 @@ class Store:
         revoked = self.get_exception(exception_id)
         assert revoked is not None
         return revoked
+
+    def latest_globals_snapshot(self, model_id: str, identifier: str) -> dict[str, Any] | None:
+        """The record of the latest ``globals-snapshot`` row for this model's file, by row id
+        (so a policy change in the same second as a check does not tie), or ``None``."""
+        row = self.conn.execute(
+            "SELECT detail FROM evidence WHERE source = ? AND url = ? AND matched_identifier = ?"
+            " ORDER BY evidence_id DESC LIMIT 1",
+            (GLOBALS_SNAPSHOT_SOURCE, f"{GLOBALS_SNAPSHOT_SOURCE}:{model_id}", identifier),
+        ).fetchone()
+        return None if row is None else _loads(row["detail"])
 
     def exception_evidence(self, exception_id: int) -> list[int]:
         """The exception's evidence rows, oldest first: its record, then any revocation."""

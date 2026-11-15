@@ -39,7 +39,8 @@ class OutputExistsError(FileExistsError):
 
 
 class OutputLinkError(ValueError):
-    """The output path is a link (PR #15 round 3, T1): it is refused, never followed."""
+    """The output path is a link, or passes through one inside the project (PR #15 round 3,
+    T1; issue #16): it is refused, never followed."""
 
 
 def is_link(path: Path) -> bool:
@@ -47,14 +48,50 @@ def is_link(path: Path) -> bool:
     return path.is_symlink() or path.is_junction()
 
 
-def refuse_link(output: Path) -> None:
-    """Refuse an output path that is a link, whatever it points at and with or without
-    ``--force``: a link inside an untrusted project must never choose where a proposal lands."""
+def _is_folder(part: Path, root: Path) -> bool:
+    """Whether ``part`` names the folder ``root``: the same spelling, or the same folder on disk
+    (an 8.3 short name or another spelling of it)."""
+    if os.path.normcase(str(part)) == os.path.normcase(str(root)):
+        return True
+    try:
+        return os.path.samefile(part, root)
+    except OSError:
+        return False
+
+
+def refuse_link(output: Path, root: Path | None = None) -> None:
+    """Refuse an output path that is a link, or that passes through one inside the project
+    ``root``, whatever it points at and with or without ``--force``: a link inside an untrusted
+    project must never choose where a proposal lands (issue #16).
+
+    The folders checked are those strictly below the shortest ancestor of the absolute output
+    path that is the project folder. The shortest, so a planted ``proj/out`` pointing back at
+    ``proj`` is still refused; strictly below, so links the user owns above the project (or the
+    project folder itself, or macOS ``/tmp``) are not. The path is not normalised first, so
+    ``out/..`` still has ``out`` checked. An output outside the project, or with no ``root``
+    given, has only the file itself checked."""
     if is_link(output):
         raise OutputLinkError(
             f"{output} is a link; discover writes only to the path it is given, never through a"
             " link, so name a file that is not one"
         )
+    if root is None:
+        return
+    parents = list(output.absolute().parents)  # nearest first
+    project = root.absolute()
+    anchor = next(
+        (index for index in reversed(range(len(parents))) if _is_folder(parents[index], project)),
+        None,
+    )
+    if anchor is None:
+        return
+    for part in parents[:anchor]:
+        if is_link(part):
+            raise OutputLinkError(
+                f"{output} passes through the link {part} inside the project; discover writes"
+                " only to the path it is given, never through a link, so name a path with no"
+                " link in it"
+            )
 
 
 def toml_string(text: str) -> str:
@@ -211,10 +248,11 @@ def render(result: Mapping[str, Any], model_id: str, root: Path, output: Path) -
     return "\n".join(lines) + "\n"
 
 
-def write(text: str, output: Path, *, force: bool) -> None:
+def write(text: str, output: Path, *, force: bool, root: Path | None = None) -> None:
     """Write ``text`` to ``output`` through a temporary file beside it, checked to load as a
-    manifest first; ``OutputExistsError`` if ``output`` exists and ``force`` is false."""
-    refuse_link(output)
+    manifest first; ``OutputExistsError`` if ``output`` exists and ``force`` is false, and
+    ``OutputLinkError`` as ``refuse_link`` decides for the project ``root``."""
+    refuse_link(output, root)
     output = output.absolute()
     if output.exists() and not force:
         raise OutputExistsError(f"{output} exists; give --force to replace it")

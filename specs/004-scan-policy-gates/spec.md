@@ -118,21 +118,18 @@ Rulings by the owner on the plan's open decisions (research.md, Decisions on the
   the stored scans, like the HIGH alert. A new exception, a policy change and a new scan still wait for a check
   that asks a weight source (FR-010).
 
-### Session 2026-11-15 (pull request review, rounds 3 to 5)
+### Session 2026-11-14 (pull request review, round 3; issue #18)
 
-- Q: A lapse since when? → A: Since the model's last check that asked a weight source, which records the
-  policy value, the active exceptions and the files and scans it judged. A check without a weight source
-  acts only under that policy value, on those files and scans, for an exception in that record that has
-  since been revoked or has expired (FR-010).
-- Q: What if a model has no such record yet, as after an upgrade? → A: Its `globals_policy` alerts wait for
-  its next check that asks a weight source.
-- Q: Every global was excepted, one exception is revoked and the same global excepted again; what does a check
-  without a weight source do? → A: The lapse acts: the alert opens listing that global, and the new exception
-  waits for a check that asks a weight source.
-- Q: Does setting the same policy again count as a change? → A: No. Only the policy value is compared.
-- Q: Is a later scan of the same bytes read elsewhere (by another model or from a registration record) a new
-  scan? → A: Not when it saw the same: an identical scan, wherever it was read, counts as the scan the weight
-  check judged, as for new evidence (round 1). A file the check judged with no scan waits for its next one.
+- Q: Against what does a check without a weight source decide that an exception lapsed? → A: Against what the
+  last weight check applied, which each weight check records per file (a `globals-snapshot` evidence row).
+  Only the globals of exceptions applied there and since revoked or expired change; a policy change or an
+  exception recorded since waits. With no snapshot, or a `default` one, nothing opens until a weight check.
+- Q: Does renewing an exception (revoke or let it expire, then record it again) between weight checks raise
+  the global at a check without a weight source? → A: No (owner's decision). A lapsed global that an active
+  exception covers now is skipped, so a renewal never opens or extends an alert (the `globals_policy` alert or
+  a dangerous global's `weight_file_scan` alert), nor trips `--fail-on`. This
+  is the one exception to "a new exception waits for a weight check"; a new exception for another global
+  still waits.
 
 ## User Scenarios & Testing *(mandatory)*
 

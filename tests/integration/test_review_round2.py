@@ -8,7 +8,6 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
-import sqlite3
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -181,29 +180,6 @@ def test_m4_a_new_exception_still_waits_for_a_weight_source(
     assert len(_policy_alerts(cli, "m")) == 1  # FR-010: only a weight check applies it
 
 
-def test_m4_a_lapse_does_not_apply_a_new_exception_at_an_osv_check(
-    cli: Any, tmp_path: Path
-) -> None:
-    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
-    alpha, beta = ".".join(ALPHA), ".".join(BETA)
-    cli("policy", "m", "--globals", "strict", "--by", "Owner")
-    _, old = cli("exception", "record", "--global", alpha, "--sha256", sha,
-                 "--reason", "r", "--by", "O")  # fmt: skip
-    cli("check", "m", "--source", "picklescan")
-    [before] = _policy_alerts(cli, "m")
-    assert before["cause"]["unlisted"] == [beta]
-    cli("exception", "record", "--global", beta, "--sha256", sha, "--reason", "r", "--by", "O")
-    cli("exception", "revoke", str(old["exception_id"]), "--reason", "no", "--by", "O")
-    cli("check", "m", "--source", "osv")
-    [after] = _policy_alerts(cli, "m")
-    # FR-010: the lapsed global is back, while the new exception waits for a weight source
-    assert after["cause"]["unlisted"] == [alpha, beta]
-    assert after["cause"]["excepted"] == []
-    cli("check", "m", "--source", "picklescan")
-    [applied] = _policy_alerts(cli, "m")
-    assert applied["cause"]["unlisted"] == [alpha]
-
-
 def test_m4_a_policy_set_strict_still_waits_for_a_weight_source(
     cli: Any, tmp_path: Path, craft: Any
 ) -> None:
@@ -214,7 +190,8 @@ def test_m4_a_policy_set_strict_still_waits_for_a_weight_source(
     assert _policy_alerts(cli, "m") == []
 
 
-# --- PR #19 review 3: a check without a weight source acts only on a lapse since the last one ---
+# --- PR #19: lapse cases beyond test_review_round3.py (each against main's snapshots) -------
+
 
 ALPHA_NAME, BETA_NAME = ".".join(ALPHA), ".".join(BETA)
 
@@ -247,45 +224,6 @@ def test_r3_a_reopened_alert_waits_for_the_new_exception(cli: Any, tmp_path: Pat
     assert back["cause"]["excepted"] == []
 
 
-def test_r3_a_lapse_opens_an_alert_while_its_new_exception_waits(cli: Any, tmp_path: Path) -> None:
-    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
-    cli("policy", "m", "--globals", "strict", "--by", "Owner")
-    alpha = _except(cli, sha, ALPHA_NAME)
-    _except(cli, sha, BETA_NAME)
-    cli("check", "m", "--source", "picklescan")
-    assert _policy_alerts(cli, "m") == []
-    _revoke(cli, alpha)
-    _except(cli, sha, ALPHA_NAME)
-    cli("check", "m", "--source", "osv")
-    [opened] = _policy_alerts(cli, "m")
-    assert opened["cause"]["unlisted"] == [ALPHA_NAME]
-    cli("check", "m", "--source", "picklescan")
-    assert _policy_alerts(cli, "m") == []
-
-
-def test_r3_a_policy_set_strict_ignores_an_older_lapse(cli: Any, tmp_path: Path) -> None:
-    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
-    _revoke(cli, _except(cli, sha, ALPHA_NAME))
-    cli("check", "m", "--source", "picklescan")
-    cli("policy", "m", "--globals", "strict", "--by", "Owner")
-    _, checked = cli("check", "m", "--source", "osv", "--fail-on", "moderate")
-    assert [a["kind"] for a in checked["gate"]["alerts"]] == []
-    assert _policy_alerts(cli, "m") == []
-    cli("check", "m", "--source", "picklescan")
-    assert len(_policy_alerts(cli, "m")) == 1
-
-
-def test_r3_a_policy_set_strict_waits_even_for_a_fresh_lapse(cli: Any, tmp_path: Path) -> None:
-    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
-    alpha = _except(cli, sha, ALPHA_NAME)
-    cli("check", "m", "--source", "picklescan")
-    cli("policy", "m", "--globals", "strict", "--by", "Owner")
-    _revoke(cli, alpha)
-    _, checked = cli("check", "m", "--source", "osv", "--fail-on", "moderate")
-    assert [a["kind"] for a in checked["gate"]["alerts"]] == []
-    assert _policy_alerts(cli, "m") == []
-
-
 def test_r3_an_alert_the_default_policy_cleared_stays_cleared(cli: Any, tmp_path: Path) -> None:
     sha = _register(cli, tmp_path / "m", "m", two_suspicious())
     cli("policy", "m", "--globals", "strict", "--by", "Owner")
@@ -300,24 +238,6 @@ def test_r3_an_alert_the_default_policy_cleared_stays_cleared(cli: Any, tmp_path
     cli("check", "m", "--source", "osv")
     assert _policy_alerts(cli, "m") == []
 
-
-def test_r3_without_a_mark_a_lapse_waits_for_a_weight_check(cli: Any, tmp_path: Path) -> None:
-    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
-    cli("policy", "m", "--globals", "strict", "--by", "Owner")
-    alpha = _except(cli, sha, ALPHA_NAME)
-    cli("check", "m", "--source", "picklescan")
-    with sqlite3.connect(tmp_path / "db" / "md.db") as conn:
-        conn.execute("DROP TABLE IF EXISTS weight_check_marks")  # a store from before the mark
-    _revoke(cli, alpha)
-    cli("check", "m", "--source", "osv")
-    [untouched] = _policy_alerts(cli, "m")
-    assert untouched["cause"]["unlisted"] == [BETA_NAME]
-    cli("check", "m", "--source", "picklescan")
-    [listed] = _policy_alerts(cli, "m")
-    assert listed["cause"]["unlisted"] == [ALPHA_NAME, BETA_NAME]
-
-
-# --- PR #19 review 4: the policy value, and only the files and scans the weight check judged ----
 
 GAMMA = ("model_dependabot_fixture.layers", "Gamma")
 
@@ -347,23 +267,6 @@ def test_r4_strict_set_again_later_still_lets_a_lapse_act(
     cli("check", "m", "--source", "picklescan")
     clock.at += timedelta(minutes=5)
     cli("policy", "m", "--globals", "strict", "--by", "Owner")
-    clock.at += timedelta(minutes=5)
-    _revoke(cli, alpha)
-    cli("check", "m", "--source", "osv")
-    [back] = _policy_alerts(cli, "m")
-    assert back["cause"]["unlisted"] == [ALPHA_NAME, BETA_NAME]
-
-
-def test_r4_strict_default_strict_without_a_check_lets_a_lapse_act(
-    cli: Any, tmp_path: Path, clock: Clock
-) -> None:
-    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
-    cli("policy", "m", "--globals", "strict", "--by", "Owner")
-    alpha = _except(cli, sha, ALPHA_NAME)
-    cli("check", "m", "--source", "picklescan")
-    for policy in ("default", "strict"):
-        clock.at += timedelta(minutes=5)
-        cli("policy", "m", "--globals", policy, "--by", "Owner")
     clock.at += timedelta(minutes=5)
     _revoke(cli, alpha)
     cli("check", "m", "--source", "osv")
@@ -409,9 +312,6 @@ def test_r4_a_lapse_before_the_weight_check_never_acts(cli: Any, tmp_path: Path)
     _version(cli, tmp_path / "m3", "m", two_suspicious())
     cli("check", "m", "--source", "osv")
     assert _two_alerts(cli, "m", sha) == []
-
-
-# --- PR #19 review 5: an identical scan read elsewhere is the scan the weight check judged -------
 
 
 def _from_record(cli: Any, root: Path, model_id: str, data: bytes, *extra: str) -> None:
@@ -518,35 +418,3 @@ def test_m5_an_uncheckable_item_alone_is_not_coverage(
     [model] = checked["overview"]["models"]
     assert model["checked"] is False
     assert [item["identifier"] for item in model["uncheckable"]] == [UNREAD]
-
-
-_DIGEST_SCAN: dict[str, Any] = {
-    "scanner": "picklescan",
-    "scanner_version": "1.0.0",
-    "complete": 1,
-    "globals": [
-        {"module": "os", "name": "system", "safety": "dangerous"},
-        {"module": "collections", "name": "OrderedDict", "safety": "innocuous"},
-    ],
-}
-
-
-def test_r6_the_scan_digest_is_pinned_and_covers_what_a_scan_saw() -> None:
-    """Review 6: the mark's digest is fixed, ignores order and changes with every field it covers.
-
-    A change to the formula would make every model's lapse wait once for a weight check, so it is
-    pinned here; each field the spec counts as the scan's content must move it.
-    """
-    digest = lifecycle._scan_digest(_DIGEST_SCAN)
-    assert digest == "2c2dc147d9d07d71bb0ce0b3401516d331cc2fda349a3153e562b6d4d8e04720"
-    reordered = {**_DIGEST_SCAN, "complete": True, "globals": _DIGEST_SCAN["globals"][::-1]}
-    assert lifecycle._scan_digest(reordered) == digest
-    first, second = _DIGEST_SCAN["globals"]
-    changed = [
-        {**_DIGEST_SCAN, "scanner": "other"},
-        {**_DIGEST_SCAN, "scanner_version": "1.0.1"},
-        {**_DIGEST_SCAN, "complete": 0},
-        {**_DIGEST_SCAN, "globals": [first]},
-        {**_DIGEST_SCAN, "globals": [{**first, "safety": "innocuous"}, second]},
-    ]
-    assert all(lifecycle._scan_digest(scan) != digest for scan in changed)
