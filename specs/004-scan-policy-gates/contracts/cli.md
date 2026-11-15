@@ -169,12 +169,12 @@ not mistake findings for failures (SC-005).
   `--fail-on`.
 - Review round 1: every `check` releases alerts whose exception was revoked or has expired, whatever the
   sources asked; recording an exception still takes effect only at a check that asks a weight source.
-- Review round 2, narrowed by PR #19 reviews 3 and 4: a `globals_policy` finding returns in the same way
-  only for an exception that the model's last check asking a weight source applied under the strict
-  policy, to a file that check judged on an identical scan of those bytes, wherever it was read, while the
-  policy has not changed since; otherwise the global waits for the next check that asks a weight source (after an upgrade, every
-  model waits once). In text, a checked model is never followed by a "not checked" line, and its
-  uncheckable items follow its rows.
+- Review round 2, narrowed by PR #19 reviews 3 to 5: a `globals_policy` finding returns in the same
+  way only for an exception that the model's last check asking a weight source applied under the strict
+  policy, to a file that check judged on a scan that saw the same as the file's latest scan (wherever
+  either was read), while the policy has not changed since; otherwise the global waits for the next
+  check that asks a weight source (after an upgrade, every model waits once). In text, a checked model
+  is never followed by a "not checked" line, and its uncheckable items follow its rows.
 
 - `run show RUN_ID --json` prints `{run_id, scope, trigger, started_at, finished_at, sources, overview}`;
   its text is the run's header, each source's status, then the overview block. An unknown run exits 1

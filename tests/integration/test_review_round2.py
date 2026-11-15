@@ -518,3 +518,35 @@ def test_m5_an_uncheckable_item_alone_is_not_coverage(
     [model] = checked["overview"]["models"]
     assert model["checked"] is False
     assert [item["identifier"] for item in model["uncheckable"]] == [UNREAD]
+
+
+_DIGEST_SCAN: dict[str, Any] = {
+    "scanner": "picklescan",
+    "scanner_version": "1.0.0",
+    "complete": 1,
+    "globals": [
+        {"module": "os", "name": "system", "safety": "dangerous"},
+        {"module": "collections", "name": "OrderedDict", "safety": "innocuous"},
+    ],
+}
+
+
+def test_r6_the_scan_digest_is_pinned_and_covers_what_a_scan_saw() -> None:
+    """Review 6: the mark's digest is fixed, ignores order and changes with every field it covers.
+
+    A change to the formula would make every model's lapse wait once for a weight check, so it is
+    pinned here; each field the spec counts as the scan's content must move it.
+    """
+    digest = lifecycle._scan_digest(_DIGEST_SCAN)
+    assert digest == "2c2dc147d9d07d71bb0ce0b3401516d331cc2fda349a3153e562b6d4d8e04720"
+    reordered = {**_DIGEST_SCAN, "complete": True, "globals": _DIGEST_SCAN["globals"][::-1]}
+    assert lifecycle._scan_digest(reordered) == digest
+    first, second = _DIGEST_SCAN["globals"]
+    changed = [
+        {**_DIGEST_SCAN, "scanner": "other"},
+        {**_DIGEST_SCAN, "scanner_version": "1.0.1"},
+        {**_DIGEST_SCAN, "complete": 0},
+        {**_DIGEST_SCAN, "globals": [first]},
+        {**_DIGEST_SCAN, "globals": [{**first, "safety": "innocuous"}, second]},
+    ]
+    assert all(lifecycle._scan_digest(scan) != digest for scan in changed)

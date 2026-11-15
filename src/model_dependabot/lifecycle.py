@@ -1465,7 +1465,7 @@ def _policy_entries(store: Store, target: _Target) -> list[Mapping[str, Any]]:
 
 def _mark_weight_check(store: Store, run_id: int, target: _Target) -> None:
     """Record the policy, the exceptions and the files and scans a check that asked a weight
-    source applied (PR #19 reviews 3 and 4)."""
+    source applied (PR #19 reviews 3 to 5)."""
     model = store.get_model(target.model_id) or {}
     digests: dict[str, str | None] = {}
     for entry in _policy_entries(store, target):
@@ -1503,7 +1503,7 @@ def _apply_globals_policy(
     applied: set[int] = set()
     judged: dict[str, str | None] = {}
     if lapse_only:
-        # FR-010, PR #19 reviews 3 and 4: outside a weight check only a lapse since the model's
+        # FR-010, PR #19 reviews 3 to 5: outside a weight check only a lapse since the model's
         # last weight check acts, under the policy value that check applied and on the files and
         # scans it judged; with no mark yet, nothing does.
         mark = store.weight_check_mark(target.model_id)

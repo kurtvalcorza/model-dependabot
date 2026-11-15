@@ -341,7 +341,7 @@ CREATE TABLE IF NOT EXISTS store_marks (
     value TEXT NOT NULL
 );
 
--- PR #19 reviews 3 and 4: what the model's last check that asked a weight source applied, so a
+-- PR #19 reviews 3 to 5: what the model's last check that asked a weight source applied, so a
 -- check that asks none acts only on a lapse since then (FR-010). ``exception_ids`` is a JSON list
 -- of the store's active exceptions; ``scan_digests`` a JSON object from each judged file's SHA-256
 -- to a digest of what its latest scan saw (scanner, version, completeness and globals; null: no
