@@ -1091,29 +1091,31 @@ class Store:
         )
 
     def file_scan_with_evidence(self, sha256: str, evidence_id: int) -> dict[str, Any] | None:
-        """The latest scan of these bytes whose evidence is row ``evidence_id``, or ``None``.
-
-        Issue #23: the scan a ``globals-snapshot`` names (its ``scan_evidence_id``).
-        """
+        """The latest scan of these bytes whose evidence is row ``evidence_id``, with that row's
+        URL as ``evidence_url``, or ``None``. Issue #23: the scan a ``globals-snapshot`` names."""
         if "file_scans" not in self.tables():
             return None
         return self._file_scan(
-            "SELECT * FROM file_scans WHERE sha256 = ? AND evidence_id = ?"
-            " ORDER BY file_scan_id DESC LIMIT 1",
+            "SELECT s.*, e.url AS evidence_url FROM file_scans s JOIN evidence e"
+            " ON e.evidence_id = s.evidence_id WHERE s.sha256 = ? AND s.evidence_id = ?"
+            " ORDER BY s.file_scan_id DESC LIMIT 1",
             (sha256, evidence_id),
         )
 
-    def latest_model_file_scan(self, sha256: str, model_id: str) -> dict[str, Any] | None:
-        """The latest scan of these bytes made in a run that checked ``model_id``, or ``None``.
+    def latest_file_scan_at(self, sha256: str, urls: Sequence[str]) -> dict[str, Any] | None:
+        """The latest scan of these bytes whose evidence URL is one of ``urls`` (where one model's
+        file was scanned: its file URL, or its registration record), or ``None``.
 
-        Issue #23: unlike ``latest_file_scan``, never a scan of identical bytes in another model.
+        Issue #23: unlike ``latest_file_scan``, never a scan of identical bytes at another place.
         """
-        if "file_scans" not in self.tables():
+        if "file_scans" not in self.tables() or not urls:
             return None
+        marks = ", ".join("?" for _ in urls)
         return self._file_scan(
-            "SELECT s.* FROM file_scans s JOIN check_run_targets t ON t.run_id = s.run_id"
-            " WHERE s.sha256 = ? AND t.model_id = ? ORDER BY s.file_scan_id DESC LIMIT 1",
-            (sha256, model_id),
+            "SELECT s.*, e.url AS evidence_url FROM file_scans s JOIN evidence e"
+            f" ON e.evidence_id = s.evidence_id WHERE s.sha256 = ? AND e.url IN ({marks})"
+            " ORDER BY s.file_scan_id DESC LIMIT 1",
+            (sha256, *urls),
         )
 
     def _file_scan(self, query: str, params: tuple[Any, ...]) -> dict[str, Any] | None:

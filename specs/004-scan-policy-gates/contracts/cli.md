@@ -179,6 +179,11 @@ not mistake findings for failures (SC-005).
   skipped, so renewing never opens or extends an alert, neither the `globals_policy` alert nor a dangerous
   global's `weight_file_scan` alert; this is the one exception to "a new exception waits for a weight
   check".
+- Issue #23: a `globals_policy` alert, whether a weight check or a lapse opens it, links the scan of this
+  model's own file, so models sharing identical bytes in one `check --all` each link their own scan. Its
+  `cause.scan` gains `identical_bytes_elsewhere: true` only when no scan was made where this model's file is
+  and the scan of identical bytes elsewhere (which may carry another model's path) was used instead; the
+  key is absent otherwise.
 
 - `run show RUN_ID --json` prints `{run_id, scope, trigger, started_at, finished_at, sources, overview}`;
   its text is the run's header, each source's status, then the overview block. An unknown run exits 1

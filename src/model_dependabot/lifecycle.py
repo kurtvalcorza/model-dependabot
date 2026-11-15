@@ -1484,7 +1484,7 @@ def _record_globals_snapshots(
     for entry in _policy_files(store, target):
         identifier = entry["identifier"]
         sha256 = identifier.removeprefix("sha256:")
-        scan = store.latest_file_scan(sha256)
+        scan, elsewhere = _own_scan(store, target, entry)
         active = store.exceptions(sha256)
         covered = [] if scan is None else globals_policy.excepted(scan, safe, active)
         record = {
@@ -1499,6 +1499,8 @@ def _record_globals_snapshots(
             "unlisted": [] if scan is None else globals_policy.unlisted(scan, safe, active),
             "exception_ids": sorted({int(e["exception_id"]) for e in covered}),
         }
+        if elsewhere:
+            record["scan_identical_bytes_elsewhere"] = True
         store.add_evidence(
             source=GLOBALS_SNAPSHOT_SOURCE,
             url=f"{GLOBALS_SNAPSHOT_SOURCE}:{target.model_id}",
@@ -1510,25 +1512,46 @@ def _record_globals_snapshots(
         )
 
 
-def _snapshot_scan(
-    store: Store, model_id: str, sha256: str, snapshot: Mapping[str, Any]
-) -> tuple[dict[str, Any] | None, bool]:
-    """The scan a lapse links, and whether it was made of identical bytes elsewhere (issue #23).
+def _scan_urls(target: _Target, entry: Mapping[str, Any]) -> list[str]:
+    """Where this model's file is scanned: the URL a local scan's evidence carries, and for a
+    version registered from a record, the record's URL (``apply_recorded_scans``)."""
+    urls = [_local_path(target, entry["location"]).as_uri()]
+    if target.record_sha256:
+        urls.append(f"{RECORD_URL_PREFIX}{target.record_sha256}")
+    return urls
 
-    The snapshot's own scan (``scan_evidence_id``): the one this model's last weight check used.
-    Failing that, the latest scan of the bytes made in a run that checked this model. Only when
-    neither exists, the latest scan of the bytes anywhere, which may carry another model's path.
+
+def _own_scan(
+    store: Store, target: _Target, entry: Mapping[str, Any]
+) -> tuple[dict[str, Any] | None, bool]:
+    """The latest scan of this model's file, and whether it was made of identical bytes elsewhere.
+
+    Issue #23: a scan is picked by where it was made, never by recency alone, so a check of
+    several models with the same bytes (``check --all``) never names another model's scan. Only
+    when this file was never scanned where it is does it fall back to the latest scan of the bytes
+    anywhere, which may carry another model's path; the second value is then ``True``.
     """
-    evidence_id = snapshot.get("scan_evidence_id")
-    if evidence_id is not None:
-        scan = store.file_scan_with_evidence(sha256, int(evidence_id))
-        if scan is not None:
-            return scan, False
-    scan = store.latest_model_file_scan(sha256, model_id)
+    sha256 = entry["identifier"].removeprefix("sha256:")
+    scan = store.latest_file_scan_at(sha256, _scan_urls(target, entry))
     if scan is not None:
         return scan, False
     scan = store.latest_file_scan(sha256)
     return scan, scan is not None
+
+
+def _snapshot_scan(
+    store: Store, target: _Target, entry: Mapping[str, Any], snapshot: Mapping[str, Any]
+) -> tuple[dict[str, Any] | None, bool]:
+    """The scan a lapse links (issue #23): the snapshot's own (``scan_evidence_id``, the one this
+    model's last weight check used) when it was made where this model's file is, else
+    ``_own_scan`` (a snapshot from before this fix may name another model's scan)."""
+    sha256 = entry["identifier"].removeprefix("sha256:")
+    evidence_id = snapshot.get("scan_evidence_id")
+    if evidence_id is not None:
+        scan = store.file_scan_with_evidence(sha256, int(evidence_id))
+        if scan is not None and scan["evidence_url"] in _scan_urls(target, entry):
+            return scan, False
+    return _own_scan(store, target, entry)
 
 
 def _apply_globals_lapses(store: Store, run_id: int, target: _Target) -> None:
@@ -1549,7 +1572,7 @@ def _apply_globals_lapses(store: Store, run_id: int, target: _Target) -> None:
         snapshot = store.latest_globals_snapshot(target.model_id, identifier)
         if snapshot is None or snapshot.get("globals_policy") != "strict":
             continue
-        scan, elsewhere = _snapshot_scan(store, target.model_id, sha256, snapshot)
+        scan, elsewhere = _snapshot_scan(store, target, entry, snapshot)
         if scan is None:
             continue
         known = {int(e["exception_id"]): e for e in store.exceptions(sha256, include_inactive=True)}
@@ -1669,7 +1692,7 @@ def _apply_globals_policy(
         open_alert = store.find_open_alert(
             target.model_id, weight_cause_key(GLOBALS_POLICY_ALERT, identifier)
         )
-        scan = store.latest_file_scan(sha256)
+        scan, elsewhere = _own_scan(store, target, entry)
         record: dict[str, Any] = {
             "model_id": target.model_id,
             "identifier": identifier,
@@ -1731,6 +1754,8 @@ def _apply_globals_policy(
                 "scanned_at": scan["scanned_at"],
             },
         }
+        if elsewhere:
+            cause["scan"]["identical_bytes_elsewhere"] = True
         _weight_alert(
             store,
             run_id,
