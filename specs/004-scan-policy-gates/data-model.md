@@ -108,6 +108,9 @@ The loader also computes the SHA-256 of the file as read, which alerts cite.
 }
 ```
 
+`cause.scan` also holds `"identical_bytes_elsewhere": true` when the scan is not of this model's own file
+but of identical bytes elsewhere (issue #23); the key is absent otherwise.
+
 `unlisted` holds every global the scan reported, whatever the scanner's label, that is neither on the
 safe list nor excepted, so a dangerous global is listed here and in its `weight_file_scan` alert (D3).
 The alert's `globals-policy` evidence record carries the sorted `unlisted` and `excepted` lists, so a
@@ -234,6 +237,14 @@ version, `coverage.sources[]` items gain `last_state` (the row's state in that s
   `evidence_by_source_url_match` on evidence (source, url, matched_identifier), serves the lookup and is
   created with `CREATE INDEX IF NOT EXISTS` when a database is opened for writing, so no migration is
   needed.
+- Issue #23: a `globals_policy` alert, its `globals-snapshot` row and a lapse all take the scan made where
+  this model's file is: the latest file scan of the bytes whose evidence URL is the file's own URL (or, for a
+  version registered from a record, the record's URL), never merely the latest scan of the bytes, so one
+  `check --all` over models with identical bytes links each model's own scan. A lapse prefers the snapshot's
+  `scan_evidence_id` when that scan was made at the file's URL. Only when the file was never scanned where it
+  is (its copy could not be read, say) is the latest scan of identical bytes anywhere taken; it may carry
+  another model's file path, the snapshot then records `scan_identical_bytes_elsewhere: true` and the
+  alert's `cause.scan` holds `identical_bytes_elsewhere: true`. The key is absent otherwise.
 
 - The `globals-policy` evidence record is `{model_id, identifier, globals_policy, set_by, set_at,
   safe_list_version, safe_list_sha256, unlisted, excepted}`, with `unlisted` and `excepted` sorted global

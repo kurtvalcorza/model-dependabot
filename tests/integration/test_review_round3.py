@@ -290,3 +290,109 @@ def test_an_exception_for_other_bytes_is_no_renewal(cli: Any, tmp_path: Path, cl
     _renew(cli, A, hashlib.sha256(b"other bytes").hexdigest())
     cli("check", "m", "--source", "osv")
     assert _unlisted(cli) == [[A]]
+
+
+# --- Issue #23 item 2: a lapse links this model's scan, not another model's scan of the bytes ---
+
+
+def _scan_urls(tmp_path: Path, alert_id: int) -> list[str]:
+    with sqlite3.connect(tmp_path / "db" / "md.db") as conn:
+        rows = conn.execute(
+            "SELECT e.url FROM alert_evidence l JOIN evidence e USING (evidence_id)"
+            " WHERE l.alert_id = ? AND e.source = 'picklescan' ORDER BY e.evidence_id",
+            (alert_id,),
+        ).fetchall()
+    return [row[0] for row in rows]
+
+
+def test_a_lapse_links_the_scan_of_this_models_file_not_of_identical_bytes_elsewhere(
+    cli: Any, tmp_path: Path, clock: Clock
+) -> None:
+    data = two_suspicious()
+    sha = _register(cli, tmp_path / "a", "a", data)
+    cli("policy", "a", "--globals", "strict", "--by", "Owner")
+    cli("exception", "record", "--global", A, "--sha256", sha, "--reason", "r",
+        "--by", "O", "--expires", "2026-11-15")  # fmt: skip
+    cli("exception", "record", "--global", B, "--sha256", sha, "--reason", "r", "--by", "O")
+    cli("check", "a", "--source", "picklescan")
+    assert _policy_alerts(cli, "a") == []  # both excepted
+    assert _register(cli, tmp_path / "b", "b", data) == sha  # the same bytes, another model
+    cli("check", "b", "--source", "picklescan")  # scanned last
+    clock.at = NOW + timedelta(days=30)  # A's exception has expired
+    cli("check", "a", "--source", "osv")
+    [lapsed] = _policy_alerts(cli, "a")  # opened by the lapse
+    assert lapsed["cause"]["unlisted"] == [A]
+    [url] = _scan_urls(tmp_path, lapsed["alert_id"])
+    assert Path(url).parent.name == "a", url  # model a's own file, not model b's
+    assert "identical_bytes_elsewhere" not in lapsed["cause"]["scan"]
+
+
+def _owners(tmp_path: Path, alert: dict[str, Any]) -> list[str]:
+    return [Path(url).parent.name for url in _scan_urls(tmp_path, alert["alert_id"])]
+
+
+def _twins(cli: Any, tmp_path: Path) -> str:
+    """Models a and b with the same bytes, both strict, A expiring and B excepted on them."""
+    data = two_suspicious()
+    sha = _register(cli, tmp_path / "a", "a", data)
+    assert _register(cli, tmp_path / "b", "b", data) == sha
+    for model in ("a", "b"):
+        cli("policy", model, "--globals", "strict", "--by", "Owner")
+    return sha
+
+
+def test_one_run_over_models_with_the_same_bytes_links_each_models_own_scan(
+    cli: Any, tmp_path: Path, clock: Clock
+) -> None:
+    _twins(cli, tmp_path)
+    cli("check", "--all", "--source", "picklescan")  # scans both, then applies the policy
+    for model in ("a", "b"):
+        [opened] = _policy_alerts(cli, model)  # the weight pass
+        assert _owners(tmp_path, opened) == [model]
+        assert "identical_bytes_elsewhere" not in opened["cause"]["scan"]
+
+
+def test_a_lapse_after_one_run_over_both_models_links_this_models_scan(
+    cli: Any, tmp_path: Path, clock: Clock
+) -> None:
+    sha = _twins(cli, tmp_path)
+    cli("exception", "record", "--global", A, "--sha256", sha, "--reason", "r",
+        "--by", "O", "--expires", "2026-11-15")  # fmt: skip
+    cli("exception", "record", "--global", B, "--sha256", sha, "--reason", "r", "--by", "O")
+    cli("check", "--all", "--source", "picklescan")
+    assert _policy_alerts(cli, "a") == _policy_alerts(cli, "b") == []
+    clock.at = NOW + timedelta(days=30)
+    cli("check", "--all", "--source", "osv")
+    for model in ("a", "b"):
+        [lapsed] = _policy_alerts(cli, model)
+        assert lapsed["cause"]["unlisted"] == [A]
+        assert _owners(tmp_path, lapsed) == [model]
+        assert "identical_bytes_elsewhere" not in lapsed["cause"]["scan"]
+
+
+def test_a_weight_check_that_does_not_rescan_keeps_this_models_scan(
+    cli: Any, tmp_path: Path, clock: Clock
+) -> None:
+    sha = _twins(cli, tmp_path)
+    cli("exception", "record", "--global", A, "--sha256", sha, "--reason", "r",
+        "--by", "O", "--expires", "2026-11-15")  # fmt: skip
+    cli("exception", "record", "--global", B, "--sha256", sha, "--reason", "r", "--by", "O")
+    cli("check", "a", "--source", "picklescan")
+    cli("check", "b", "--source", "picklescan")
+    cli("check", "a", "--source", "format-check")  # a weight check that scans nothing
+    clock.at = NOW + timedelta(days=30)
+    cli("check", "a", "--source", "osv")
+    [lapsed] = _policy_alerts(cli, "a")
+    assert _owners(tmp_path, lapsed) == ["a"]
+
+
+def test_a_file_never_scanned_where_it_is_says_the_scan_came_from_identical_bytes_elsewhere(
+    cli: Any, tmp_path: Path
+) -> None:
+    _twins(cli, tmp_path)
+    cli("check", "b", "--source", "picklescan")
+    (tmp_path / "a" / "w.pkl").unlink()  # a's own copy cannot be scanned
+    cli("check", "a", "--source", "picklescan")
+    [opened] = _policy_alerts(cli, "a")
+    assert _owners(tmp_path, opened) == ["b"]
+    assert opened["cause"]["scan"]["identical_bytes_elsewhere"] is True
