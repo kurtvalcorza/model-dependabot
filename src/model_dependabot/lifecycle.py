@@ -1510,6 +1510,27 @@ def _record_globals_snapshots(
         )
 
 
+def _snapshot_scan(
+    store: Store, model_id: str, sha256: str, snapshot: Mapping[str, Any]
+) -> tuple[dict[str, Any] | None, bool]:
+    """The scan a lapse links, and whether it was made of identical bytes elsewhere (issue #23).
+
+    The snapshot's own scan (``scan_evidence_id``): the one this model's last weight check used.
+    Failing that, the latest scan of the bytes made in a run that checked this model. Only when
+    neither exists, the latest scan of the bytes anywhere, which may carry another model's path.
+    """
+    evidence_id = snapshot.get("scan_evidence_id")
+    if evidence_id is not None:
+        scan = store.file_scan_with_evidence(sha256, int(evidence_id))
+        if scan is not None:
+            return scan, False
+    scan = store.latest_model_file_scan(sha256, model_id)
+    if scan is not None:
+        return scan, False
+    scan = store.latest_file_scan(sha256)
+    return scan, scan is not None
+
+
 def _apply_globals_lapses(store: Store, run_id: int, target: _Target) -> None:
     """At a check that asks no weight source, return the globals whose exception lapsed.
 
@@ -1518,7 +1539,8 @@ def _apply_globals_lapses(store: Store, run_id: int, target: _Target) -> None:
     expired is added to the file's alert (opened if none is open); everything else, the policy
     included, stays as that check left it, except that a global an active exception covers now
     (a renewal) is skipped. A snapshot under the default policy, or none at all (a
-    store from before the snapshots), opens nothing: the next weight check decides (FR-010).
+    store from before the snapshots), opens nothing: the next weight check decides (FR-010). The
+    scan linked is the snapshot's own (issue #23, ``_snapshot_scan``).
     """
     now = store.now()
     for entry in _policy_files(store, target):
@@ -1527,7 +1549,7 @@ def _apply_globals_lapses(store: Store, run_id: int, target: _Target) -> None:
         snapshot = store.latest_globals_snapshot(target.model_id, identifier)
         if snapshot is None or snapshot.get("globals_policy") != "strict":
             continue
-        scan = store.latest_file_scan(sha256)
+        scan, elsewhere = _snapshot_scan(store, target.model_id, sha256, snapshot)
         if scan is None:
             continue
         known = {int(e["exception_id"]): e for e in store.exceptions(sha256, include_inactive=True)}
@@ -1580,6 +1602,8 @@ def _apply_globals_lapses(store: Store, run_id: int, target: _Target) -> None:
                 "scanned_at": scan["scanned_at"],
             },
         }
+        if elsewhere:
+            cause["scan"]["identical_bytes_elsewhere"] = True
         _weight_alert(
             store,
             run_id,

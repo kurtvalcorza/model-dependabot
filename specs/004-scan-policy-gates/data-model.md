@@ -234,6 +234,11 @@ version, `coverage.sources[]` items gain `last_state` (the row's state in that s
   `evidence_by_source_url_match` on evidence (source, url, matched_identifier), serves the lookup and is
   created with `CREATE INDEX IF NOT EXISTS` when a database is opened for writing, so no migration is
   needed.
+- Issue #23: the scan a lapse links to the `globals_policy` alert is the snapshot's own, the file scan whose
+  evidence is the snapshot's `scan_evidence_id` (the scan this model's last weight check used). Without one,
+  it is the latest scan of the bytes made in a run that checked this model; only when neither exists is it
+  the latest scan of identical bytes anywhere, which may carry another model's file path, and the alert's
+  `cause.scan` then holds `identical_bytes_elsewhere: true`.
 
 - The `globals-policy` evidence record is `{model_id, identifier, globals_policy, set_by, set_at,
   safe_list_version, safe_list_sha256, unlisted, excepted}`, with `unlisted` and `excepted` sorted global

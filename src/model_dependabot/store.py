@@ -1085,10 +1085,39 @@ class Store:
         """The latest scan of the bytes with this SHA-256 (by ``file_scan_id``), or ``None``."""
         if "file_scans" not in self.tables():
             return None  # a database older than feature 004, opened read-only
-        row = self.conn.execute(
+        return self._file_scan(
             "SELECT * FROM file_scans WHERE sha256 = ? ORDER BY file_scan_id DESC LIMIT 1",
             (sha256,),
-        ).fetchone()
+        )
+
+    def file_scan_with_evidence(self, sha256: str, evidence_id: int) -> dict[str, Any] | None:
+        """The latest scan of these bytes whose evidence is row ``evidence_id``, or ``None``.
+
+        Issue #23: the scan a ``globals-snapshot`` names (its ``scan_evidence_id``).
+        """
+        if "file_scans" not in self.tables():
+            return None
+        return self._file_scan(
+            "SELECT * FROM file_scans WHERE sha256 = ? AND evidence_id = ?"
+            " ORDER BY file_scan_id DESC LIMIT 1",
+            (sha256, evidence_id),
+        )
+
+    def latest_model_file_scan(self, sha256: str, model_id: str) -> dict[str, Any] | None:
+        """The latest scan of these bytes made in a run that checked ``model_id``, or ``None``.
+
+        Issue #23: unlike ``latest_file_scan``, never a scan of identical bytes in another model.
+        """
+        if "file_scans" not in self.tables():
+            return None
+        return self._file_scan(
+            "SELECT s.* FROM file_scans s JOIN check_run_targets t ON t.run_id = s.run_id"
+            " WHERE s.sha256 = ? AND t.model_id = ? ORDER BY s.file_scan_id DESC LIMIT 1",
+            (sha256, model_id),
+        )
+
+    def _file_scan(self, query: str, params: tuple[Any, ...]) -> dict[str, Any] | None:
+        row = self.conn.execute(query, params).fetchone()
         if row is None:
             return None
         record = dict(row)
