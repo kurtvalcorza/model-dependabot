@@ -59,6 +59,7 @@ source what it did, for the check overview (``assurance/overview.py``).
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -1445,6 +1446,14 @@ def _lapsed(store: Store, sha256: str, name: str, applied: set[int]) -> bool:
     )
 
 
+def _scan_digest(scan: Mapping[str, Any]) -> str:
+    """What a scan saw, wherever the bytes were read: the scanner, its version, whether it
+    completed and the sorted globals (spec: a scan is the same evidence by content)."""
+    seen = sorted((g["module"], g["name"], g["safety"]) for g in scan["globals"])
+    body = [scan["scanner"], scan["scanner_version"], bool(scan["complete"]), seen]
+    return hashlib.sha256(json.dumps(body).encode("utf-8")).hexdigest()
+
+
 def _policy_entries(store: Store, target: _Target) -> list[Mapping[str, Any]]:
     """The version's local pickle entries the globals policy judges (research S7)."""
     return [
@@ -1458,17 +1467,17 @@ def _mark_weight_check(store: Store, run_id: int, target: _Target) -> None:
     """Record the policy, the exceptions and the files and scans a check that asked a weight
     source applied (PR #19 reviews 3 and 4)."""
     model = store.get_model(target.model_id) or {}
-    files: dict[str, int | None] = {}
+    digests: dict[str, str | None] = {}
     for entry in _policy_entries(store, target):
         sha256 = entry["identifier"].removeprefix("sha256:")
         scan = store.latest_file_scan(sha256)
-        files[sha256] = None if scan is None else int(scan["evidence_id"])
+        digests[sha256] = None if scan is None else _scan_digest(scan)
     store.set_weight_check_mark(
         target.model_id,
         run_id=run_id,
         globals_policy=model.get("globals_policy") or "default",
         exception_ids=[int(e["exception_id"]) for e in store.exceptions()],
-        files=files,
+        scan_digests=digests,
     )
 
 
@@ -1492,7 +1501,7 @@ def _apply_globals_policy(
     if lapse_only and safe is None:
         return  # a policy change waits for a check that asks a weight source
     applied: set[int] = set()
-    judged: dict[str, int | None] = {}
+    judged: dict[str, str | None] = {}
     if lapse_only:
         # FR-010, PR #19 reviews 3 and 4: outside a weight check only a lapse since the model's
         # last weight check acts, under the policy value that check applied and on the files and
@@ -1501,7 +1510,7 @@ def _apply_globals_policy(
         if mark is None or mark["globals_policy"] != policy:
             return
         applied = set(mark["exception_ids"])
-        judged = mark["files"]
+        judged = mark["scan_digests"]
     if safe is None:
         # Review X4: the policy is the alert's source, so its change clears every open
         # ``globals_policy`` alert of the model, whatever its entry has become.
@@ -1528,7 +1537,7 @@ def _apply_globals_policy(
             target.model_id, weight_cause_key(GLOBALS_POLICY_ALERT, identifier)
         )
         scan = store.latest_file_scan(sha256)
-        if lapse_only and (scan is None or judged.get(sha256, -1) != int(scan["evidence_id"])):
+        if lapse_only and (scan is None or judged.get(sha256) != _scan_digest(scan)):
             continue  # a file or scan the last weight check did not judge waits for the next
         record: dict[str, Any] = {
             "model_id": target.model_id,

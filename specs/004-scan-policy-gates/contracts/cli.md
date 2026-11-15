@@ -171,8 +171,8 @@ not mistake findings for failures (SC-005).
   sources asked; recording an exception still takes effect only at a check that asks a weight source.
 - Review round 2, narrowed by PR #19 reviews 3 and 4: a `globals_policy` finding returns in the same way
   only for an exception that the model's last check asking a weight source applied under the strict
-  policy, to a file that check judged on the scan still stored for it, while the policy has not changed
-  since; otherwise the global waits for the next check that asks a weight source (after an upgrade, every
+  policy, to a file that check judged on an identical scan of those bytes, wherever it was read, while the
+  policy has not changed since; otherwise the global waits for the next check that asks a weight source (after an upgrade, every
   model waits once). In text, a checked model is never followed by a "not checked" line, and its
   uncheckable items follow its rows.
 

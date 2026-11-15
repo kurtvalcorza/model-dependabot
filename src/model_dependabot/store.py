@@ -343,14 +343,15 @@ CREATE TABLE IF NOT EXISTS store_marks (
 
 -- PR #19 reviews 3 and 4: what the model's last check that asked a weight source applied, so a
 -- check that asks none acts only on a lapse since then (FR-010). ``exception_ids`` is a JSON list
--- of the store's active exceptions; ``files`` a JSON object from each judged file's SHA-256 to the
--- evidence id of the scan it was judged on (null: no scan).
+-- of the store's active exceptions; ``scan_digests`` a JSON object from each judged file's SHA-256
+-- to a digest of what its latest scan saw (scanner, version, completeness and globals; null: no
+-- scan), so an identical scan read elsewhere counts as the one judged. Not an evidence id.
 CREATE TABLE IF NOT EXISTS weight_check_marks (
     model_id TEXT PRIMARY KEY,
     run_id INTEGER NOT NULL REFERENCES check_runs (run_id),
     globals_policy TEXT NOT NULL,
     exception_ids TEXT NOT NULL,
-    files TEXT NOT NULL
+    scan_digests TEXT NOT NULL
 );
 
 -- Review C2, research U13: the ETag cache, kept across runs so a later run revalidates with
@@ -1199,22 +1200,22 @@ class Store:
         run_id: int,
         globals_policy: str,
         exception_ids: Sequence[int],
-        files: Mapping[str, int | None],
+        scan_digests: Mapping[str, str | None],
     ) -> None:
         """Record what a check that asked a weight source applied to the model (FR-010)."""
         with self.conn:
             self.conn.execute(
                 "INSERT INTO weight_check_marks"
-                " (model_id, run_id, globals_policy, exception_ids, files)"
+                " (model_id, run_id, globals_policy, exception_ids, scan_digests)"
                 " VALUES (?, ?, ?, ?, ?) ON CONFLICT (model_id) DO UPDATE SET"
                 " run_id = excluded.run_id, globals_policy = excluded.globals_policy,"
-                " exception_ids = excluded.exception_ids, files = excluded.files",
+                " exception_ids = excluded.exception_ids, scan_digests = excluded.scan_digests",
                 (
                     model_id,
                     run_id,
                     globals_policy,
                     json.dumps(sorted(exception_ids)),
-                    json.dumps(dict(sorted(files.items()))),
+                    json.dumps(dict(sorted(scan_digests.items()))),
                 ),
             )
 
@@ -1229,7 +1230,7 @@ class Store:
             return None
         mark = dict(row)
         mark["exception_ids"] = [int(i) for i in json.loads(mark["exception_ids"])]
-        mark["files"] = json.loads(mark["files"])
+        mark["scan_digests"] = json.loads(mark["scan_digests"])
         return mark
 
     def get_exception(self, exception_id: int) -> dict[str, Any] | None:

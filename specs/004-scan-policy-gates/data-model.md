@@ -58,11 +58,12 @@ it, so that only a lapse since that check acts (FR-010).
 | `run_id` | integer | the check run that wrote it |
 | `globals_policy` | `default` \| `strict` | the model's policy value at that check |
 | `exception_ids` | JSON | the ids of every exception in the store active at that check, sorted |
-| `files` | JSON | each local pickle file the check judged: its SHA-256 to the evidence id of its latest scan then, or null when it had none |
+| `scan_digests` | JSON | each local pickle file the check judged: its SHA-256 to a digest of what its latest scan then saw (scanner, scanner version, whether it completed and the sorted globals), or null when it had none; not an evidence id |
 
 Rule: a check that asks no weight source changes no `globals_policy` alert when the model has no mark,
 when the policy value differs from the mark's or when the policy is `default`. Otherwise, for each file in
-`files` whose latest scan is still the one recorded there, it counts only the exceptions in
+`scan_digests` whose latest scan saw the same (an identical scan read elsewhere counts, spec.md
+clarifications of round 1 on new evidence), it counts only the exceptions in
 `exception_ids` that are still active, and a global returns (opening the alert or joining its list) only
 when an exception in `exception_ids` covering it has been revoked or has expired. A new exception, a
 policy change, a file the check did not judge and a newer scan wait for the next check that asks a weight

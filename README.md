@@ -292,7 +292,8 @@ ones under `excepted`. When an exception is revoked, or its expiry date has pass
 whole day in UTC), the next check, whatever sources it asks, returns the finding on the same alert,
 recording the release. Under `--globals strict` the lapsed global also returns to the `globals_policy`
 alert at that check, when the model's last check that asked a weight source ran under the strict policy
-with that exception active and judged that file on the scan still stored for it, and the policy has not
+with that exception active and judged that file on an identical scan of those bytes, wherever it was
+read, and the policy has not
 changed since; otherwise it returns at the next check that asks a weight source. After an upgrade every
 model waits once for that check. A new exception, though, takes effect only at a check that asks a weight source:
 a check with only other sources, `osv` say, does not apply it. Hub weight files are not

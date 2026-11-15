@@ -411,6 +411,65 @@ def test_r4_a_lapse_before_the_weight_check_never_acts(cli: Any, tmp_path: Path)
     assert _two_alerts(cli, "m", sha) == []
 
 
+# --- PR #19 review 5: an identical scan read elsewhere is the scan the weight check judged -------
+
+
+def _from_record(cli: Any, root: Path, model_id: str, data: bytes, *extra: str) -> None:
+    """Record the weights in one folder, then register a copy without them from the record."""
+    _model(cli, root / "src", model_id, ["[[weights]]", 'path = "w.pkl"'], {"w.pkl": data})
+    record = root / "src" / "model.record.json"
+    code, payload = cli("record", str(root / "src" / "model.toml"), "--out", str(record))
+    assert code == EXIT_OK, payload
+    (root / "ci").mkdir()
+    for name in ("model.toml", "model.record.json"):
+        (root / "ci" / name).write_bytes((root / "src" / name).read_bytes())
+    code, payload = cli(
+        "register", str(root / "ci" / "model.toml"), "--from-record",
+        str(root / "ci" / "model.record.json"), *extra,
+    )  # fmt: skip
+    assert code == EXIT_OK, payload
+
+
+def _strict_with_alpha_excepted(cli: Any, tmp_path: Path) -> tuple[str, int]:
+    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    alpha = _except(cli, sha, ALPHA_NAME)
+    cli("check", "m", "--source", "picklescan")
+    [listed] = _policy_alerts(cli, "m")
+    assert listed["cause"]["unlisted"] == [BETA_NAME]
+    return sha, alpha
+
+
+def test_r5_another_model_scanning_the_same_bytes_lets_a_lapse_act(
+    cli: Any, tmp_path: Path
+) -> None:
+    _, alpha = _strict_with_alpha_excepted(cli, tmp_path)
+    _register(cli, tmp_path / "n", "n", two_suspicious())
+    cli("check", "n", "--source", "picklescan")
+    _revoke(cli, alpha)
+    cli("check", "m", "--source", "osv")
+    [back] = _policy_alerts(cli, "m")
+    assert back["cause"]["unlisted"] == [ALPHA_NAME, BETA_NAME]
+
+
+def test_r5_another_model_from_a_record_lets_a_lapse_act(cli: Any, tmp_path: Path) -> None:
+    _, alpha = _strict_with_alpha_excepted(cli, tmp_path)
+    _from_record(cli, tmp_path / "n", "n", two_suspicious())
+    _revoke(cli, alpha)
+    cli("check", "m", "--source", "osv")
+    [back] = _policy_alerts(cli, "m")
+    assert back["cause"]["unlisted"] == [ALPHA_NAME, BETA_NAME]
+
+
+def test_r5_the_same_model_again_from_a_record_lets_a_lapse_act(cli: Any, tmp_path: Path) -> None:
+    _, alpha = _strict_with_alpha_excepted(cli, tmp_path)
+    _from_record(cli, tmp_path / "m2", "m", two_suspicious(), "--model-id", "m")
+    _revoke(cli, alpha)
+    cli("check", "m", "--source", "osv")
+    [back] = _policy_alerts(cli, "m")
+    assert back["cause"]["unlisted"] == [ALPHA_NAME, BETA_NAME]
+
+
 # --- M5: an uncheckable DOI through the real path ------------------------------------------------
 
 
