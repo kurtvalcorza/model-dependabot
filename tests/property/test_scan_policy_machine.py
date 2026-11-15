@@ -161,11 +161,10 @@ class ScanPolicyMachine(RuleBasedStateMachine):
         self.dismissed: dict[str, dict[str, Any]] = {}
         self.versions = 0
         # What the last check that asked a weight source applied: the policy value, the active
-        # exception ids and the files it judged on a scan. A file registered since from a record
-        # may carry another scan, so it is unsure until the next such check. The oracles of (g)
-        # read this, never the product's mark.
+        # exception ids and the files it judged on a scan. An identical scan read elsewhere, as a
+        # registration record's, is the same scan (review 5). The oracles of (g) read this, never
+        # the product's mark.
         self.mark: dict[str, Any] | None = None
-        self.unsure: set[str] = set()
         self.last: tuple[int, Any] = (0, None)
         self.register(file="mixed", folder="a", via_record=False)
 
@@ -256,8 +255,6 @@ class ScanPolicyMachine(RuleBasedStateMachine):
             self.strict_scan = None
         self.file = file
         self.from_record = via_record  # the weights stay behind: picklescan cannot read them
-        if via_record:
-            self.unsure.add(self._sha())
         self._held_invariant()
 
     @rule(
@@ -506,7 +503,6 @@ class ScanPolicyMachine(RuleBasedStateMachine):
                 "ids": {i for i, e in self.exceptions.items() if self._is_active(e)},
                 "files": {self._sha()} if scanned else set(),
             }
-            self.unsure = set()
 
     def _mark_matches(self) -> bool:
         """The last weight check ran under the current policy value and judged this file."""
@@ -514,7 +510,6 @@ class ScanPolicyMachine(RuleBasedStateMachine):
             self.mark is not None
             and self.mark["policy"] == self.strict
             and self._sha() in self.mark["files"]
-            and self._sha() not in self.unsure
         )
 
     def _policy_view(self, alerts: Any) -> set[tuple[str, tuple[str, ...]]]:
@@ -529,8 +524,6 @@ class ScanPolicyMachine(RuleBasedStateMachine):
     ) -> None:
         """(g) at a check without a weight source, against the model's record of the last one."""
         key = f"globals_policy:{self._sha()}"
-        if self.strict and self._sha() in self.unsure:
-            return  # a record's scan may or may not be the one the weight check judged
         if not (self.strict and self._mark_matches() and scanned):
             # no record, another policy value, the default policy or a file not judged: nothing
             # changes
@@ -777,5 +770,43 @@ def test_the_machine_reaches_excepted_held_and_gated_states() -> None:
         revoke(third)
         step(machine.check, sources=["osv"], fail_on=None)
         assert unlisted() == {alpha}
+        # Review 5, t1: a file the last weight check did not judge waits, even when it was judged
+        # before and its exception lapses
+        alpha_again = record(0)
+        step(machine.check, sources=["picklescan"], fail_on=None)
+        assert not open_alerts("globals_policy")
+        step(machine.register, file="mixed", folder="e", via_record=False)
+        step(machine.check, sources=["picklescan"], fail_on=None)
+        step(machine.register, file="two", folder="f", via_record=False)
+        revoke(alpha_again)
+        step(machine.check, sources=["osv"], fail_on=None)
+        assert not [
+            a for a in open_alerts("globals_policy") if a["cause_key"].endswith(machine._sha())
+        ]
+    finally:
+        machine.teardown()
+
+
+def test_a_scan_the_weight_check_did_not_see_waits() -> None:
+    """Review 5: a weight check that read no scan of the file judged nothing, so a scan a record
+    brings later waits for the next weight check, lapse or not; the invariants run after every
+    step."""
+    machine = ScanPolicyMachine()  # mixed, registered and never scanned
+
+    def step(rule: Any, **kwargs: Any) -> None:
+        rule(**kwargs)
+        machine.excepted_never_counts_as_open()
+        machine.one_open_alert_per_cause_and_evidence()
+
+    try:
+        step(machine.globals, strict=True)
+        step(machine.record_exception, pick=1, days=None)  # CustomLayer
+        step(machine.check, sources=["hf-scan"], fail_on=None)
+        step(machine.register, file="mixed", folder="b", via_record=True)
+        step(machine.revoke, pick=0)
+        step(machine.check, sources=["osv"], fail_on=None)
+        assert not [
+            a for a in machine._alerts() if a["state"] == "open" and a["kind"] == "globals_policy"
+        ]
     finally:
         machine.teardown()
