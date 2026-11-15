@@ -190,6 +190,186 @@ def test_m4_a_policy_set_strict_still_waits_for_a_weight_source(
     assert _policy_alerts(cli, "m") == []
 
 
+# --- PR #19: lapse cases beyond test_review_round3.py (each against main's snapshots) -------
+
+
+ALPHA_NAME, BETA_NAME = ".".join(ALPHA), ".".join(BETA)
+
+
+def _except(cli: Any, sha: str, name: str) -> int:
+    code, made = cli("exception", "record", "--global", name, "--sha256", sha,
+                     "--reason", "r", "--by", "O")  # fmt: skip
+    assert code == EXIT_OK, made
+    return int(made["exception_id"])
+
+
+def _revoke(cli: Any, exception_id: int) -> None:
+    code, _ = cli("exception", "revoke", str(exception_id), "--reason", "no", "--by", "O")
+    assert code == EXIT_OK
+
+
+def test_r3_a_reopened_alert_waits_for_the_new_exception(cli: Any, tmp_path: Path) -> None:
+    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    alpha = _except(cli, sha, ALPHA_NAME)
+    cli("check", "m", "--source", "picklescan")
+    [listed] = _policy_alerts(cli, "m")
+    assert listed["cause"]["unlisted"] == [BETA_NAME]
+    cli("alert", "dismiss", str(listed["alert_id"]), *DISMISS)
+    _except(cli, sha, BETA_NAME)
+    _revoke(cli, alpha)
+    cli("check", "m", "--source", "osv")
+    [back] = _policy_alerts(cli, "m")
+    assert back["cause"]["unlisted"] == [ALPHA_NAME, BETA_NAME]
+    assert back["cause"]["excepted"] == []
+
+
+def test_r3_an_alert_the_default_policy_cleared_stays_cleared(cli: Any, tmp_path: Path) -> None:
+    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    alpha = _except(cli, sha, ALPHA_NAME)
+    cli("check", "m", "--source", "picklescan")
+    _revoke(cli, alpha)
+    cli("check", "m", "--source", "osv")
+    cli("policy", "m", "--globals", "default", "--by", "Owner")
+    cli("check", "m", "--source", "picklescan")
+    assert _policy_alerts(cli, "m") == []
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    cli("check", "m", "--source", "osv")
+    assert _policy_alerts(cli, "m") == []
+
+
+GAMMA = ("model_dependabot_fixture.layers", "Gamma")
+
+
+def one_suspicious() -> bytes:
+    """Imports one global on neither scanner list (protocol 2 opcodes, built here)."""
+    return b"\x80\x02" + _global(*GAMMA) + b"0."
+
+
+def _version(cli: Any, root: Path, model_id: str, data: bytes) -> None:
+    """Register a new version of a model that is already registered."""
+    _model(cli, root, model_id, ["[[weights]]", 'path = "w.pkl"'], {"w.pkl": data})
+    code, payload = cli("register", str(root / "model.toml"), "--model-id", model_id)
+    assert code == EXIT_OK, payload
+
+
+def _two_alerts(cli: Any, model_id: str, sha: str) -> list[dict[str, Any]]:
+    return [a for a in _policy_alerts(cli, model_id) if a["cause"]["identifier"] == f"sha256:{sha}"]
+
+
+def test_r4_strict_set_again_later_still_lets_a_lapse_act(
+    cli: Any, tmp_path: Path, clock: Clock
+) -> None:
+    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    alpha = _except(cli, sha, ALPHA_NAME)
+    cli("check", "m", "--source", "picklescan")
+    clock.at += timedelta(minutes=5)
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    clock.at += timedelta(minutes=5)
+    _revoke(cli, alpha)
+    cli("check", "m", "--source", "osv")
+    [back] = _policy_alerts(cli, "m")
+    assert back["cause"]["unlisted"] == [ALPHA_NAME, BETA_NAME]
+
+
+def test_r4_bytes_gained_by_registration_wait_for_a_weight_check(cli: Any, tmp_path: Path) -> None:
+    _register(cli, tmp_path / "m1", "m", one_suspicious())
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    sha = _register(cli, tmp_path / "n", "n", two_suspicious())
+    cli("check", "n", "--source", "picklescan")
+    alpha = _except(cli, sha, ALPHA_NAME)
+    _except(cli, sha, BETA_NAME)
+    cli("check", "m", "--source", "picklescan")
+    _version(cli, tmp_path / "m2", "m", two_suspicious())
+    cli("check", "m", "--source", "osv")
+    _revoke(cli, alpha)
+    cli("check", "m", "--source", "osv")
+    assert _two_alerts(cli, "m", sha) == []
+    cli("check", "m", "--source", "picklescan")
+    assert [a["cause"]["unlisted"] for a in _two_alerts(cli, "m", sha)] == [[ALPHA_NAME]]
+
+
+def test_r4_a_scan_newer_than_the_weight_check_waits(cli: Any, tmp_path: Path) -> None:
+    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
+    alpha = _except(cli, sha, ALPHA_NAME)
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    cli("check", "m", "--source", "hf-scan")  # a weight check that reads no scan of the file
+    _register(cli, tmp_path / "n", "n", two_suspicious())
+    cli("check", "n", "--source", "picklescan")
+    _revoke(cli, alpha)
+    cli("check", "m", "--source", "osv")
+    assert _policy_alerts(cli, "m") == []
+
+
+def test_r4_a_lapse_before_the_weight_check_never_acts(cli: Any, tmp_path: Path) -> None:
+    sha = _register(cli, tmp_path / "m1", "m", two_suspicious())
+    _revoke(cli, _except(cli, sha, ALPHA_NAME))
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    cli("check", "m", "--source", "picklescan")
+    _version(cli, tmp_path / "m2", "m", one_suspicious())
+    _version(cli, tmp_path / "m3", "m", two_suspicious())
+    cli("check", "m", "--source", "osv")
+    assert _two_alerts(cli, "m", sha) == []
+
+
+def _from_record(cli: Any, root: Path, model_id: str, data: bytes, *extra: str) -> None:
+    """Record the weights in one folder, then register a copy without them from the record."""
+    _model(cli, root / "src", model_id, ["[[weights]]", 'path = "w.pkl"'], {"w.pkl": data})
+    record = root / "src" / "model.record.json"
+    code, payload = cli("record", str(root / "src" / "model.toml"), "--out", str(record))
+    assert code == EXIT_OK, payload
+    (root / "ci").mkdir()
+    for name in ("model.toml", "model.record.json"):
+        (root / "ci" / name).write_bytes((root / "src" / name).read_bytes())
+    code, payload = cli(
+        "register", str(root / "ci" / "model.toml"), "--from-record",
+        str(root / "ci" / "model.record.json"), *extra,
+    )  # fmt: skip
+    assert code == EXIT_OK, payload
+
+
+def _strict_with_alpha_excepted(cli: Any, tmp_path: Path) -> tuple[str, int]:
+    sha = _register(cli, tmp_path / "m", "m", two_suspicious())
+    cli("policy", "m", "--globals", "strict", "--by", "Owner")
+    alpha = _except(cli, sha, ALPHA_NAME)
+    cli("check", "m", "--source", "picklescan")
+    [listed] = _policy_alerts(cli, "m")
+    assert listed["cause"]["unlisted"] == [BETA_NAME]
+    return sha, alpha
+
+
+def test_r5_another_model_scanning_the_same_bytes_lets_a_lapse_act(
+    cli: Any, tmp_path: Path
+) -> None:
+    _, alpha = _strict_with_alpha_excepted(cli, tmp_path)
+    _register(cli, tmp_path / "n", "n", two_suspicious())
+    cli("check", "n", "--source", "picklescan")
+    _revoke(cli, alpha)
+    cli("check", "m", "--source", "osv")
+    [back] = _policy_alerts(cli, "m")
+    assert back["cause"]["unlisted"] == [ALPHA_NAME, BETA_NAME]
+
+
+def test_r5_another_model_from_a_record_lets_a_lapse_act(cli: Any, tmp_path: Path) -> None:
+    _, alpha = _strict_with_alpha_excepted(cli, tmp_path)
+    _from_record(cli, tmp_path / "n", "n", two_suspicious())
+    _revoke(cli, alpha)
+    cli("check", "m", "--source", "osv")
+    [back] = _policy_alerts(cli, "m")
+    assert back["cause"]["unlisted"] == [ALPHA_NAME, BETA_NAME]
+
+
+def test_r5_the_same_model_again_from_a_record_lets_a_lapse_act(cli: Any, tmp_path: Path) -> None:
+    _, alpha = _strict_with_alpha_excepted(cli, tmp_path)
+    _from_record(cli, tmp_path / "m2", "m", two_suspicious(), "--model-id", "m")
+    _revoke(cli, alpha)
+    cli("check", "m", "--source", "osv")
+    [back] = _policy_alerts(cli, "m")
+    assert back["cause"]["unlisted"] == [ALPHA_NAME, BETA_NAME]
+
+
 # --- M5: an uncheckable DOI through the real path ------------------------------------------------
 
 
