@@ -465,8 +465,9 @@ deliver value without it.
   added or materially expanded" and PATCH "for clarifications". Widening the watched scope from one fine-tuned
   base model to several parents of four types reads as a material expansion, so the plan SHOULD propose a MINOR
   amendment of the preamble (for example "the models it was derived from"); PATCH is the alternative if the
-  owner reads it as a clarification, and recording an exception in Complexity Tracking is the third. **This is
-  the owner's decision**; this specification does not change the constitution.
+  owner reads it as a clarification, and recording an exception in Complexity Tracking is the third. **Owner
+decision (2026-11-19): MINOR.** The plan proposes a MINOR amendment of the preamble; this specification
+  does not change the constitution itself.
 - Principle IV (precision first) is why the FR-017 matrix is closed with "does not travel" as its default and why
   FR-020 recommends watch events for inherited findings.
 
