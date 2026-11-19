@@ -173,7 +173,7 @@ changes; with it no exit code changes.
 - [x] T042 [P] Note in `docs/rules/README.md` that three sections of each page are rendered from `src/model_dependabot/rule_texts/rule-texts.toml` by `tools/render_rule_pages.py`
 - [x] T043 Walk through one alert per family (weight files, packages, datasets and papers, licences, base model) with the text view alone and record, for each, the entry, the relationship, what is established and the next step in `specs/010-actionable-alert-view/validation.md` (SC-005)
 - [x] T044 Run every scenario of `specs/010-actionable-alert-view/quickstart.md` and record the results in `specs/010-actionable-alert-view/validation.md`
-- [ ] T045 Run `uv run pytest -q`, `uv run ruff check` and `uv run ruff format --check` with their real exit codes (no pipe) and record the counts against the T001 baseline in `specs/010-actionable-alert-view/validation.md`
+- [x] T045 Run `uv run pytest -q`, `uv run ruff check` and `uv run ruff format --check` with their real exit codes (no pipe) and record the counts against the T001 baseline in `specs/010-actionable-alert-view/validation.md`
 - [x] T046 Review `src/model_dependabot/rule_texts/rule-texts.toml`, the rendered `docs/rules/MDB*.md` sections and every fixed string of `src/model_dependabot/assurance/advice.py` for house style (British spelling, no serial comma) and for any institution or platform name
 
 ---

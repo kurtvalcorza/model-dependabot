@@ -68,4 +68,10 @@ held in v1, fixed by v2`.
 
 ## Final run (T045)
 
-See the section appended after the final run.
+On the branch head after the last code commit, each gate run on its own, no pipe:
+
+| Gate | Exit | Counts | Against the baseline |
+| :-- | :-- | :-- | :-- |
+| `uv run pytest -q` | 0 | 1837 passed, 6 skipped, 13 deselected (1827 s) | +130 passed (the new tests), 0 failed, skips and deselections unchanged |
+| `uv run ruff check` | 0 | All checks passed | unchanged |
+| `uv run ruff format --check` | 0 | 318 files already formatted | +24 files, all formatted |
