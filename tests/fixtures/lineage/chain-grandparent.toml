@@ -1,0 +1,9 @@
+[model]
+id = "example-grand"
+name = "Lineage fixture"
+owner = "Owner"
+
+[[parents]]
+hub = "hf:sd-concepts-library/dyoudim-style"
+revision = "bb36f39d9eede01cc139dc4fadd193f1e4879fe3"
+relationship = "fine-tuned-from"

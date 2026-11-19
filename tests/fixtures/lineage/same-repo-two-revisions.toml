@@ -1,0 +1,14 @@
+[model]
+id = "example-two-revisions"
+name = "Lineage fixture"
+owner = "Owner"
+
+[[parents]]
+hub = "hf:example-org/base-a"
+revision = "0123456789abcdef0123456789abcdef01234567"
+relationship = "fine-tuned-from"
+
+[[parents]]
+hub = "hf:example-org/base-a"
+revision = "1111111111111111111111111111111111111111"
+relationship = "quantized-from"

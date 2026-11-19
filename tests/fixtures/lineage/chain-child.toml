@@ -1,0 +1,9 @@
+[model]
+id = "example-child"
+name = "Lineage fixture"
+owner = "Owner"
+
+[[parents]]
+model = "example-mid"
+version = 1
+relationship = "adapter-for"

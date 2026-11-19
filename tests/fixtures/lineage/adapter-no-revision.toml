@@ -1,0 +1,8 @@
+[model]
+id = "example-adapter"
+name = "Lineage fixture"
+owner = "Owner"
+
+[[parents]]
+hub = "hf:example-org/base-a"
+relationship = "adapter-for"

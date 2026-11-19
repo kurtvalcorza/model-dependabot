@@ -1,0 +1,34 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.7.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "machine-learning-model",
+      "bom-ref": "model:example-imported@1",
+      "name": "example-imported",
+      "version": "1",
+      "pedigree": {
+        "ancestors": [
+          {
+            "type": "machine-learning-model",
+            "bom-ref": "base-model:0",
+            "name": "example-adapter-base",
+            "properties": [
+              {
+                "name": "model-dependabot:parent-model",
+                "value": "example-adapter-base"
+              },
+              {
+                "name": "model-dependabot:relationship",
+                "value": "adapter-for"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "components": []
+}

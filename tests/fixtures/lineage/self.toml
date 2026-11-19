@@ -1,0 +1,9 @@
+[model]
+id = "example-self"
+name = "Lineage fixture"
+owner = "Owner"
+
+[[parents]]
+model = "example-self"
+version = 1
+relationship = "fine-tuned-from"

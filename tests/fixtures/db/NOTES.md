@@ -11,3 +11,10 @@ written out the same way on 2026-11-13 before any 004 code change, followed by a
 could have written then: one model with one version and one pickle weight entry, one check run with
 its target, one evidence row, an open `weight_file_scan` alert and a dismissed `format_policy` alert.
 `tests/integration/test_migration_004.py` opens it to test the feature 004 upgrade.
+
+`schema-pre-011.sql` is the store's `SCHEMA` as it was on `main` at `6e146c1`, before feature 011,
+written out the same way on 2026-11-20 before any 011 code change, followed by rows the tool could
+have written then: one model with version 1 (origin `manifest`) and version 2 (legacy, null origin),
+each with one pinned `base_model` entry, one check run with its target, one evidence row, an open
+`base_model_disabled` alert and one watch event. `tests/integration/test_migration_011.py` opens it
+to test the feature 011 upgrade and the read-only synthesis of legacy edges.
