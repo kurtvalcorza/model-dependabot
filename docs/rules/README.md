@@ -21,3 +21,9 @@ prove, how it closes and how to fix or accept it.
 
 The registry is `src/model_dependabot/rules.py`; every alert in every view carries its `rule_id` and
 `rule_doc`, and text output shows the ID after the alert id.
+
+Three sections of each page, "What it does not prove", "How it closes" and "How to fix or accept it"
+(the fix prose and the numbered review steps), are rendered from
+`src/model_dependabot/rule_texts/rule-texts.toml` by `tools/render_rule_pages.py`; edit that file,
+not the page, and run the tool. The advisory view (`alert show ALERT_ID --advice`) shows the same
+texts. "What raises it" is written by hand.

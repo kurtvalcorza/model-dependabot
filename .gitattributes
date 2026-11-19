@@ -8,3 +8,4 @@ src/model_dependabot/licences/*.json -text
 src/model_dependabot/licences/SHA256SUMS -text
 # The safe list is cited by its SHA-256 as read; keep it byte-exact on every platform.
 src/model_dependabot/safe_globals/safe-globals.toml -text
+src/model_dependabot/rule_texts/rule-texts.toml -text
