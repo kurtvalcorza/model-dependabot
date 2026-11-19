@@ -159,3 +159,54 @@ def test_relevance_is_decided_by_the_referenced_versions_own_inventory() -> None
         alert(8, "paper_retracted", FILE, state="fixed", closed_by_version=1),
     ]
     assert _ids(world.run(("child", 1))) == [1, 3]
+
+
+# --- review round 1: per-path travel (owner's ruling on R1 to R3) -------------------------------
+
+
+def _diamond(first: str, second: str) -> World:
+    """child -adapter-> first -fine-tuned-> grand, and child -adapter-> second -adapter-> grand."""
+    world = World()
+    world.version("grand", 1, identifiers=[FILE])
+    world.version(first, 1, [ref("grand", "fine-tuned-from")])
+    world.version(second, 1, [ref("grand", "adapter-for")])
+    world.version("child", 1, [ref(first, "adapter-for"), ref(second, "adapter-for")])
+    world.alerts["grand"] = [alert(7, "weight_file_scan", FILE)]
+    return world
+
+
+def test_a_diamond_gives_the_same_result_whichever_branch_sorts_first() -> None:
+    """R1: the all-adapter branch carries the weight finding, in both namings."""
+    assert _ids(_diamond("a", "b").run(("child", 1))) == [7]
+    assert _ids(_diamond("z", "b").run(("child", 1))) == [7]
+    [finding] = _diamond("a", "b").run(("child", 1))
+    assert [hop["relationship"] for hop in finding["paths"][0]] == ["adapter-for", "adapter-for"]
+    assert finding["reach"] == "transitive"
+
+
+def test_a_chain_with_one_non_travelling_hop_carries_nothing_in_either_order() -> None:
+    """R2: a weight finding needs adapter-for on every hop."""
+    for lower, upper in (("fine-tuned-from", "adapter-for"), ("adapter-for", "fine-tuned-from")):
+        world = World()
+        world.version("grand", 1, identifiers=[FILE])
+        world.version("mid", 1, [ref("grand", upper)])
+        world.version("child", 1, [ref("mid", lower)])
+        world.alerts["grand"] = [
+            alert(1, "weight_file_scan", FILE),
+            alert(2, "dataset_retracted", FILE),
+        ]
+        assert _ids(world.run(("child", 1))) == [2], (lower, upper)
+
+
+def test_two_registered_parents_both_pass_their_findings_down() -> None:
+    """R3: every parent is walked, not only the first."""
+    world = World()
+    world.version("left", 1, identifiers=[FILE])
+    world.version("right", 1, identifiers=[LATER])
+    world.version("child", 1, [ref("left", "merged-from"), ref("right", "merged-from")])
+    world.alerts["left"] = [alert(11, "licence_changed", FILE)]
+    world.alerts["right"] = [alert(12, "dataset_removed", LATER)]
+    found = world.run(("child", 1))
+    assert _ids(found) == [11, 12]
+    assert {f["parent"] for f in found} == {("left", 1), ("right", 1)}
+    assert {f["reach"] for f in found} == {"direct"}
