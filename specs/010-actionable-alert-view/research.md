@@ -9,16 +9,16 @@ that confirms it.
 
 ## Questions for the owner
 
-Planning found four choices that change what users see or how a requirement is read. Each has a
-recommendation; tasks.md follows it until the owner rules, and names the tasks a different ruling
-changes.
+Planning found four choices that change what users see or how a requirement is read. **The owner
+accepted all four recommendations on 2026-11-19** (column "Ruled"); tasks.md follows the rulings. The
+same review ruled that 010 lands before 011 (plan, "Overlap with feature 011").
 
-| # | Question | Options | Recommended | Tasks affected |
-| :-- | :-- | :-- | :-- | :-- |
-| Q1 | Environment markers are not stored (R5), so the spec's edge case "the view names the marker" cannot be met from stored rows | (a) this feature names no marker; every package alert lists "whether the package is installed where the model runs" as not established and the limitation "this inventory does not record environment markers"; storing markers is a follow-up issue; (b) store the marker at registration (a new nullable `inventory_entries.marker` column and a `LockEntry.marker` field), so versions registered after this feature show it | **(a)**: the view stays read-only with no schema change (plan, Storage); (b) is an inventory change for a separate feature, and old versions would still read "not recorded". The spec's edge case needs a one-line amendment under either ruling | T027, T040 |
-| Q2 | `Store.__init__` migrates an older database on open, a write (R8); FR-002 and SC-004 say the view writes nothing | (a) keep today's open for `--advice`; SC-004 is measured on a database already at the current schema, and the view code never calls a writing method; (b) open with `Store.open_read_only` when `--advice` is given | **(a)**: (b) makes `alerts ID --advice` exit 3 on a database older than feature 002 where `alerts ID` migrates and exits 0, which FR-017 forbids | T015, T022, T037 |
-| Q3 | Do the numbered review steps also appear on the rule pages? (R4) | (a) yes: "How to fix or accept it" on each page is the fix prose followed by the steps, rendered from the same file, with placeholders shown as `<identifier>`; (b) no: the steps live only in the view | **(a)**: one text, read the same way in both places (FR-014); the pages keep their four headings, so `tests/unit/test_rules.py:51-55` still holds | T012 |
-| Q4 | The constitution says "The first user is a model-hosting platform"; D3 and the spec say the first user of this view is the model maintainer (plan, Constitution Check) | (a) no amendment; (b) a PATCH clarification in its own change | **(a)** for this feature: the view names no platform, so nothing in it conflicts | none |
+| # | Question | Options | Recommended | Ruled | Tasks affected |
+| :-- | :-- | :-- | :-- | :-- | :-- |
+| Q1 | Environment markers are not stored (R5), so the spec's edge case "the view names the marker" cannot be met from stored rows | (a) this feature names no marker; every package alert lists "whether the package is installed where the model runs" as not established and the limitation "this inventory does not record environment markers"; storing markers is a follow-up issue; (b) store the marker at registration (a new nullable `inventory_entries.marker` column and a `LockEntry.marker` field), so versions registered after this feature show it | **(a)**: the view stays read-only with no schema change (plan, Storage); (b) is an inventory change for a separate feature, and old versions would still read "not recorded". The spec's edge case needs a one-line amendment under either ruling | **(a)**, owner, 2026-11-19; spec edge case amended; follow-up issue #28 | T027, T040 |
+| Q2 | `Store.__init__` migrates an older database on open, a write (R8); FR-002 and SC-004 say the view writes nothing | (a) keep today's open for `--advice`; SC-004 is measured on a database already at the current schema, and the view code never calls a writing method; (b) open with `Store.open_read_only` when `--advice` is given | **(a)**: (b) makes `alerts ID --advice` exit 3 on a database older than feature 002 where `alerts ID` migrates and exits 0, which FR-017 forbids | **(a)**, owner, 2026-11-19; SC-004 measured on a current-schema database | T015, T022, T037 |
+| Q3 | Do the numbered review steps also appear on the rule pages? (R4) | (a) yes: "How to fix or accept it" on each page is the fix prose followed by the steps, rendered from the same file, with placeholders shown as `<identifier>`; (b) no: the steps live only in the view | **(a)**: one text, read the same way in both places (FR-014); the pages keep their four headings, so `tests/unit/test_rules.py:51-55` still holds | **(a)**, owner, 2026-11-19 | T012 |
+| Q4 | The constitution says "The first user is a model-hosting platform"; D3 and the spec say the first user of this view is the model maintainer (plan, Constitution Check) | (a) no amendment; (b) a PATCH clarification in its own change | **(a)** for this feature: the view names no platform, so nothing in it conflicts | **(a)**, owner, 2026-11-19; no constitution change | none |
 
 ## R1. How the view is asked for and where it appears (FR-001, FR-018)
 
@@ -62,16 +62,24 @@ of the alert's model to its entries and origin. It looks for exact matches only,
 | `weight_file_scan`, `hub_scan`, `format_policy`, `globals_policy` | `kind = weight_file`, `identifier = cause.identifier` (`sha256:<hex>`) | not applicable |
 | `package_advisory` | `kind = package`, `identifier = cause.identifier` (the purl) | not applicable |
 | `dataset_retracted`, `dataset_not_findable`, `dataset_removed` | `kind = dataset`, `identifier = cause.identifier` | `dataset_removed` on a hub dataset: `hub_repo` equals the repository in the cause key |
-| `paper_retracted` | `kind = dataset` whose `paper_dois` holds `cause.paper_doi` and whose `identifier` equals `cause.dataset` | hub dataset: `hub_repo` equals the repository in the key, whatever revision it pins |
+| `paper_retracted` | `kind = dataset` whose `paper_dois` holds `cause.paper_doi` and whose `identifier` equals `cause.dataset` | hub dataset: `hub_repo` equals the repository in the key, whatever revision it pins, **and** `paper_dois` holds `cause.paper_doi` (both paths require the paper) |
 | `licence_changed` | `kind` `base_model` or `dataset`, `identifier = cause.item` | repository scope: `name` (base model) or `hub_repo` (dataset) equals the scope |
 | `base_model_disabled`, `base_model_unavailable` | `kind = base_model`, `name = cause.repo` | always by repository |
 
 No match in any version gives `unresolved` with one of three reasons: `no stored version holds this
 identifier`, `the alert's cause does not name an identifier` and `the alert's model has no stored
 version`. Matches are listed in a fixed order: version descending (so the current version, when it
-holds the entry, comes first), then `entry_id` ascending (the order `store.entries` returns). A match
+holds the entry, comes first), then the order `store.entries` returns (`ORDER BY entry_id`, `store.py:1460`; the records carry no
+`entry_id`, `ENTRY_FIELDS`, `store.py:446-465`). A match
 in the current version sets `in_current_version: true`; otherwise the view names
 `last_held_in_version`, the highest version that holds it.
+
+**Reuse**: whether a cause is repository-scoped and which repository an entry belongs to are already
+decided in `lifecycle.py`: `_repository_scoped` (`lifecycle.py:3572-3584`), `_hub_scope`
+(`lifecycle.py:2571-2578`), `base_model_repo` and `hub_dataset_repo` (`lifecycle.py:2557-2568`). The
+resolver imports them unchanged rather than re-deriving them. Extracting them into a shared module would
+edit `lifecycle.py`, which the 011 overlap ruling keeps out of 010; that extraction is a follow-up after
+011.
 
 **Alternatives**: matching by package name alone (would pick the wrong pinned version, a partial match
 FR-006 forbids); reading only the alert's `current_version` (cannot name the last holder of a `fixed`
@@ -84,8 +92,8 @@ error, `manifest.py:3-4`). The only related record is the dismissal reason `not_
 (`store.py:72`). A dismissal stores `dismissal_reason`, `dismissed_by`, `note` and `closed_at`; there is
 no `dismissed_at` column (`alerts` table, `store.py:256-277`). `dismiss_alert`
 (`lifecycle.py:2483-2503`) closes the alert through `store.close_alert(..., state="dismissed")`
-(*confirmed*); that `close_alert` (`store.py:1741`) stamps `closed_at` with the store's clock is
-*inferred*, and T014 confirms it.
+(*confirmed*), and `close_alert` sets `closed_at` to `self._stamp()`, the store's clock
+(`store.py:1752-1764`, *confirmed*). T014 keeps that as a regression assertion.
 
 **Decision**: `runtime_use` is `declared` with polarity `not_used` when this alert's stored state is
 `dismissed` and its reason is `not_used_at_runtime`, with basis `{by: dismissed_by, at: closed_at,
@@ -108,7 +116,8 @@ safe list shows the house pattern for package data: a TOML file beside an `__ini
 `limitations` (the page's "What it does not prove"), `closes` ("How it closes"), `fix` ("How to fix or
 accept it" prose), `steps` (an ordered array) and `not_established` (an ordered array whose first item
 is the impact question). Version 1 copies the three prose sections of each page verbatim, so the
-pages' prose does not change when the file lands. `rules.py` loads it once and refuses a file where a
+existing prose of every page is unchanged when the file lands; under the Q3 ruling each page also gains
+its numbered review steps after the fix prose, so all 12 pages change by that list. `rules.py` loads it once and refuses a file where a
 rule ID lacks a field, a field is empty, an unknown placeholder is used, or a rule ID is missing or
 extra. `tools/render_rule_pages.py` rewrites the three sections of each page from the file (Q3 (a):
 the steps follow the fix prose, numbered, placeholders shown as `<name>`); a test renders and
@@ -196,8 +205,19 @@ fixed, withdrawn or cleared), `history ID`, `run show RUN_ID`, `check ID` and `c
 (the last two run in copies of the store so the read invocations see a fixed state).
 `tools/record_cli_baseline.py` records stdout, stderr and the exit code of each invocation to
 `tests/fixtures/cli_baseline/pre-010-baseline.json`, together with the commit and the `git rev-parse
-HEAD:src` tree hash it was recorded from. It runs once, on `main` at `47ebfbe`, before any `src/`
-change. `tests/integration/test_cli_baseline.py` replays the list and compares byte for byte.
+HEAD:src` tree hash it was recorded from. It records from the build before this feature, as FR-016
+says, not from a fixed commit: the `main` commit that 010's first `src/` pull request is based on. At
+planning time that is `47ebfbe`, whose `src` tree is `4ca0c708b930870cbf5bce02b3f2ef20f4797882` (last
+`src/` commit `0e927e6`). The recorder refuses to run unless `git status --porcelain -- src` is empty and
+`git rev-parse HEAD:src` equals the expected tree it is given (and, when the file exists, the tree already
+in it); it writes the commit and the tree into the file. `tests/integration/test_cli_baseline.py` asserts
+the recorded tree, pins the SHA-256 of `pre-010-baseline.json` (a re-record fails the suite until the pin
+is updated, an owner decision) and replays the list byte for byte. Feature 004's T005 recorded the commit
+and the `src` tree equality the same way.
+
+**Ordering with 011**: 010 lands first (plan, "Overlap with feature 011"), so the baseline holds
+base-model scenarios as they are before 011; when 011 changes their output, 011 re-records the file and
+its pin.
 
 A replay test passes on arrival by design (the build has not moved yet). To show it can fail, T007
 also records in `validation.md` one deliberate mutation (a changed character in `alert_line`) that the
@@ -208,7 +228,8 @@ test catches, then reverts it.
 **Decision**: `tests/fixtures/advice/verdicts.json` lists phrases, each with the FR-011 clause it
 guards, matched case-insensitively as substrings in the text view and in every string of the JSON view:
 for example "is compromised", "rights are lost", "rights are kept", "is safe", "safe to load",
-"was never affected", "not affected", "no impact", "inventory is complete", "model is clean". The
+"was never affected", "not affected", "no impact", "inventory is complete", "model is clean",
+"clean result". The
 view's own fixed sentences (impact, `unknown` runtime use, the empty-model note) are written to pass it;
 the test runs over one view per rule ID and every state (SC-003). Adding a phrase is a test change, so
 the list is versioned with the code.
@@ -216,11 +237,14 @@ the list is versioned with the code.
 **Finding** (*confirmed*): the rule pages already use some of these phrases in negated form, for example
 "is safe" in `docs/rules/MDB101.md:13` and "clean result" in `docs/rules/MDB102.md:13`, both inside a
 "does not prove" or "not a" sentence. Copied verbatim into `limitations` (R4), they would trip a plain
-substring guard. **Decision**: the guard runs on every string of the view except the rule's own
-`limitations` and `closes` texts; those are checked by a second test in `tests/unit/test_rule_texts.py`
-that every sentence of them containing a verdict phrase also contains a negation from a fixed list
-(`does not`, `is not`, `not a`, `never`, `no `). A sentence that fails is rewritten in
-`rule-texts.toml`, which then changes the page through the renderer.
+substring guard. A grep of all 12 pages for the phrases above finds exactly these two (*confirmed*).
+**Decision** (review R5): no negation heuristic. `verdicts.json` carries an `allowed` list of exact
+sentences, each with its rule ID and field: the MDB101 `limitations` sentence at `docs/rules/MDB101.md:13`
+and the MDB102 `limitations` sentence at `docs/rules/MDB102.md:13`, verbatim. The guard removes each
+allowed sentence, by exact content, from every string of the view, wherever it appears (in `limitations`,
+or in the `closes` text embedded in the last review step after `How this alert closes:`), and then fails on
+any phrase left. Any other occurrence fails, in the view and in `rule-texts.toml` alike; adding an allowed
+sentence is a reviewed change to the fixture.
 
 The empty-model note reads: "No alert is open for this model. That is not an assessment of the model or
 of how complete its inventory is."

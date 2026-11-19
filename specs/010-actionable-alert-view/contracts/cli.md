@@ -34,11 +34,11 @@ advisory on an `import` version, abridged:
 "advice": {
   "schema": "advice/1",
   "alert_id": 7,
-  "severity": {"value": "HIGH", "origin": "cvss_v3", "note": "as published by the source"},
+  "severity": {"value": "HIGH", "origin": "cvss_v3", "note": "band of the source's CVSS vector"},
   "entry": {
     "status": "resolved", "reason": null, "kind": "package",
     "identifier": "pkg:pypi/pillow@9.0.0", "matched_by": "identifier",
-    "in_current_version": true, "last_held_in_version": 2, "opened_in_version": 1,
+    "in_current_version": true, "last_held_in_version": 2, "opened_in_version": 1, "closed_by_version": null,
     "places": [
       {"version": 2, "origin": "import", "section": null, "location": null, "revision": "9.0.0"},
       {"version": 1, "origin": "manifest", "section": "[environment] lock", "location": null, "revision": "9.0.0"}
@@ -86,7 +86,7 @@ of how complete its inventory is."
 
 ```text
 Advice for #7 MDB201 (docs/rules/MDB201.md)
-  Severity: HIGH (cvss_v3, as published by the source)
+  Severity: HIGH (cvss_v3, band of the source's CVSS vector)
   Entry: package pkg:pypi/pillow@9.0.0, in the current version (v2); opened in v1
     v2 import, no manifest section, 9.0.0
     v1 manifest, [environment] lock, 9.0.0
@@ -108,7 +108,7 @@ Advice for #7 MDB201 (docs/rules/MDB201.md)
     4. How this alert closes: ...
 ```
 
-An `unresolved` entry prints `Entry: unresolved: <reason> (<identifier>)` and `Relationship: none`. A
+A `fixed` alert's entry line ends `; last held in v<N>, fixed by v<M>`. An `unresolved` entry prints `Entry: unresolved: <reason> (<identifier>)` and `Relationship: none`. A
 dismissal prints `Owner decision: dismissed not_used_at_runtime by <by> at <at>: <note>`; an exception
 prints one `Owner decision: exception <id> for <global> by <by> at <at>, expires <date>: <reason>` line
 per excepted global. Blocks are separated by one blank line; the text ends without a trailing blank

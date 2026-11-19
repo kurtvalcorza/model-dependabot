@@ -11,7 +11,7 @@ One read-only addition to the command-line tool: an opt-in `--advice` flag on `a
 `alerts ID` that appends an advisory view to the unchanged output. Four increments, in priority order.
 
 1. **Rule texts and the CLI baseline (foundation)**: the pre-feature CLI baseline is recorded first,
-   from `main` at `47ebfbe` (FR-016, research R9). The limitations, closing text, fix text, review
+   from the build before this feature, with its commit and `src` tree checked (FR-016, research R9). The limitations, closing text, fix text, review
    steps, relationship and not-established questions of every rule ID move into one versioned package
    data file, `rule_texts/rule-texts.toml`, read by `rules.py`; the three prose sections of each
    `docs/rules/MDB*.md` page are rendered from it and a test keeps them in step (FR-010, FR-014,
@@ -32,9 +32,9 @@ One read-only addition to the command-line tool: an opt-in `--advice` flag on `a
    argument parser in a test (FR-014, FR-015). The flag is wired into `cli.py`; without it the
    recorded baseline replays byte for byte, and with it the exit code is unchanged (FR-016, FR-017).
 
-Decisions: [research.md](research.md). Four planning-time questions need the owner's ruling (Q1 to Q4,
-research, "Questions for the owner"); each has a recommendation, and the tasks follow the
-recommendation until the owner rules.
+Decisions: [research.md](research.md). Four planning-time questions (Q1 to Q4, research, "Questions for
+the owner") were ruled by the owner on 2026-11-19, each as recommended; 010 lands before 011 (below,
+"Overlap with feature 011").
 
 ## Technical Context
 
@@ -50,7 +50,8 @@ existing `Store` opens works unchanged (spec, Edge Cases). The commands open the
 do today (`cli.py:546-547`, `_open`); research R8 and Q2 record why
 
 **Testing**: pytest, offline by default (`tests/conftest.py:33-39` blocks sockets). New fixtures:
-a CLI baseline recorded once from `main` at `47ebfbe` (`tests/fixtures/cli_baseline/`), a four-family
+a CLI baseline recorded once from the build before this feature (`47ebfbe` at planning time;
+`tests/fixtures/cli_baseline/`), a four-family
 model with recorded answers that raises one alert of every rule ID (`tests/fixtures/advice/`), and a
 fixed list of verdict phrases for FR-011 (`tests/fixtures/advice/verdicts.json`). Registry tests extend
 `tests/unit/test_rules.py`
@@ -83,7 +84,7 @@ to the owner.
 | Principle | How this plan meets it | Before research | After design |
 | :-- | :-- | :-- | :-- |
 | I. Evidence on Every Alert | No alert is raised or changed. Every established statement cites one or more evidence ids of the alert (`store.alert_evidence`, `store.py:1945-1950`) with source, URL, retrieval time and matched identifier; a statement with no evidence row is not established (FR-009). The relationship is shown as the inventory's declaration with its basis (version origin, manifest section, version), never as evidence or inference. "Inferred" in issue #7 is replaced by "not established" (spec, US2), so the tool presents no inference of its own | Pass | Pass |
-| II. Pinned Inventory, Open Standards | No inventory field is added and the CycloneDX export is unchanged. The resolver matches only exact pinned identifiers. Q1 (environment markers are not stored, research R5) is answered inside this principle: the recommendation stores nothing new | Pass | Pass, Q1 open |
+| II. Pinned Inventory, Open Standards | No inventory field is added and the CycloneDX export is unchanged. The resolver matches only exact pinned identifiers. Q1 (environment markers are not stored, research R5) is answered inside this principle: the recommendation stores nothing new | Pass | Pass (Q1 ruled 2026-11-19: limitation only, follow-up #28) |
 | III. Advise, Never Act | The view only reads. Every review step is an action for the maintainer with a command the CLI has (FR-015), checked by parsing each named command with `build_parser()` (`cli.py:162`). Impact is always `impact undetermined`; no command records an impact conclusion (FR-012) | Pass | Pass |
 | IV. Precision First | No new alert or watch event. An identifier no stored version holds reads `unresolved` with its reason; no entry is picked by name, similarity or partial match (FR-006). Watch events get no advisory view (FR-003) | Pass | Pass |
 | V. Test-First with Offline Feed Tests | No new feed. Every test task precedes its code and fails first; the FR-016 baseline is recorded from the pre-feature build before any `src/` change, so the replay test fails only if behaviour moves. The default run stays offline | Pass | Pass |
@@ -91,9 +92,9 @@ to the owner.
 | House style | British spelling, no serial comma, in `rule-texts.toml`, rule pages and output text; a test checks the verdict list, not style, so style is a review item (T046) | Pass | Pass |
 | Development workflow | Specified, clarified and planned before code; tasks next; outward actions wait for the owner | Pass | Pass |
 
-Result: **pass**, with no Complexity Tracking entry. Two points are put to the owner rather than
-decided here, because they touch how the constitution's words are read, not whether the plan meets
-them:
+Result: **pass**, with no Complexity Tracking entry. Two points touch how the constitution's words are
+read, not whether the plan meets them; the owner ruled on both on 2026-11-19, accepting the
+recommendation (Q2 and Q4):
 
 - **Q2, read-only and the store's open-time migrations.** `Store.__init__` (`store.py:662-687`) creates
   missing tables and migrates an older database on open, which is a write. Today `alerts` and
@@ -143,7 +144,7 @@ src/model_dependabot/
 ├── assurance/
 │   ├── affected.py            # new: resolve entry, relationship and basis, runtime use (US1)
 │   └── advice.py              # new: statements, claims, owner decision, steps, impact; text (US2-3)
-└── reports.py                 # unchanged in behaviour; advice_text lives in advice.py
+└── reports.py                 # unchanged; read only (alert_view, view_state); advice_text lives in advice.py
 tools/
 ├── record_cli_baseline.py     # new: records the FR-016 baseline once, from main at 47ebfbe
 └── render_rule_pages.py       # new: writes the three prose sections of docs/rules/MDB*.md
@@ -162,12 +163,33 @@ pure functions of stored rows and can be tested without a check run, as feature 
 ship with the code whose version they are tied to (FR-014 "versioned in the repository"); `rules.py`
 stays the one registry that `reports.py`, `cli.py`, the page renderer and the registry test read.
 
+## Overlap with feature 011 (typed model lineage, #9)
+
+Owner's ruling, 2026-11-19: **010 lands before 011.**
+
+- **Files**: of the existing files, 010 changes only `cli.py`, `rules.py`, `README.md` and `docs/rules/`
+  (the pages and their index). Everything else it adds is new (`rule_texts/`, `assurance/affected.py`,
+  `assurance/advice.py`, `tools/record_cli_baseline.py`, `tools/render_rule_pages.py`, tests and fixtures).
+  It does not edit `reports.py`, `store.py`, `lifecycle.py`, `manifest.py` or `assurance/trust.py`; it
+  imports from them unchanged. So the existing files both features change are `cli.py` and `README.md`,
+  not the six listed in 011's plan (`specs/011-typed-model-lineage/plan.md:173-184` on 011's planning
+  branch), which 011 corrects.
+- **No lineage**: 010 reads no lineage edges. Its relationship comes from the fixed table of
+  data-model.md; the single `[base_model]` is the only parent it knows (spec, Assumptions: multi-parent
+  lineage is out of scope). Filling the relationship from 011's edges is 011's work on top of 010's view,
+  not a 010 task.
+- **Baselines**: 010's FR-016 baseline is recorded from the build before 010 (T003). 011 records its own
+  baseline after 010 lands, and re-records 010's `pre-010-baseline.json` (with a new pin, T007) where 011
+  legitimately changes output, for example base-model causes; that re-record is 011's task, reviewed by
+  the owner.
+
 ## Delivery order
 
 The order follows tasks.md's phases.
 
 1. CLI baseline recorded and its replay test, rule texts moved into `rule-texts.toml` with the pages
-   rendered from it and the registry test extended (foundation). One pull request; behaviour unchanged.
+   rendered from it and the registry test extended (foundation). One pull request; CLI behaviour
+   unchanged, and each rule page keeps its prose and gains the numbered review steps (Q3).
 2. Affected entry, relationship and runtime use (US1), with `alert show --advice` showing that part.
    One pull request.
 3. Statements, claims, owner decision and impact (US2), with the verdict guard. One pull request.

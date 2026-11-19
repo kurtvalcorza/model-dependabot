@@ -16,7 +16,7 @@ part of the contract (FR-003).
 | :-- | :-- | :-- |
 | `schema` | text | `advice/1`; bumped when a field is added, renamed or removed |
 | `alert_id` | integer | the alert's id, repeated so the object can be read alone |
-| `severity` | object | `{value, origin, note}`: the stored `severity` and `severity_origin` unchanged (FR-004); `note` is `"fixed by the service for this alert kind"` for origin `policy`, otherwise `"as published by the source"`. No score, weight or rank field exists |
+| `severity` | object | `{value, origin, note}`: the stored `severity` and `severity_origin` unchanged (FR-004); `note` is one fixed text per origin, matching `matching/severity.py:90-103`: `policy` "fixed by the service for this alert kind"; `database_specific` "as published by the source"; `cvss_v3` and `cvss_v4` "band of the source's CVSS vector"; `unknown` "the source gave no severity". A test refuses any other origin. No score, weight or rank field exists |
 | `entry` | object | Affected entry, below |
 | `relationship` | object or null | Relationship, below; null when `entry.status` is `unresolved` |
 | `runtime_use` | object | Runtime use, below |
@@ -41,7 +41,8 @@ part of the contract (FR-003).
 | `in_current_version` | boolean or null | whether the model's latest version holds it |
 | `last_held_in_version` | integer or null | the highest version that holds it; equal to the latest version when `in_current_version` |
 | `opened_in_version` | integer | the alert's stored value |
-| `places` | array | one item per (version, entry) that holds it, version descending, then `entry_id` ascending |
+| `closed_by_version` | integer or null | the alert's stored value (`reports.py:85`): the fixing version of a `fixed` alert (spec, Edge Cases) |
+| `places` | array | one item per (version, entry) that holds it, version descending, then in the order `store.entries` returns (`entry_id` ascending); items carry no `entry_id` |
 
 Each item of `places`: `{version, origin, section, location, revision}` where `origin` is the version's
 stored origin (`manifest`, `record`, `import` or `null` for a version registered before feature 003,
@@ -150,7 +151,7 @@ the text changes without a new version (as `tests/unit/test_safe_globals.py` doe
 - `alerts ID --advice`: the order of today's payload, the `alerts` list (by severity, then alert id,
   `reports.py:125-127`) then the `excepted` list, under the same `--state` filter
   (`reports.py:130-148`). Watch events: no view.
-- Inside a view: `places` version descending then `entry_id`; `established` by `evidence_id`;
+- Inside a view: `places` version descending, then `store.entries` order; `established` by `evidence_id`;
   `not_established` impact first, then the rule's list, then the conditional items in the order of
   research R6; `claims` as `claim_verification`; `owner_decision.items` by `exception_id`;
   `runtime_use.context` by alert id.
