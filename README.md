@@ -2,8 +2,9 @@
 
 Dependency alerts for AI models. You describe a model in a small manifest; the tool records a pinned
 inventory of what the model depends on (its weight files, the packages locked in its environment, the
-base model it was fine-tuned from and its training data) and then checks that inventory against
-published advisories and weight-file scans. It also watches what happens upstream: a training dataset or
+models it was derived from by fine-tuning, adaptation, merging or quantisation, and its training data)
+and then checks that inventory against published advisories and weight-file scans. It also watches
+what happens upstream: a training dataset or
 a paper tied to it being retracted or removed, a licence changing and the base model being disabled or
 no longer publicly available. When something it depends on becomes vulnerable, unsafe or unavailable it
 raises an alert, and it closes the alert when a new version of the model fixes the cause or the source

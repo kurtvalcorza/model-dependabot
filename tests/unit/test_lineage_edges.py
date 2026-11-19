@@ -99,3 +99,26 @@ def test_a_legacy_base_model_is_one_unspecified_edge_keyed_base_model(tmp_path: 
         "base_model",
         PURL_A,
     )
+
+
+# --- review R10: the repository filter of cause_edges and the case of parent identity -----------
+
+
+def test_cause_edges_names_only_the_hub_edges_of_that_repository() -> None:
+    from model_dependabot.lineage.edges import cause_edges
+
+    edges = _edges("four-types")  # base-a, base-b, base-c and a registered model
+    [only] = cause_edges(edges, "Example-Org/Base-B")
+    assert (only["relationship"], only["source_key"]) == ("merged-from", "parents[1]")
+    assert cause_edges(edges, "example-org/other") == []
+    assert len(cause_edges(_edges("same-repo-two-revisions"), "example-org/base-a")) == 2
+
+
+def test_parent_identity_ignores_the_case_of_a_repository() -> None:
+    from model_dependabot.lineage.edges import fold, parent_identity
+
+    upper = dict(_edges("merge-two")[0], parent_repo="Example-Org/Base-A")
+    lower = _edges("merge-two")[0]
+    assert parent_identity(upper) == parent_identity(lower)
+    [folded] = fold([lower, upper])
+    assert folded["declared_count"] == 2

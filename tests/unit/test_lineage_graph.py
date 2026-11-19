@@ -121,3 +121,10 @@ def test_a_merge_with_one_parent_is_a_note_not_a_problem() -> None:
     assert graph.problems(edges, exists_in(edges)) == []
     [note] = graph.notes(edges, [("m", 1)])
     assert graph.note_text(note) == "merge with one parent"
+
+
+def test_a_merge_of_two_parents_has_no_note() -> None:
+    """Review R5: the note is for exactly one merged-from parent."""
+    second = dict(hub("merged-from"), parent_repo="example-org/base-b")
+    edges = {("m", 1): [hub("merged-from"), second]}
+    assert graph.notes(edges, [("m", 1)]) == []
