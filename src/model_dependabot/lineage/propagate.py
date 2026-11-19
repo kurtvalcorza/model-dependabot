@@ -24,6 +24,7 @@ from typing import Any
 from model_dependabot.lineage import RELATIONSHIPS, UNSPECIFIED
 from model_dependabot.lineage.edges import Edge, Exists
 from model_dependabot.lineage.graph import Node, label, parent_node
+from model_dependabot.upstream.scope import in_inventory
 
 ALL = frozenset(RELATIONSHIPS)
 _WEIGHTS = frozenset({"adapter-for"})
@@ -66,9 +67,6 @@ def candidates(
     repository-scoped cause by an entry in that repository) and it is open, or fixed by a version
     later than ``version``. ``opened_in_version`` and ``current_version`` play no part.
     """
-    from model_dependabot import lifecycle  # the repository rules live with the check
-
-    identifiers = {entry.get("identifier") for entry in entries if entry.get("identifier")}
     found = []
     for alert in alerts:
         state = alert["state"]
@@ -76,16 +74,8 @@ def candidates(
         later_fix = state == "fixed" and closed_by is not None and closed_by > version
         if state != "open" and not later_fix:
             continue
-        cause = alert["cause"]
-        if cause.get("identifier") in identifiers:
+        if in_inventory(alert["kind"], alert["cause"], entries):
             found.append(alert)
-            continue
-        if lifecycle._repository_scoped(alert["kind"], cause):
-            repository = lifecycle._repository_of(cause, entries)
-            if repository is not None and any(
-                lifecycle._in_repository(entry, repository) for entry in entries
-            ):
-                found.append(alert)
     return found
 
 

@@ -64,7 +64,6 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote
 
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
@@ -132,6 +131,9 @@ from model_dependabot.upstream.changes import (
 )
 from model_dependabot.upstream.licences import normalise
 from model_dependabot.upstream.observe import observe
+from model_dependabot.upstream.scope import in_repository as _in_repository
+from model_dependabot.upstream.scope import repository_of as _repository_of
+from model_dependabot.upstream.scope import repository_scoped as _repository_scoped
 
 PACKAGE_ALERT = "package_advisory"
 UNMATCHED = "advisory_unmatched"
@@ -3610,55 +3612,6 @@ def _dataset_present(
         if kind != PAPER_RETRACTED or cause.get("paper_doi") in (entry.get("paper_dois") or []):
             return True
     return False
-
-
-def _repository_scoped(kind: str, cause: Mapping[str, Any]) -> bool:
-    """Whether the cause is a state or observation of a whole hub repository (identity and
-    clearance table): a disabled or unavailable base model, a disabled hub dataset, a licence
-    read from a base model's or hub dataset's info, or a paper tied to a hub dataset."""
-    identifier = str(cause.get("identifier") or "")
-    on_hub = identifier.startswith((HUB_DATASET_PREFIX, "pkg:huggingface/"))
-    return (
-        kind in REPOSITORY_ALERTS
-        or (kind == DATASET_REMOVED and cause.get("host") == "huggingface")
-        or (kind == LICENCE_CHANGED and on_hub)
-        or (kind == PAPER_RETRACTED and identifier.startswith(HUB_DATASET_PREFIX))
-    )
-
-
-def _repository_of(
-    cause: Mapping[str, Any], earlier: Sequence[Mapping[str, Any]]
-) -> tuple[str, str] | None:
-    """The hub repository the cause's item is in, as (entry kind, owner/name), if it is in one.
-
-    Read from the earlier version's entry for the item, else from the cause itself (an alert
-    written before causes named their repository).
-    """
-    for entry in earlier:
-        if entry.get("identifier") != cause["identifier"]:
-            continue
-        if entry["kind"] == "base_model" and entry.get("name"):
-            return ("base_model", entry["name"])
-        if entry["kind"] == "dataset" and entry.get("hub_repo"):
-            return ("dataset", entry["hub_repo"])
-    identifier = str(cause["identifier"])
-    if identifier.startswith(HUB_DATASET_PREFIX):
-        return ("dataset", identifier.removeprefix(HUB_DATASET_PREFIX).rsplit("@", 1)[0])
-    if cause.get("repo") and identifier.startswith("pkg:huggingface/"):
-        return ("base_model", str(cause["repo"]))
-    if identifier.startswith("pkg:huggingface/"):
-        return (
-            "base_model",
-            unquote(identifier.removeprefix("pkg:huggingface/").rsplit("@", 1)[0]),
-        )
-    return None
-
-
-def _in_repository(entry: Mapping[str, Any], repository: tuple[str, str]) -> bool:
-    kind, repo = repository
-    if entry["kind"] != kind:
-        return False
-    return entry.get("name" if kind == "base_model" else "hub_repo") == repo
 
 
 def _gap_for(
