@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+from collections.abc import Mapping, Sequence
 from functools import cache
 from pathlib import Path
 from typing import Any
@@ -48,6 +50,8 @@ from model_dependabot.inventory.build import (
     new_entry,
     normalise_doi,
 )
+from model_dependabot.lineage import RELATIONSHIPS, UNSPECIFIED
+from model_dependabot.lineage.edges import NO_VERSION, fold, new_edge
 from model_dependabot.lockfile import NO_EXACT_VERSION, NO_HASH
 from model_dependabot.sources.hf import is_commit
 from model_dependabot.upstream.licences import join_licences, recorded
@@ -65,6 +69,18 @@ P_GAP = PREFIX + "gap"
 # Feature 003 (contracts/inventory-profile.md): where the format claim came from. Written on
 # export; ignored on import, where every claim is a third party's.
 P_FORMAT_ORIGIN = PREFIX + "format-origin"
+# Feature 011 (contracts/cyclonedx-lineage.md): an ancestor's lineage edge. CycloneDX 1.7 has no
+# field for a relationship type, an edge's origin or a reference to a model in the same store.
+P_RELATIONSHIP = PREFIX + "relationship"
+P_RELATIONSHIP_RECORDED = PREFIX + "relationship-recorded"
+P_EDGE_ORIGIN = PREFIX + "edge-origin"
+P_CLAIMED_ORIGIN = PREFIX + "claimed-origin"
+P_PARENT_MODEL = PREFIX + "parent-model"
+P_PARENT_VERSION = PREFIX + "parent-version"
+# Research P2: at most this many ancestors are read; the rest is one recorded gap.
+MAX_ANCESTORS = 256
+_LIMIT_GAP = re.compile(r"^more than \d+ ancestors; \d+ not read$")
+UNIDENTIFIED_ANCESTOR = "unidentified base model"
 PROPERTIES = frozenset(
     {
         P_FORMAT,
@@ -75,6 +91,12 @@ PROPERTIES = frozenset(
         P_HUB_FILE,
         P_GAP,
         P_FORMAT_ORIGIN,
+        P_RELATIONSHIP,
+        P_RELATIONSHIP_RECORDED,
+        P_EDGE_ORIGIN,
+        P_CLAIMED_ORIGIN,
+        P_PARENT_MODEL,
+        P_PARENT_VERSION,
     }
 )
 
@@ -269,8 +291,62 @@ def _dataset_component(index: int, entry: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def export_bom(model_id: str, version: int, entries: list[dict[str, Any]]) -> dict[str, Any]:
-    """The CycloneDX 1.7 document for one model version."""
+def _edge_properties(edge: Mapping[str, Any]) -> list[tuple[str, Any]]:
+    return [
+        (P_RELATIONSHIP, edge["relationship"]),
+        (P_RELATIONSHIP_RECORDED, edge.get("relationship_recorded")),
+        (P_EDGE_ORIGIN, edge.get("origin")),
+        (P_CLAIMED_ORIGIN, edge.get("claimed_origin")),
+    ]
+
+
+def _edge_component(
+    index: int, edge: Mapping[str, Any], entry: dict[str, Any] | None
+) -> dict[str, Any]:
+    """One ancestor for one lineage edge (contracts/cyclonedx-lineage.md, Ancestor forms).
+
+    A pinned hub edge is its base model entry's component plus the edge's properties. A
+    registered-model edge has no purl (FR-010a). A gap edge carries ``model-dependabot:gap`` and,
+    when it names a repository, ``hub-repo`` and ``hub-revision``, so a re-import reads it back.
+    """
+    ref = f"base-model:{index}"
+    if edge.get("parent_kind") == "model":
+        component = {"type": "machine-learning-model", "bom-ref": ref}
+        component["name"] = str(edge["parent_model_id"])
+        pairs = [
+            (P_PARENT_MODEL, edge["parent_model_id"]),
+            (P_PARENT_VERSION, edge.get("parent_version")),
+            (P_GAP, edge.get("gap_reason")),
+        ]
+        return _with(component, properties=_properties(pairs + _edge_properties(edge)))
+    if entry is not None:
+        component = _base_model_component(index, entry)
+        properties = component.get("properties", []) + _properties(_edge_properties(edge))
+        component["properties"] = properties
+        return component
+    repo = edge.get("parent_repo")
+    component = {"type": "machine-learning-model", "bom-ref": ref}
+    component["name"] = str(repo or UNIDENTIFIED_ANCESTOR)
+    pairs = [
+        (P_HUB_REPO, repo),
+        (P_HUB_REVISION, edge.get("parent_revision") if repo else None),
+        (P_GAP, edge.get("gap_reason")),
+    ]
+    return _with(component, properties=_properties(pairs + _edge_properties(edge)))
+
+
+def export_bom(
+    model_id: str,
+    version: int,
+    entries: list[dict[str, Any]],
+    edges: Sequence[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """The CycloneDX 1.7 document for one model version.
+
+    With ``edges`` (feature 011), ancestors are written one per edge, not one per base model entry:
+    the k-th edge's ``bom-ref`` is ``base-model:<n + k>``, n the number of weight-file and package
+    entries, so a legacy version's one ancestor keeps the ref it had (research L4).
+    """
     components: list[dict[str, Any]] = []
     ancestors: list[dict[str, Any]] = []
     datasets: list[dict[str, str]] = []
@@ -281,13 +357,24 @@ def export_bom(model_id: str, version: int, entries: list[dict[str, Any]]) -> di
         elif kind == "package":
             components.append(_package_component(index, entry))
         elif kind == "base_model":
-            ancestors.append(_base_model_component(index, entry))
+            if edges is None:
+                ancestors.append(_base_model_component(index, entry))
         elif kind == "dataset":
             data = _dataset_component(index, entry)
             components.append(data)
             datasets.append({"ref": data["bom-ref"]})
         else:
             raise ValueError(f"unknown entry kind {kind!r}")
+    if edges is not None:
+        first = sum(entry["kind"] in ("weight_file", "package") for entry in entries)
+        pinned = {
+            entry["identifier"]: entry
+            for entry in reversed(entries)
+            if entry["kind"] == "base_model" and entry["identifier"]
+        }
+        for k, edge in enumerate(edges):
+            entry = pinned.get(edge.get("entry_identifier")) if not edge.get("gap_reason") else None
+            ancestors.append(_edge_component(first + k, edge, entry))
     model: dict[str, Any] = {
         "type": "machine-learning-model",
         "bom-ref": f"model:{model_id}@{version}",
@@ -554,6 +641,113 @@ def _list(value: Any) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
+def _limit_reason(unread: int) -> str:
+    return f"more than {MAX_ANCESTORS} ancestors; {unread} not read"
+
+
+def _read_ancestors(
+    model: Mapping[str, Any],
+) -> tuple[list[tuple[int, dict[str, Any]]], int, list[tuple[int, dict[str, Any]]]]:
+    """The ancestors read (with their index), how many were not, and carried limit gaps.
+
+    A limit gap a previous export wrote (an ancestor whose gap is the limit's) is not counted
+    towards the limit: it is read back as the gap it records (review R3).
+    """
+    pedigree = model.get("pedigree") if isinstance(model.get("pedigree"), dict) else {}
+    listed = list(enumerate(_list(pedigree.get("ancestors"))))
+    carried = [(i, item) for i, item in listed if _LIMIT_GAP.match(_props(item).get(P_GAP, ""))]
+    others = [(i, item) for i, item in listed if (i, item) not in carried]
+    read = others[:MAX_ANCESTORS]
+    return read + carried, len(others) - len(read), carried
+
+
+def _ancestor_edge(index: int, item: dict[str, Any], **source: Any) -> dict[str, Any]:
+    """The edge one imported ancestor gives (contracts/cyclonedx-lineage.md, rules 2 to 6)."""
+    props = _props(item)
+    stated = props.get(P_RELATIONSHIP)
+    relationship, recorded = UNSPECIFIED, props.get(P_RELATIONSHIP_RECORDED)
+    if stated in RELATIONSHIPS:
+        relationship = stated
+    elif stated is not None and stated != UNSPECIFIED:
+        recorded = stated
+    common = {
+        "relationship": relationship,
+        "relationship_recorded": recorded,
+        "origin": "import",
+        "claimed_origin": props.get(P_EDGE_ORIGIN),
+        "source_key": f"ancestors[{index}]",
+        "state": "unverified",
+        **source,
+    }
+    if P_PARENT_MODEL in props:
+        text = props.get(P_PARENT_VERSION, "")
+        version = int(text) if text.isdecimal() and int(text) >= 1 else None
+        return new_edge(
+            parent_kind="model",
+            parent_model_id=props[P_PARENT_MODEL],
+            parent_version=version,
+            gap_reason=props.get(P_GAP) or (NO_VERSION if version is None else None),
+            **common,
+        )
+    purl = item.get("purl")
+    if isinstance(purl, str) and purl.startswith("pkg:huggingface/"):
+        _, repo, commit = _split_purl(purl)
+        commit = None if commit is None else commit.lower()
+        reason = props.get(P_GAP)
+        if commit is None:
+            reason = reason or NO_REVISION
+        elif not is_commit(commit):
+            reason = reason or NOT_A_COMMIT
+        entry = huggingface_purl(repo, commit) if commit and is_commit(commit) else None
+        return new_edge(
+            parent_kind="hub",
+            parent_repo=repo,
+            parent_revision=commit,
+            gap_reason=reason,
+            entry_identifier=entry,
+            **common,
+        )
+    repo = props.get(P_HUB_REPO)
+    return new_edge(
+        parent_kind="hub",
+        parent_repo=repo,
+        parent_revision=props.get(P_HUB_REVISION) if repo else None,
+        gap_reason=props.get(P_GAP) or (NO_REVISION if repo else "no Hugging Face purl"),
+        **common,
+    )
+
+
+def import_ancestors(
+    document: Any, *, source_file: str | None = None, source_sha256: str | None = None
+) -> list[dict[str, Any]]:
+    """The lineage edges of a document's ``pedigree.ancestors[]``, folded by identity (T030).
+
+    Every edge is origin ``import`` and state ``unverified``, whatever the document says; its stated
+    ``edge-origin`` is kept as ``claimed_origin`` (FR-007, FR-011). Beyond ``MAX_ANCESTORS``, one
+    gap edge without a parent identity records how many were not read.
+    """
+    if not isinstance(document, dict):
+        return []
+    metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
+    model = metadata.get("component") if isinstance(metadata.get("component"), dict) else {}
+    ancestors, unread, _ = _read_ancestors(model)
+    source = {"source_file": source_file, "source_sha256": source_sha256}
+    edges = [_ancestor_edge(index, item, **source) for index, item in ancestors]
+    if unread:
+        edges.append(
+            new_edge(
+                parent_kind="hub",
+                relationship=UNSPECIFIED,
+                origin="import",
+                state="unverified",
+                source_key=f"ancestors[{MAX_ANCESTORS}+]",
+                gap_reason=_limit_reason(unread),
+                **source,
+            )
+        )
+    return fold(edges)
+
+
 def import_bom(document: Any) -> list[dict[str, Any]]:
     """The inventory entries of a CycloneDX 1.5, 1.6 or 1.7 JSON document, in kind order."""
     if not isinstance(document, dict) or document.get("bomFormat") != "CycloneDX":
@@ -592,8 +786,14 @@ def import_bom(document: Any) -> list[dict[str, Any]]:
         else:
             entries.append(_import_package(component))
 
-    pedigree = model.get("pedigree") if isinstance(model.get("pedigree"), dict) else {}
-    entries += [_import_base_model(item) for item in _list(pedigree.get("ancestors"))]
+    # Feature 011 (research L4, review R1): an ancestor naming a registered model gives an edge and
+    # no entry; at most MAX_ANCESTORS are read and the rest is one gap entry.
+    ancestors, unread, _ = _read_ancestors(model)
+    entries += [
+        _import_base_model(item) for _, item in ancestors if P_PARENT_MODEL not in _props(item)
+    ]
+    if unread:
+        entries.append(gap("base_model", _limit_reason(unread)))
 
     # A dataset listed twice (or two components sharing one bom-ref) is one entry (review F-03).
     order = {kind: rank for rank, kind in enumerate(ENTRY_KIND_ORDER)}

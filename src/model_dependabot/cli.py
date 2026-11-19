@@ -32,7 +32,13 @@ from model_dependabot.assurance.format_check import measure_imported, record_imp
 from model_dependabot.discover.project import discover, write_proposal
 from model_dependabot.discover.propose import OutputExistsError, OutputLinkError, refuse_link
 from model_dependabot.inventory.build import build_entries, record_licences
-from model_dependabot.inventory.cyclonedx import InventoryError, export_bom, import_bom, validate
+from model_dependabot.inventory.cyclonedx import (
+    InventoryError,
+    export_bom,
+    import_ancestors,
+    import_bom,
+    validate,
+)
 from model_dependabot.inventory.record import (
     CheckedRecord,
     RecordError,
@@ -491,7 +497,7 @@ def _record(
     if store.get_model(model_id) is None:
         store.add_model(model_id, name=name, owner=owner)
     version = (store.latest_version(model_id) or 0) + 1
-    document = export_bom(model_id, version, entries)
+    document = export_bom(model_id, version, entries, edges)
     try:
         validate(document)
     except ValidationError as error:  # the input made an invalid inventory: exit 1, not 3
@@ -699,6 +705,9 @@ def make_handlers(
             entries = import_bom(document)
         except InventoryError as error:
             raise InvalidInputError(str(error)) from None
+        # Feature 011: every imported edge is origin import and unverified (FR-007, FR-011).
+        digest = hashlib.sha256(raw).hexdigest()
+        edges = import_ancestors(document, source_file=Path(args.bom).name, source_sha256=digest)
         model_id = args.model_id
         base_dir = Path(args.bom).parent
         with _open(args.db) as store:
@@ -715,16 +724,18 @@ def make_handlers(
                 store,
                 model_id,
                 entries,
-                hashlib.sha256(raw).hexdigest(),
+                digest,
                 base_dir=base_dir,
                 origin="import",
+                edges=edges,
             )
             record_import_contradictions(store, model_id, version, measures)
             payload = _inventory_payload(model_id, version, store.entries(model_id, version))
+            payload["lineage"] = _lineage(store, model_id, version)
             payload["alerts"] = reevaluate_version(store, model_id, version)
             notes = _claim_notes(store, model_id, version)
         text = _inventory_text(payload, f"Imported {model_id} v{version}", notes)
-        return CommandResult(payload, text)
+        return CommandResult(payload, text + "\n" + _lineage_text(payload["lineage"]))
 
     def show(args: argparse.Namespace) -> CommandResult:
         with _open(args.db) as store:

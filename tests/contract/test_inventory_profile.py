@@ -69,6 +69,13 @@ def test_the_property_set_is_exactly_the_documented_one() -> None:
                     "hub-file",
                     "gap",
                     "format-origin",  # feature 003, contracts/inventory-profile.md
+                    # feature 011, specs/011-typed-model-lineage/contracts/cyclonedx-lineage.md
+                    "relationship",
+                    "relationship-recorded",
+                    "edge-origin",
+                    "claimed-origin",
+                    "parent-model",
+                    "parent-version",
                 )
             }
         )
