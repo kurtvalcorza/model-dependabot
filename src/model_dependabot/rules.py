@@ -117,7 +117,6 @@ RULES = (
             "gating_changed",
             "card_changed",
             "base_model_moved",
-            "lineage_inherited",  # feature 011: a registered parent's finding (FR-020)
         ),
     ),
     Rule(
@@ -128,6 +127,20 @@ RULES = (
         ("base_model_refused", "base_model_unrecognised"),
     ),
 )
+# Feature 011 (owner's ruling on review R8): a page for a watch kind with no alert kind of its own.
+# Its ID is assigned like any other and never reused; it has rule texts and a page, but no alert
+# carries it, so ``rule_for`` does not return it.
+WATCH_RULES = (
+    Rule(
+        "MDB601",
+        "lineage_inherited",
+        "A registered parent's finding reaches this model",
+        "lineage",
+        ("lineage_inherited",),
+    ),
+)
+# Every rule ID with a page and rule texts.
+PAGES = (*RULES, *WATCH_RULES)
 _BY_KIND = {rule.kind: rule for rule in RULES}
 
 
@@ -218,7 +231,7 @@ def load_rule_texts(path: Path | str = RULE_TEXTS) -> tuple[int, dict[str, RuleT
     if not isinstance(version, int) or isinstance(version, bool):
         raise RuleTextsError("version must be an integer")
     tables = {key: value for key, value in data.items() if key != "version"}
-    wanted = {rule.rule_id for rule in RULES}
+    wanted = {rule.rule_id for rule in PAGES}
     if set(tables) != wanted:
         raise RuleTextsError(
             f"rule IDs missing {sorted(wanted - set(tables))},"

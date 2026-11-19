@@ -17,7 +17,7 @@ import re
 import sys
 from pathlib import Path
 
-from model_dependabot.rules import CLOSING, RULES, RuleTexts, texts_for
+from model_dependabot.rules import CLOSING, PAGES, RuleTexts, texts_for
 
 ROOT = Path(__file__).resolve().parent.parent
 LIMITS = "## What it does not prove"
@@ -58,7 +58,7 @@ def render(page: str, texts: RuleTexts) -> str:
 
 
 def main() -> int:
-    for rule in RULES:
+    for rule in PAGES:
         path = ROOT / rule.page
         page = path.read_text("utf-8")
         path.write_text(render(page, texts_for(rule.rule_id)), encoding="utf-8", newline="\n")

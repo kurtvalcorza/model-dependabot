@@ -12,6 +12,7 @@
   "MDB304": "dataset_not_findable",
   "MDB401": "licence_changed",
   "MDB501": "base_model_disabled",
-  "MDB502": "base_model_unavailable"
+  "MDB502": "base_model_unavailable",
+  "MDB601": "lineage_inherited"
  }
 }
