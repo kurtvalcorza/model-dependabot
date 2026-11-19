@@ -36,7 +36,14 @@
   for a finding from a registered parent). Settle them before `/speckit.plan`.
 - The Background section cites `file:line` at `main` `aa32cd6` to ground the current behaviour; the
   requirements themselves name no implementation.
+- Review 2026-11-19 (MD9-R1 to R14) applied: imported edges are always origin `import` and unverified with the
+  BOM's origin kept as claimed origin (FR-007, FR-011, SC-002); the rename edge case follows feature 002's keying
+  (two alerts); FR-003/SC-001 list the exact allowed differences; direct and transitive defined (FR-018); a
+  same-model version chain is not a cycle (FR-022); references re-resolve at each check and audit (FR-021a);
+  registered-model ancestors have a CycloneDX form (FR-010a); the FR-017 matrix is closed with a default of
+  "does not travel"; a Constitution Check flags the preamble amendment as the owner's decision. Still 3
+  [NEEDS CLARIFICATION] markers.
+- Renumbered from 006 to 011 on 2026-11-19: 005-009 were used by earlier merged work and 010 by the alert view (#7).
 - Manifest, CycloneDX and command names (`[base_model]`, `pedigree.ancestors[]`, `inventory audit`) appear because
   they are the user-facing interface and open standard named in #9, not implementation.
-- The `base_model_relation` mapping in Assumptions is inferred and must be checked against a primary source in
-  planning.
+- The `base_model_relation` mapping in Assumptions cites the Hugging Face model card documentation.
