@@ -54,8 +54,13 @@ One row per edge identity of a model version. Created with `CREATE TABLE IF NOT 
 | `entry_identifier` | text | the `base_model` entry this hub edge produced (the pinned purl), else null |
 | `declared_count` | integer | `>= 1`; above 1 is the "duplicate parent" problem |
 
-`UNIQUE (model_id, version, parent_kind, parent_repo, parent_revision, parent_model_id, parent_version,
-relationship)` is edge identity (FR-023), with nulls compared through `COALESCE` in a unique index.
+Edge identity (FR-023) is a unique index on `(model_id, version, parent_kind, COALESCE(parent_repo,
+''), COALESCE(parent_revision, ''), COALESCE(parent_model_id, ''), COALESCE(parent_version, 0),
+relationship, CASE WHEN parent_repo IS NULL AND parent_model_id IS NULL THEN source_key ELSE '' END)`.
+The last term keeps edges **without a parent identity** distinct (review R2): an imported ancestor with
+neither a `pkg:huggingface` purl nor `parent-model`, and the import-limit gap edge, are keyed by their
+`source_key` (`ancestors[i]`), so two such ancestors stay two edges, never fold into `declared_count = 2`
+and are never a `duplicate_parent` or `ambiguous_relationship` (research L3)
 
 **Derived, not stored**: `resolved` (a `model` edge whose `(parent_model_id, parent_version)` exists in
 `model_versions` at read time, FR-021a) and the gap `parent not registered` when it does not. A legacy
@@ -71,8 +76,16 @@ transaction, `store.py:1371-1412`, so a version and its edges are recorded all o
 ## Base model entry (unchanged)
 
 Kind `base_model` (`store.py:49`), identifier `pkg:huggingface/<owner>/<name>@<commit>`
-(`inventory/build.py:462-479`). One entry per distinct hub (repository, revision) of a version, whatever
-the number of edges naming it. A registered-model edge produces no entry.
+(`inventory/build.py:462-479`).
+
+- **Registered from a manifest or record**: one entry per distinct hub (repository, revision), whatever
+  the number of edges naming it.
+- **Imported**: one entry per ancestor, as today, without de-duplication (`inventory/cyclonedx.py:595-596`);
+  a purl-less ancestor stays a gap entry (`:466-468`). The one change: an ancestor carrying
+  `model-dependabot:parent-model` gives **no entry** (research L4, review R1).
+- Beyond 256 imported ancestors: one gap entry and one gap edge, reason
+  `more than 256 ancestors; <N> not read`, written back on export as a gap ancestor (review R3).
+- A registered-model edge never produces an entry, on registration or import.
 
 ## Lineage problem (computed, not stored)
 
@@ -101,6 +114,12 @@ absent from the mapping travels on none (FR-017).
 Watch events of the parent never travel. `unspecified` passes only kinds that travel on all four
 (FR-019). A path passes a kind only if every edge on it does; an ambiguous pair passes the intersection.
 
+**Which parent alerts are candidates at a referenced version v** (owner's ruling C5, research L7): an
+alert of the parent model whose item is in `store.entries(parent, v)` (by entry identifier, or, for a
+repository-scoped cause, by an entry of v in that repository), and whose state is `open` or `fixed` with
+`closed_by_version > v` (`store.py:256-276`). `opened_in_version` and `current_version` are not used. A
+child pinning version 1 still inherits version 1's findings after version 2 fixes them.
+
 ## Inherited finding (new watch kind `lineage_inherited`)
 
 Added to `WATCH_KINDS` (`store.py:73-103`); an older database's `watch_events` is rebuilt by the existing
@@ -111,7 +130,7 @@ open (`store.py:684`).
 | :-- | :-- |
 | `model_id`, `version` | the child and its current version |
 | `entry_identifier` | `model:<parent id>@<parent version>/<parent cause key>` |
-| `detail.parent_alert` | `{alert_id, model_id, kind, cause_key, severity, state}` |
+| `detail.parent_alert` | `{alert_id, model_id, kind, cause_key, severity, state}`; `state` is `open` or `fixed` (fixed by a version later than the referenced one) |
 | `detail.reach` | `direct` (one edge) or `transitive` (two or more) (FR-018) |
 | `detail.paths` | list of paths; each a list of `{child, parent, relationship, origin, edge_id}` from child upward |
 | `detail.relationship_unspecified` | true when any edge on a path is `unspecified` (FR-019) |
@@ -124,7 +143,7 @@ Never an alert, so it does not count for `--fail-on` (FR-027).
 `base_model_disabled`, `base_model_unavailable` and a base model's `licence_changed` gain
 `cause.edges`: every edge of the version that names the repository, each
 `{relationship, origin, revision, source_key}` (FR-009, FR-024). Cause keys are unchanged
-(`lifecycle.py:2557-2563`, `:3166-3168`, `:3195`, `:3466`). The `base_model_*` watch events of feature
+(`lifecycle.py:2557-2563`; unavailable `:3175`, `:3253`, `:3378`; disabled `:3195`; licence `:3466`). The `base_model_*` watch events of feature
 002 gain `detail.edges` for their entry.
 
 ## Discovery candidate (extended)

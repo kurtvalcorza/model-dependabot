@@ -58,21 +58,30 @@ Existing `model-dependabot:gap` is unchanged and carries the edge's gap. All are
 
 ## Import rules
 
-1. At most 256 ancestors are read; beyond that, one `base_model` gap entry
-   `more than 256 ancestors; <N> not read` (research P2).
+What the code does today (`inventory/cyclonedx.py`): one `base_model` entry per ancestor, with no
+de-duplication (`:595-596`); an ancestor without a `pkg:huggingface` purl is a gap entry, reason its
+`model-dependabot:gap` or else "no Hugging Face purl" (`:466-468`). This feature keeps that and adds
+edges:
+
+1. At most 256 ancestors are read; beyond that, one gap entry and one gap edge with the reason
+   `more than 256 ancestors; <N> not read` (research P2). Export writes the gap edge as an ancestor
+   carrying `model-dependabot:gap`, so a re-import reads the same gap back (review R3).
 2. Every edge is origin `import`, state `unverified`, whatever `edge-origin` says; a stated
    `edge-origin` becomes `claimed_origin` (FR-007, FR-011, D6). Nothing imported carries state `owner`.
 3. No `relationship` property: `unspecified`. A value outside the five: `unspecified`, with the value in
    `relationship_recorded` (FR-012).
-4. `parent-model` with `parent-version`: a registered-model reference, resolved by id and version in the
-   importing store; unresolvable is the gap `parent not registered`; resolved stays `unverified`, is shown
-   "resolved by id and version only" and carries no finding (FR-010a). `parent-model` without
-   `parent-version`: gap `no version`.
-5. Neither a `pkg:huggingface` purl nor `parent-model`: today's gap `no Hugging Face purl`
-   (`cyclonedx.py:467-468`).
+4. `parent-model` with `parent-version`: a registered-model reference and **no entry** (`import_bom`
+   skips the ancestor, so it is not the gap entry "no Hugging Face purl"); resolved by id and version in
+   the importing store; unresolvable is the edge gap `parent not registered`; resolved stays
+   `unverified`, is shown "resolved by id and version only" and carries no finding (FR-010a).
+   `parent-model` without `parent-version`: edge gap `no version`, still no entry.
+5. Neither a `pkg:huggingface` purl nor `parent-model`: today's gap entry `no Hugging Face purl`
+   (`:466-468`) plus one edge without a parent identity, keyed by its `source_key`; two such ancestors
+   are two edges, never a `duplicate_parent` (review R2).
 6. A hub ancestor becomes a `base_model` entry exactly as `_import_base_model` makes it today
-   (`cyclonedx.py:463-486`) plus an edge row; two ancestors with one purl give one entry and, with one
-   type, one edge (`duplicate_parent`) or, with two, two edges (`ambiguous_relationship`).
+   (`:463-486`), one per ancestor, plus an edge. Two ancestors with one purl stay **two entries**, as
+   today; their edges fold: with one type, one edge with `declared_count = 2` (`duplicate_parent`), with
+   two types, two edges (`ambiguous_relationship`) (research L4).
 
 ## Round trips (SC-002)
 
@@ -81,4 +90,6 @@ Existing `model-dependabot:gap` is unchanged and carries the edge's gap. All are
 - Import of a third-party document, export: parent references, revisions, gaps and recognised types
   equal; unrecognised types are written `unspecified` with `relationship-recorded`; no duplicate
   bom-ref, including one parent under two types and a self-reference.
+- A document with 300 ancestors: import, export, import keeps the limit gap.
+- Two purl-less ancestors: two gap entries and two edges after import, two gap ancestors after export.
 - Every export validates against the official CycloneDX 1.7 schema (`cyclonedx.validate`, `:130`).

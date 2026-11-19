@@ -10,7 +10,7 @@ markers left). Tracking: #9.
 Six increments on the existing command-line tool, in priority order.
 
 1. **Constitution amendment (C4)**: the preamble's "the base model it was fine-tuned from" becomes "the
-   models it was derived from (...)", version 1.0.3 to 1.1.0, in the first pull request (research L12).
+   models it was derived from by fine-tuning, adaptation, merging or quantisation", version 1.0.3 to 1.1.0, in the first pull request (research L12).
 2. **Typed parents in the manifest (US1, P1)**: a `[[parents]]` array of tables, each a hub repository
    and revision or a registered model id and version, plus one of four relationship types. Edges are
    stored in a new immutable table `lineage_edges`; hub parents keep producing `base_model` entries
@@ -23,7 +23,7 @@ Six increments on the existing command-line tool, in priority order.
 4. **Hub findings over several edges and propagation (US3, P2)**: hub findings keep their keys and name
    every edge that carries them (one alert per cause per child); findings of a registered parent travel
    by the closed FR-017 matrix as `lineage_inherited` watch events, direct or transitive with the path,
-   in a lineage pass at the end of `check` (research L6, L7).
+   in a lineage pass at the end of `_check`, inside `run_check`'s error handling (research L6, L7).
 5. **Graph problems (US4, P2)**: cycles, duplicate parents, ambiguous relationships and unregistered
    references, computed by a pure graph module at registration, import, audit and check, resolving
    references afresh each time (research L8).
@@ -47,8 +47,8 @@ or renamed. A version registered before this feature has no edge rows and reads 
 
 **Testing**: pytest, offline by default (`tests/conftest.py`). New fixtures in `tests/fixtures/lineage/`
 (manifests and CycloneDX documents); hub answers reused from `tests/fixtures/hf_upstream/`; a pre-011
-baseline (`tests/fixtures/equivalence/pre-011-baseline.json`) recorded once on `main` before any code for
-SC-001 (research L11); a pre-011 schema fixture (`tests/fixtures/db/schema-pre-011.sql`) for the
+baseline (`tests/fixtures/equivalence/pre-011-baseline.json`) recorded once, before any 011 code, for
+SC-001, recorded with feature 004's harness on the `main` 010 leaves (research L11); a pre-011 schema fixture (`tests/fixtures/db/schema-pre-011.sql`) for the
 migration; the official CycloneDX 1.7 schema as vendored for every export test
 
 **Target Platform**: as 001 (Linux and macOS CI; Windows for local use)
@@ -65,9 +65,10 @@ stays read-only (`store.py:631`); nothing reads weights or model-card text as li
 
 **Scale/Scope**: as 001: tens to hundreds of models; parents per version usually 1 to a few tens
 
-No open NEEDS CLARIFICATION: the spec's three questions were answered on 2026-11-19. Three planning
-choices (P1 table name, P2 import limit, P3 which parent alerts belong to a referenced version) carry a
-recommendation for the owner's review (research, Planning choices).
+No open NEEDS CLARIFICATION: the spec's three questions were answered on 2026-11-19. Two planning
+choices (P1 table name, P2 import limit) carry a recommendation for the owner's review (research,
+Planning choices); the owner ruled the third on 2026-11-19 (C5: the referenced parent version's own
+stored inventory decides which of its findings travel) and the order against 010 (C6: 010 first).
 
 ## Constitution Check
 
@@ -75,7 +76,7 @@ recommendation for the owner's review (research, Planning choices).
 
 | Principle | How this plan meets it | Before research | After design |
 | :-- | :-- | :-- | :-- |
-| Preamble (watched scope) | The preamble names one parent of one type ("the base model it was fine-tuned from", `.specify/memory/constitution.md:3-6`). Several parents of four types are a material expansion: per Governance a **MINOR** amendment (owner, 2026-11-19). Proposed wording: "the models it was derived from (fine-tuned from, adapted for, merged from or quantised from)"; version 1.0.3 to **1.1.0**; made by T001 in the first pull request with its rationale and the owner's approval in the commit. Until T001 lands no code widens the scope | Pass, amendment proposed | Pass, amendment task T001 |
+| Preamble (watched scope) | The preamble names one parent of one type ("the base model it was fine-tuned from", `.specify/memory/constitution.md:3-6`). Several parents of four types are a material expansion: per Governance a **MINOR** amendment (owner, 2026-11-19). Proposed wording: "the models it was derived from by fine-tuning, adaptation, merging or quantisation"; version 1.0.3 to **1.1.0**; made by T001 in the first pull request with its rationale and the owner's approval in the commit. Until T001 lands no code widens the scope | Pass, amendment proposed | Pass, amendment task T001 |
 | I. Evidence on Every Alert | Every finding along an edge cites the edge's type, origin, revision and source key (FR-009); an inherited event links the parent alert's evidence and names its id. No alert is raised from an edge alone | Pass | Pass |
 | II. Pinned Inventory, Open Standards | Edges stay in CycloneDX `pedigree.ancestors[]`; the type, origin, claimed origin and registered-model reference use `model-dependabot:` properties because 1.7 has no field for them, each documented (FR-010, FR-013, contracts/cyclonedx-lineage.md). Every parent keeps its own pinned revision or version | Pass | Pass |
 | III. Advise, Never Act | Nothing changes a manifest or a model. Discovery proposes commented blocks only. Inherited findings are events; only the parent's owner closes the parent's alert | Pass | Pass |
@@ -95,7 +96,7 @@ Result: **pass**, with one amendment task (T001) and the justified items in Comp
 specs/011-typed-model-lineage/
 ├── spec.md              # specification with clarifications
 ├── plan.md              # this file
-├── research.md          # Phase 0: decisions L1-L12, planning choices P1-P3
+├── research.md          # Phase 0: rulings C1-C6, decisions L1-L12, planning choices P1-P2
 ├── data-model.md        # Phase 1: lineage_edges, ParentSpec, TRAVELS, lineage_inherited
 ├── quickstart.md        # Phase 1: validation scenarios
 ├── contracts/
@@ -129,10 +130,12 @@ src/model_dependabot/
 │                              #          open_read_only reads an absent table as empty (:631)
 ├── lifecycle.py               # changed: cause.edges in the base model path (_apply_base_model :3140,
 │                              #          _disabled_state :3185, _apply_moved_base_model :3212,
-│                              #          _apply_licence :3419); lineage pass in run_check (:410-428)
+│                              #          _apply_licence :3419); lineage pass at the end of _check (:457),
+│                              #          inside run_check's F7 handler (:409-425)
 ├── cli.py                     # changed: _record passes edges (:439-475); register (:604-642) and
 │                              #          import_inventory (:644-679) record edges and print lineage;
-│                              #          _inventory_text lineage section (:416-427)
+│                              #          _inventory_text lineage section (:416-427); check problems
+│                              #          in _check_text (:481-490)
 ├── reports.py                 # changed: edge lines under hub causes (_cause_text :172); inherited
 │                              #          event text (watch_view :93); audit lineage section (:322)
 ├── assurance/audit.py         # changed: audit_report lineage block (:227)
@@ -143,9 +146,10 @@ src/model_dependabot/
     ├── compare.py             # changed: every candidate against every parent (:149-169)
     └── propose.py             # changed: commented [[parents]] blocks (:161-172)
 tools/
-└── record_lineage_baseline.py # new: records the SC-001 baseline once, on the pre-011 build
+└── record_equivalence_baseline.py # changed: --scenarios, --out, --expect-src-tree (feature 004's recorder)
 tests/
 ├── fixtures/lineage/          # new: manifests and CycloneDX documents of quickstart.md
+├── fixtures/equivalence/lineage_scenarios.py   # new: [base_model] scenarios on 004's Scenario/snapshot/run
 ├── fixtures/equivalence/pre-011-baseline.json
 ├── fixtures/db/schema-pre-011.sql
 ├── unit/                      # manifest parents; edges; graph; propagate matrix; discovery mapping
@@ -164,40 +168,45 @@ their own, not inventory entries, so legacy entries stay byte-identical (researc
 
 ## Overlap with feature 010 (actionable alert view, #7)
 
-Feature 010 is planned in parallel on `plan/010-actionable-alert-view`. Its spec cites `reports.py`,
-`store.py`, `lifecycle.py`, `cli.py`, `manifest.py`, `assurance/trust.py`, `rules.py` and
-`matching/severity.py`. Files both features change: **`reports.py`, `store.py`, `lifecycle.py`,
-`cli.py`, `manifest.py` and `assurance/trust.py`**. Neither spec depends on the other (011 spec,
-Dependencies).
+**Owner's ruling (2026-11-19, research C6): feature 010 lands before 011.** This reverses the order the
+first draft of this plan recommended.
 
-Ordering:
-
-- **No shared pull request.** Each feature's pull requests are rebased on the other's merged work; tasks
-  editing the shared files are never [P] across the two features.
-- **Store first, one at a time.** If both add watch kinds, alert fields or tables, the later pull request
-  rebases its `WATCH_KINDS` and `SCHEMA` edits onto the earlier one; `_rebuild_for_kinds` is idempotent
-  (`store.py:833`), so the migration order does not matter, only the textual merge.
-- **010's relationship field reads 011's edges.** If 011's Phase 3 lands first, 010 fills "the known
-  relationship to the model" from `cause.edges` and `lineage_inherited` (contracts/edge-evidence.md). If
-  010 lands first, 011's T044 (reports) adds edges to 010's view rather than beside it. Recommended order:
-  011 Phases 1-3 (amendment, manifest, edges) before 010's view work, because 010 then has typed edges to
-  show from its first release; 010's work that does not touch these files proceeds in parallel.
-- **`manifest.py`**: 011 adds `[[parents]]`; if 010 adds a manifest key, the later one adds its key to
-  `_TOP_KEYS` (`manifest.py:21`) on rebase.
+- **What 010 changes**: only `cli.py`, `rules.py`, `README.md` and `docs/rules/`. 011's files that 010
+  does not touch (`store.py`, `lifecycle.py`, `reports.py`, `manifest.py`, `assurance/trust.py`,
+  `inventory/`, `discover/`, `lineage/`) carry no textual conflict; `cli.py` and `README.md` are
+  rebased onto 010's.
+- **011 starts from the `main` 010 leaves.** Every line reference in these documents is to `47ebfbe`;
+  the first task that edits a file re-checks its references at that base, and `cli.py` ones are
+  re-derived there.
+- **SC-001 baseline with provenance (T005)**: recorded on that base, not on a fixed commit, with feature
+  004's recorder (`tools/record_equivalence_baseline.py`), which refuses to record unless `src/` is clean
+  and `git rev-parse HEAD:src` equals the tree passed as `--expect-src-tree`; the baseline file carries
+  `recorded_from` and `src_tree` (research L11, review R7, R8).
+- **010's FR-016 CLI baseline**: 010 compares CLI text, JSON and exit codes byte for byte. 011 legitimately
+  changes some of them (register and `inventory show` lineage, alert cause `edges` and their lines,
+  `check` problems and inherited events, the audit section). Each 011 pull request that changes them
+  re-records 010's baseline with 010's recorder in the same pull request and lists every changed
+  invocation and the requirement that changes it (task T060); exit codes never change (SC-007).
+- **010's relationship field**: once 011 lands, 010's view can read "the known relationship to the
+  model" from `cause.edges` and `lineage_inherited` (contracts/edge-evidence.md); that is 010's
+  follow-up, not a 011 task. T044 adds edge lines to the views as they exist after 010.
+- Tasks of the two features editing the same file are never [P] with each other.
 
 ## Delivery order
 
 The order follows tasks.md's phases.
 
-1. Constitution amendment (T001), setup and foundation (store table, migration, baseline) with US1. One
-   pull request.
+1. After feature 010 has merged: constitution amendment (T001), setup and foundation (store table,
+   migration, baseline recorded on the `main` 010 leaves) with US1. One pull request.
 2. CycloneDX round trip (US2), with the multi-ancestor import test. One pull request.
-3. Graph problems (US4), before propagation, because propagation stops at cycles. One pull request.
+3. Graph problems (US4), before propagation, because propagation stops at cycles; `check` reports them
+   (T059). One pull request.
 4. Hub findings over several edges and propagation (US3). One pull request.
 5. Discovery and audit (US5), then the shared documentation (T056). One pull request.
 
 Each increment is shippable alone and keeps the full suite green. The SC-001 equivalence test lands in
-increment 1 and stays in the suite.
+increment 1 and stays in the suite. Every increment that changes CLI text or JSON re-records 010's
+FR-016 baseline in the same pull request (T060).
 
 ## Complexity Tracking
 

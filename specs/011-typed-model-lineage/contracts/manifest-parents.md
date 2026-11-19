@@ -63,7 +63,8 @@ Lineage (3 edges):
   merged-from      hf:example-org/base-a@0123…  origin manifest, owner
   merged-from      hf:example-org/base-b@89ab…  origin manifest, owner
   adapter-for      model:example-adapter-base@2  origin manifest, owner  [parent not registered]
-Lineage problems (0):
+Lineage problems (1):
+  parent_not_registered: model:example-adapter-base@2 (parents[2])
 ```
 
 The JSON payload gains `lineage: {edges: [...], problems: [...]}` with the audit's shapes

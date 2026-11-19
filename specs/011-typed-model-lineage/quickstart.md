@@ -21,7 +21,8 @@ uv run pytest -q
 uv run ruff check && uv run ruff format --check
 ```
 
-Record the pass count before T005 and after the last task (no pipe; read the real exit code).
+Record the pass count at T005, on the `main` feature 010 leaves, and after the last task (no pipe; read
+the real exit code).
 
 ## 2. Several typed parents (User Story 1)
 
@@ -86,10 +87,11 @@ grep -n 'parents\|relationship' $S/proposed.toml   # two commented [[parents]] b
 
 Expected: no "several base models" gap; each candidate `declared-but-unverified` with the gap "no revision".
 
-## 8. The constitution amendment (T061)
+## 8. The constitution amendment (T001)
 
 ```bash
 grep -n 'derived from\|Version' .specify/memory/constitution.md
 ```
 
-Expected: the preamble names "the models it was derived from" and the footer reads version 1.1.0.
+Expected: the preamble names "the models it was derived from by fine-tuning, adaptation, merging or
+quantisation" and the footer reads version 1.1.0.

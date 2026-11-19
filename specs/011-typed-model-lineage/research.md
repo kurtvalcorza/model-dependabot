@@ -5,7 +5,10 @@
 Each item records the decision, why it was made and what else was considered. Code references are to
 `main` at `47ebfbe` (PR #27 merged). `src/` and `tests/` are unchanged since `aa32cd6`, the commit the
 spec's Background cites (`git diff --stat aa32cd6 47ebfbe -- src tests` is empty), so the spec's line
-numbers still hold except where an item below corrects one.
+numbers still hold except where an item below corrects one. Kurt ruled on 2026-11-19 that feature 010
+lands before 011 (C6): implementation starts from the `main` 010 leaves, and every line reference here is
+re-checked at that base by the first task that edits the file (010 changes only `cli.py`, `rules.py`,
+`README.md` and `docs/rules/`).
 
 ## Decisions already made
 
@@ -14,23 +17,24 @@ numbers still hold except where an item below corrects one.
 | C1 | Relationship of a legacy `[base_model]`; may it take a type key? | `unspecified`, never inferred; no type key | owner, 2026-11-19 (spec, Clarifications) |
 | C2 | Which registered-parent findings travel on which edge type | The FR-017 matrix as written | owner, 2026-11-19 |
 | C3 | Inherited finding: alert or watch event? | A watch event marked inherited, citing the parent's alert | owner, 2026-11-19 |
-| C4 | Constitution preamble | MINOR amendment, proposed by this plan (L12), made by task T001 | owner, 2026-11-19 |
+| C4 | Constitution preamble | MINOR amendment 1.0.3 to 1.1.0, proposed by this plan (L12), made by task T001; wording without a nested parenthesis (review R13) | owner, 2026-11-19 |
+| C5 | Which of a registered parent's findings belong to the version a child references (replaces the plan's P3, review R6) | Decided by the referenced parent version's own stored inventory: an alert of the parent travels when the item it names is in `store.entries(parent, v)`, including an alert a later version fixed. A child pinning version 1 still inherits version 1's findings after version 2 fixes them (L7) | owner, 2026-11-19 |
+| C6 | Order against feature 010 | 010 lands before 011; 011 records its SC-001 baseline on the `main` 010 leaves, with provenance, and re-records 010's FR-016 CLI baseline in each pull request that legitimately changes CLI text or JSON (L11, plan.md) | owner, 2026-11-19 |
 
 ## Planning choices for the owner's review
 
-These are the plan's own choices. Each has a recommendation; the plan follows it unless the owner rules
+These are the plan's own choices (P3 was replaced by the owner's ruling C5). Each has a recommendation; the plan follows it unless the owner rules
 otherwise at plan review.
 
 | # | Question | Options | Recommended |
 | :-- | :-- | :-- | :-- |
 | P1 | Name of the manifest's parent list (L1) | (a) `[[parents]]`; (b) `[[base_models]]`; (c) `[[lineage]]` | **(a)**: it says what each table is; (b) reads as the legacy table pluralised and invites mixing the forms |
 | P2 | Import limit on `pedigree.ancestors[]` (L4, spec edge case) | (a) 256; (b) 64; (c) 1024 | **(a)**: far above any real merge (merges of tens of parents exist), small enough to bound the graph walk |
-| P3 | Which of a registered parent's alerts belong to the version a child references (L7) | (a) open alerts whose `opened_in_version <= v <= current_version`; (b) all open alerts of the parent model | **(a)**: a child pinned to version 1 does not inherit a cause first seen in version 3 |
 
 ## L1. The manifest's parent list
 
 **Finding**: the manifest accepts one `[base_model]` table with keys `hub` and `revision`
-(`src/model_dependabot/manifest.py:21`, `:24`), parsed at `manifest.py:205-213` into one optional
+(`src/model_dependabot/manifest.py:21`, `:25`), parsed at `manifest.py:205-213` into one optional
 `BaseModelSpec` (`manifest.py:46-49`, field `Manifest.base_model` at `manifest.py:74`). Unknown keys are
 an error (`manifest.py:78-84`), so a new table must be added to `_TOP_KEYS`.
 
@@ -84,38 +88,62 @@ CycloneDX document (not queryable, and an imported claim would be indistinguisha
 builder folds edges with the same identity into one row and stores how many times it was declared
 (`declared_count`), so the "duplicate parent" problem is reported again at every audit and check
 (US4 AS2). Two edges with the same parent identity and different types are both kept; the problem
-"ambiguous relationship" is computed on read (US4 AS3). Hub edges with the same repository and revision
-share one `base_model` entry, so the hub is asked once and one finding names both edges (FR-024).
+"ambiguous relationship" is computed on read (US4 AS3).
+
+**An edge without a parent identity never folds** (review R2). An imported ancestor with neither a
+`pkg:huggingface` purl nor `model-dependabot:parent-model` (today's gap "no Hugging Face purl",
+`cyclonedx.py:467-468`), and the import-limit gap (L4), have no repository and no model id. Such an edge
+is keyed by its `source_key` (`ancestors[i]`) instead, so two of them stay two edges, are never a
+`duplicate_parent` or `ambiguous_relationship`, and re-export writes both, as today's two gap entries do.
+
+**Entries**: on registration from a manifest, hub edges with the same repository and revision share one
+`base_model` entry, so the hub is asked once and one finding names both edges (FR-024). On import, entries
+stay as today (L4).
 
 ## L4. CycloneDX ancestors
 
-**Finding**: export writes one `pedigree.ancestors[]` component per `base_model` entry with
-`bom-ref` `base-model:<index>`, the index being the entry's position in the version's entry list
-(`inventory/cyclonedx.py:224-236`, `:277-284`); the root is `model:<id>@<version>` (`:292-298`). Import
-reads every ancestor (`:595-596`) through `_import_base_model` (`:463-486`), which ignores all properties
-but `model-dependabot:gap`; an ancestor without a `pkg:huggingface` purl is the gap "no Hugging Face
-purl" (`:467-468`). The only test of ancestors covers one
-(`tests/contract/test_inventory_profile.py:129-134`). Export is computed once, at registration, by
-`cli._record` (`cli.py:439-475`) and stored; `inventory export` writes the stored document
-(`cli.py:691-700`).
+**Finding (what the code does today)**: export writes one `pedigree.ancestors[]` component per
+`base_model` entry with `bom-ref` `base-model:<index>`, the index being the entry's position in the
+version's entry list (`inventory/cyclonedx.py:224-236`, `:277-284`); the root is `model:<id>@<version>`
+(`:292-298`). Import makes **one `base_model` entry per ancestor, with no de-duplication**
+(`:595-596`): two ancestors with one purl give two entries with the same identifier. `_import_base_model`
+(`:463-486`) ignores every property but `model-dependabot:gap`; an ancestor without a `pkg:huggingface`
+purl becomes a gap entry, its reason the ancestor's `model-dependabot:gap` or else "no Hugging Face purl"
+(`:466-468`). The only test of ancestors covers one (`tests/contract/test_inventory_profile.py:129-134`).
+Export is computed once, at registration, by `cli._record` (`cli.py:439-475`) and stored;
+`inventory export` writes the stored document (`cli.py:691-700`).
 
-**Decision**: `export_bom` gains an `edges` argument and writes one ancestor per edge, not per entry.
-The k-th edge (0-based, stored order) gets `bom-ref` `base-model:<n + k>`, where n is the number of
+**Decision, export**: `export_bom` gains an `edges` argument and writes one ancestor per edge, not per
+entry. The k-th edge (0-based, stored order) gets `bom-ref` `base-model:<n + k>`, where n is the number of
 weight-file and package entries. For a legacy version this is the index today's code gives its one base
 model (entries are sorted weight files, packages, base model, datasets; `inventory/build.py:36`), so a
 legacy ref is unchanged; refs stay unique for any number of edges because files, packages and datasets
-use other prefixes (`cyclonedx.py:188`, `:214`). New properties (contracts/cyclonedx-lineage.md):
-`model-dependabot:relationship`, `model-dependabot:edge-origin`, `model-dependabot:claimed-origin`,
-`model-dependabot:relationship-recorded`, `model-dependabot:parent-model` and
-`model-dependabot:parent-version`. A registered-model edge is an ancestor with no purl (FR-010a).
+use other prefixes (`cyclonedx.py:188`, `:214`). A gap edge (no revision, no purl, or the import limit)
+is written as an ancestor carrying `model-dependabot:gap`, so every gap survives a round trip. New
+properties (contracts/cyclonedx-lineage.md): `model-dependabot:relationship`,
+`model-dependabot:edge-origin`, `model-dependabot:claimed-origin`, `model-dependabot:relationship-recorded`,
+`model-dependabot:parent-model` and `model-dependabot:parent-version`. A registered-model edge is an
+ancestor with no purl (FR-010a).
 
-Import reads at most 256 ancestors (P2); the rest become one gap entry "more than 256 ancestors; N not
-read", so nothing is silently dropped. Every imported edge is origin `import`, state `unverified`, and
-keeps the document's `edge-origin` value as `claimed_origin` (FR-007, FR-011, D6).
+**Decision, import** (aligned with L2 and data-model.md, review R1):
+
+- An ancestor carrying `model-dependabot:parent-model` produces an edge and **no entry**:
+  `import_bom` skips it, so it is not turned into the gap entry "no Hugging Face purl". Only documents
+  written by this feature carry the property, so no earlier import changes.
+- Every other ancestor keeps today's entry, one per ancestor, **without de-duplication**: two ancestors
+  with one purl still give two entries, so third-party imports keep their entries and gaps exactly (a
+  behaviour change here was considered and rejected; the repository-keyed alerts already give one alert
+  for both, L6). Their edges fold by identity (L3); an edge's `entry_identifier` is the purl both share.
+- At most 256 ancestors are read (P2). The rest become one gap entry and one gap edge (no parent identity,
+  `source_key` `ancestors[256+]`) with the reason "more than 256 ancestors; N not read"; export writes that
+  edge as a gap ancestor, and a re-import reads it back as a gap through `model-dependabot:gap` (review
+  R3), so the gap is never lost on import then export.
+- Every imported edge is origin `import`, state `unverified`, and keeps the document's `edge-origin` value
+  as `claimed_origin` (FR-007, FR-011, D6).
 
 **Validation**: an ancestor without a purl validates against the vendored CycloneDX 1.7 schema
-(components need `type` and `name` only); T025 asserts it against the official schema, as every export
-test does (`cyclonedx.py:130`).
+(components need `type` and `name` only); inferred, T025 asserts it against the official schema, as every
+export test does (`cyclonedx.py:130`).
 
 ## L5. Origin, source location and verification state
 
@@ -131,7 +159,8 @@ at `trust.py:25`). No code path can write `verified`: the column's `CHECK` allow
 ## L6. Hub findings over several edges (FR-014, FR-024)
 
 **Finding**: base model alerts are keyed by the repository without a revision (`base_model_repo`,
-`lifecycle.py:2557-2563`; keys at `:3166-3168` and `:3195`), and a base model's licence alert by its
+`lifecycle.py:2557-2563`; the unavailable key at `:3175`, `:3253` on the moved path and `:3378` in
+`_apply_refusal`, the disabled key at `:3195`), and a base model's licence alert by its
 hub scope (`lifecycle.py:3466`, `:3581`). `_apply_upstream` visits every pinned `base_model` entry
 (`lifecycle.py:3524-3527`). `_upstream_alert` carries an open alert forward and replaces its cause with
 the latest one (`lifecycle.py:2805`, `:2834-2840`).
@@ -146,30 +175,53 @@ detail. Nothing else about the hub path changes.
 
 ## L7. Propagation from registered parents (FR-015 to FR-020)
 
-**Decision**: a new pure module `src/model_dependabot/lineage/propagate.py` and one lineage pass in
-`run_check`, after `_check` returns and before `finish_check_run` (`lifecycle.py:410`, `:427`). The pass
-is not a source: it adds no overview row and is not selectable with `--source` (FR-027).
+**Decision**: a new pure module `src/model_dependabot/lineage/propagate.py` and one lineage pass at the
+**end of `_check`** (`lifecycle.py:457`), so it runs inside `run_check`'s `try` and the review-F7 handler
+(`lifecycle.py:409-425`) finishes the run, records every source's status and stores the overview if the
+pass raises (review R5). The pass is not a source: it adds no overview row, is not selectable with
+`--source`, never touches `target.tally` or `target.held` (which feed `_store_overview`,
+`lifecycle.py:432-454`) and only appends its event ids to `target.summary["watch_events"]` (FR-027).
 
 For each target, a breadth-first walk over resolved, `owner`-state registered-model edges, with a set of
-visited (model id, version) so each version is visited at most once per check (FR-022). At each parent
-version it reads that model's open alerts that belong to the referenced version (P3) and keeps the ones
-whose kind travels on every edge of the path, by the closed matrix of FR-017 (`TRAVELS` in
-data-model.md). An `unspecified` edge passes only the all-yes rows (FR-019); an ambiguous pair passes the
-intersection of its two types (US4 AS3). An imported (`unverified`) registered-model edge carries
-nothing (FR-010a).
+visited (model id, version) so each version is visited at most once per check (FR-022). An imported
+(`unverified`) registered-model edge carries nothing (FR-010a).
 
-Each finding that reaches the child is one watch event of the new kind `lineage_inherited` on the
-child's current version, with `entry_identifier` `model:<parent id>@<parent version>/<cause key>`, so
-one parent alert gives one event however many paths carry it (`record_watch_event` keeps one row per
-version, entry and kind, `store.py:2023-2033`). Its detail lists every path (each edge: child, parent,
-relationship, origin), `reach` (`direct` for one edge, `transitive` for two or more, FR-018), the
-parent's alert id, kind, cause key and severity, and `relationship_unspecified` when any edge on a path
-is `unspecified`. It is never an alert (C3), so `--fail-on` is unchanged (FR-027).
+**Which of a parent's findings belong to the referenced version (C5, replaces P3)**: at a parent version
+v, a parent alert is a candidate when
+
+1. its item is in v's own stored inventory, `store.entries(parent, v)`: the cause's entry identifier
+   (file hash, purl, DOI, hub dataset) is an identifier of v's entries, or, for a repository-scoped cause
+   (`_repository_scoped`, `lifecycle.py:3572`), v has an entry in that repository (`_repository_of` and
+   `_in_repository`, `lifecycle.py:3586`, `:3614`); and
+2. its state is `open`, or `fixed` by a version later than v (`closed_by_version > v`). An alert fixed by v
+   itself or earlier, or `dismissed`, `cleared` or `withdrawn`, does not travel: the source or the parent's
+   owner settled the cause.
+
+So a child pinning version 1 still inherits version 1's findings after version 2 fixes them, and a cause
+first seen while the parent was at version 3 still reaches a child pinning version 1 when version 1's
+inventory holds the item. `opened_in_version` and `current_version` play no part: they record when a
+check saw the cause, not which versions hold it (review R6, `store.py:256-276`).
+
+A candidate then travels when its kind travels on every edge of the path, by the closed matrix of FR-017
+(`TRAVELS` in data-model.md). An `unspecified` edge passes only the all-yes rows (FR-019); an ambiguous
+pair passes the intersection of its two types (US4 AS3).
+
+Each finding that reaches the child is one watch event of the new kind `lineage_inherited` on the child's
+current version, with `entry_identifier` `model:<parent id>@<parent version>/<cause key>`, so one parent
+alert gives one event however many paths carry it (`record_watch_event` keeps one row per version, entry
+and kind, `store.py:2023-2033`). Its detail lists every path (each edge: child, parent, relationship,
+origin), `reach` (`direct` for one edge, `transitive` for two or more, FR-018), the parent's alert id,
+kind, cause key, severity and state, and `relationship_unspecified` when any edge on a path is
+`unspecified`. It is never an alert (C3), so `--fail-on` is unchanged (FR-027).
+
+The same pass computes the lineage problems of the checked versions (L8) and adds them to the check's
+payload and text (`lineage.problems`; `_check_text`, `cli.py:481-490`), with no exit code change (FR-021,
+US4 AS1, review R4).
 
 **Why a watch event needs no closure rules**: an inherited finding is an event, not an alert, so a type
 change or a dropped parent produces no inherited event at the next check and closes nothing. The spec's
-"close as `fixed` with the type change as evidence" therefore applies only to the child's own alerts;
-hub findings travel on every type (FR-014), so a type change alone never closes one. Recorded here so the
+"close as `fixed` with the type change as evidence" therefore applies only to the child's own alerts; hub
+findings travel on every type (FR-014), so a type change alone never closes one. Recorded here so the
 edge case is not re-litigated.
 
 ## L8. Resolution and graph problems (FR-021, FR-021a, FR-022)
@@ -220,14 +272,30 @@ legacy edges (L2).
 
 ## L11. Fixtures and the equivalence baseline (SC-001)
 
-**Decision**: as feature 004 did (its research S10), a baseline recorded once on the pre-011 build
-(`tests/fixtures/equivalence/pre-011-baseline.json`, written by a new
-`tools/record_lineage_baseline.py`) of every scenario that registers or checks a manifest with
-`[base_model]`: `tests/integration/test_check_base_model.py`, `tests/unit/test_lifecycle_base_model.py`,
-`tests/unit/test_lifecycle_base_model_moved.py` and `tests/integration/test_register.py`. It records entry
-identifiers, gaps, cause keys, alert count, states and severities, watch event kinds and exit codes, so
-the equivalence test compares exactly SC-001's fields and nothing FR-003 allows to change. Hub answers
-reuse `tests/fixtures/hf_upstream/`. New manifests live in `tests/fixtures/lineage/`.
+**Decision** (review R7, R8; ruling C6): reuse feature 004's harness, not a new tool.
+
+- The `[base_model]` scenarios are written as functions in a new module
+  `tests/fixtures/equivalence/lineage_scenarios.py` that imports `Scenario`, `snapshot` and `run` from
+  `tests/fixtures/equivalence/scenarios.py` (`Scenario` at `:49`, `snapshot` at `:295`, `run` at `:325`)
+  and adds to each snapshot SC-001's other fields: entry identifiers and gaps (from `inventory_entries`)
+  and each command's exit code. The scenarios mirror `tests/integration/test_check_base_model.py`,
+  `tests/unit/test_lifecycle_base_model.py`, `tests/unit/test_lifecycle_base_model_moved.py` and
+  `tests/integration/test_register.py`, each as a function a runner can call, so the replay is
+  executable.
+- `tools/record_equivalence_baseline.py` gains `--scenarios MODULE`, `--out FILE` and
+  `--expect-src-tree TREE`, keeping its defaults for 004. It already refuses a dirty `src/`
+  (`git status --porcelain --untracked-files=no -- src` in `main()`); with `--expect-src-tree` it also
+  refuses unless `git rev-parse HEAD:src` equals the given tree, and writes `recorded_from` and `src_tree`
+  into the baseline, as 004's does.
+- The baseline `tests/fixtures/equivalence/pre-011-baseline.json` is recorded on the `main` 010 leaves
+  (the base of 011's first pull request), not on a fixed commit; `--expect-src-tree` is that base's
+  `HEAD:src`, written into validation.md.
+- 010's FR-016 CLI baseline compares text, JSON and exit codes byte for byte. Each 011 pull request that
+  legitimately changes CLI text or JSON (register and `inventory show` lineage, alert cause `edges`,
+  `check` problems and inherited events, the audit section) re-records it with 010's recorder in the same
+  pull request and lists every changed invocation and why (T060).
+
+Hub answers reuse `tests/fixtures/hf_upstream/`. New manifests live in `tests/fixtures/lineage/`.
 
 ## L12. The constitution amendment (C4)
 
@@ -236,14 +304,15 @@ libraries in its runtime environment, its weight files, the base model it was fi
 training datasets and known weaknesses of its model family)".
 
 **Proposed text**: "It watches what a model depends on (the code libraries in its runtime environment,
-its weight files, the models it was derived from (fine-tuned from, adapted for, merged from or quantised
-from), its training datasets and known weaknesses of its model family)".
+its weight files, the models it was derived from by fine-tuning, adaptation, merging or quantisation, its
+training datasets and known weaknesses of its model family)". No parenthesis is nested inside the
+preamble's list (review R13).
 
 **Version**: 1.0.3 to **1.1.0** (MINOR: "a principle or section is added or materially expanded",
-Governance), `Last Amended` set to the date of the amending commit. The amendment is proposed with this
-rationale, approved by the owner and recorded in the commit that makes it (Governance). It lands in the
-first implementation pull request (T001), before any code widens the watched scope, so the constitution
-never lags the code.
+Governance, `constitution.md:84-85`), `Last Amended` set to the date of the amending commit. The amendment
+is proposed with this rationale, approved by the owner and recorded in the commit that makes it
+(Governance). It lands in the first implementation pull request (T001), before any code widens the
+watched scope, so the constitution never lags the code.
 
 ## Deferred (not in this feature)
 
