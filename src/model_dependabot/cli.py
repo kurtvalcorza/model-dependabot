@@ -878,7 +878,7 @@ def make_handlers(
                             store, alert, versions=versions, model_alerts=model_alerts
                         )
                         blocks.append(advice_text(item["advice"]))
-                payload["advice_summary"] = advice_summary(len(blocks))
+                payload["advice_summary"] = advice_summary(len(blocks), args.state)
                 note = payload["advice_summary"]["note"]
                 text += "\n\n" + "\n\n".join(blocks or [note])
         return CommandResult(payload, text)

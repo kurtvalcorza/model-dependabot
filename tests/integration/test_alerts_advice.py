@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from model_dependabot.assurance.advice import EMPTY_MODEL_NOTE
+from model_dependabot.assurance.advice import EMPTY_LISTING_NOTES, EMPTY_MODEL_NOTE
 from model_dependabot.cli import main, make_handlers
 from model_dependabot.sources.fetcher import RecordedFetcher
 from model_dependabot.store import Store
@@ -60,7 +60,7 @@ def test_one_view_per_alert_in_today_s_order(db: Path, state: str) -> None:
         assert all("advice" not in event for event in advised["watch_events"])
         summary = advised["advice_summary"]
         assert summary["alerts_listed"] == len(listed)
-        assert summary["note"] == (EMPTY_MODEL_NOTE if not listed else None)
+        assert summary["note"] == (EMPTY_LISTING_NOTES[state] if not listed else None)
 
 
 @pytest.mark.parametrize("state", STATES)
@@ -75,11 +75,49 @@ def test_the_text_begins_with_today_s_bytes(db: Path, state: str) -> None:
         if ids:
             assert [b.splitlines()[0].split()[2] for b in blocks] == [f"#{i}" for i in ids]
         else:
-            assert blocks == [EMPTY_MODEL_NOTE]
+            assert blocks == [EMPTY_LISTING_NOTES[state]]
 
 
 def test_a_model_with_no_open_alert_gives_the_empty_model_note(db: Path) -> None:
     advised = json.loads(
         run(db, "alerts", "record-model", "--state", "excepted", "--advice", "--json")
     )
-    assert advised["advice_summary"] == {"alerts_listed": 0, "note": EMPTY_MODEL_NOTE}
+    note = EMPTY_LISTING_NOTES["excepted"]
+    assert advised["advice_summary"] == {"alerts_listed": 0, "note": note}
+
+
+# --- review round 1, M10-R1: the empty-listing note matches the --state filter ------------------
+
+
+@pytest.mark.parametrize(
+    ("model", "state", "note"),
+    [
+        ("advice-model", "excepted", "No alert of this model is excepted."),
+        ("unavailable-model", "closed", "No alert of this model is closed."),
+        ("record-model", "excepted", "No alert of this model is excepted."),
+    ],
+)
+def test_an_empty_filter_on_a_model_with_open_alerts_never_says_none_is_open(
+    advice_db: tuple[Path, dict[str, int]], model: str, state: str, note: str
+) -> None:
+    db, _ = advice_db
+    assert json.loads(run(db, "alerts", model, "--state", "open", "--json"))["alerts"]
+    advised = json.loads(run(db, "alerts", model, "--state", state, "--advice", "--json"))
+    assert advised["advice_summary"]["note"].startswith(note)
+    text = run(db, "alerts", model, "--state", state, "--advice")
+    assert "No alert is open" not in text
+    assert text.rstrip("\n").endswith(EMPTY_LISTING_NOTES[state])
+
+
+def test_a_model_with_no_alert_names_each_filter(advice_db: tuple[Path, dict[str, int]]) -> None:
+    db, _ = advice_db
+    with Store(db, now=lambda: NOW) as store:
+        store.add_model("quiet-model")
+        store.add_version("quiet-model", {}, "8" * 64, [], origin="manifest")
+    for state in STATES:
+        advised = json.loads(
+            run(db, "alerts", "quiet-model", "--state", state, "--advice", "--json")
+        )
+        assert advised["advice_summary"] == {"alerts_listed": 0, "note": EMPTY_LISTING_NOTES[state]}
+    assert EMPTY_LISTING_NOTES["open"] == EMPTY_MODEL_NOTE
+    assert EMPTY_LISTING_NOTES["all"].startswith("This model has no alert.")

@@ -113,3 +113,22 @@ def test_a_step_with_a_missing_value_reads_not_recorded(
         bare = alert | {"cause": {"identifier": alert["cause"]["identifier"]}}
         steps = advice_view(store, bare)["review_steps"]
     assert "not recorded" in steps[0]["text"]
+
+
+# --- review round 1, M10-R6: the steps follow what the CLI allows for the alert's state ----------
+
+
+@pytest.mark.parametrize("state", ["fixed", "withdrawn", "cleared", "dismissed"])
+@pytest.mark.parametrize("rule", RULES, ids=lambda rule: rule.rule_id)
+def test_a_closed_or_dismissed_alert_is_never_told_to_dismiss(rule, state: str) -> None:
+    alert = {"alert_id": 1, "model_id": "m", "kind": rule.kind, "cause": {}, "state": state}
+    steps = review_steps(alert)
+    assert all("alert dismiss" not in step["text"] for step in steps)
+    assert steps[-2]["text"].startswith(f"This alert is {state}, and only an open alert")
+    assert steps[-1]["text"] == CLOSING + texts_for(rule.rule_id).closes
+
+
+@pytest.mark.parametrize("rule", RULES, ids=lambda rule: rule.rule_id)
+def test_an_open_alert_keeps_every_step(rule) -> None:
+    alert = {"alert_id": 1, "model_id": "m", "kind": rule.kind, "cause": {}, "state": "open"}
+    assert len(review_steps(alert)) == len(texts_for(rule.rule_id).steps) + 1

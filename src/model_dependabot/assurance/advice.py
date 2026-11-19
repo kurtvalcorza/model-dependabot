@@ -40,13 +40,24 @@ SEVERITY_NOTES = {
     "cvss_v4": "band of the source's CVSS vector",
     "unknown": "the source gave no severity",
 }
-EMPTY_MODEL_NOTE = (
-    "No alert is open for this model. That is not an assessment of the model or of how complete"
-    " its inventory is."
-)
+NOT_AN_ASSESSMENT = "That is not an assessment of the model or of how complete its inventory is."
+# The note of an empty ``alerts ID --advice`` listing, worded for the ``--state`` filter applied
+# (US2 scenario 6): only ``open`` says that no alert is open.
+EMPTY_LISTING_NOTES = {
+    "open": "No alert is open for this model. " + NOT_AN_ASSESSMENT,
+    "excepted": "No alert of this model is excepted. " + NOT_AN_ASSESSMENT,
+    "closed": "No alert of this model is closed. " + NOT_AN_ASSESSMENT,
+    "all": "This model has no alert. " + NOT_AN_ASSESSMENT,
+}
+EMPTY_MODEL_NOTE = EMPTY_LISTING_NOTES["open"]
 MARKER_LIMITATION = (
     "This inventory does not record environment markers, so it cannot say whether the package is"
     " installed where the model runs."
+)
+DISMISS_COMMAND = "`model-dependabot alert dismiss "
+CLOSED_STEP = (
+    "This alert is {state}, and only an open alert can be dismissed: the steps above are for"
+    " reference if the same cause is raised again."
 )
 _PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
 _CAUSE_FIELDS = ("identifier", "location", "package", "version", "dataset", "paper_doi", "repo")
@@ -111,6 +122,8 @@ def established(
     closing row as the source's withdrawal or clearance (research R6)."""
     facts = [row for row in sorted(rows, key=lambda r: r["evidence_id"])]
     facts = [row for row in facts if row["source"] != EXCEPTION_SOURCE]
+    closing = closing_rows(alert, facts)
+    closing_ids = {row["evidence_id"] for row in closing}
     result = [
         {
             "kind": "established",
@@ -119,20 +132,52 @@ def established(
             "evidence": [_evidence_item(row)],
         }
         for row in facts
+        if row["evidence_id"] not in closing_ids
     ]
-    if alert["state"] in ("withdrawn", "cleared") and facts:
-        closing = facts[-1]
-        verb = "withdrew" if alert["state"] == "withdrawn" else "cleared"
+    if closing:
         result.append(
             {
                 "kind": "established",
-                "text": f"the source {verb} the cause ({closing['source']} at"
-                f" {closing['retrieved_at']})",
-                "evidence_ids": [closing["evidence_id"]],
-                "evidence": [_evidence_item(closing)],
+                "text": _closing_text(alert["state"], closing),
+                "evidence_ids": [row["evidence_id"] for row in closing],
+                "evidence": [_evidence_item(row) for row in closing],
             }
         )
     return result
+
+
+def closing_rows(
+    alert: Mapping[str, Any], facts: Sequence[Mapping[str, Any]]
+) -> list[Mapping[str, Any]]:
+    """The rows a withdrawn or cleared alert was closed on (``lifecycle._close`` links them).
+
+    The link table keeps no order, so they are read from the rows themselves: for a withdrawal,
+    every row whose detail records ``withdrawn`` (one per advisory of an alias group); otherwise
+    the rows of the latest check run among the alert's rows; a row without a run (written outside a
+    check) falls back to the last row. Empty for any other state.
+    """
+    if alert["state"] not in ("withdrawn", "cleared") or not facts:
+        return []
+    if alert["state"] == "withdrawn":
+        marked = [row for row in facts if (row.get("detail") or {}).get("withdrawn")]
+        if marked:
+            return marked
+    runs = [row["run_id"] for row in facts if row.get("run_id") is not None]
+    if runs:
+        return [row for row in facts if row.get("run_id") == max(runs)]
+    return [facts[-1]]
+
+
+def _closing_text(state: str, closing: Sequence[Mapping[str, Any]]) -> str:
+    verb = "withdrew" if state == "withdrawn" else "cleared"
+    sources = ", ".join(dict.fromkeys(row["source"] for row in closing))
+    retrieved = ", ".join(dict.fromkeys(row["retrieved_at"] for row in closing))
+    text = f"the source {verb} the cause ({sources}, retrieved {retrieved}"
+    dates = [str((row.get("detail") or {}).get("withdrawn")) for row in closing]
+    dates = [date for date in dict.fromkeys(dates) if date != "None"]
+    if state == "withdrawn" and dates:
+        text += f"; withdrawn {', '.join(dates)}"
+    return text + ")"
 
 
 def _absent(store: Store, alert: Mapping[str, Any], version: int, identifier: str) -> bool:
@@ -240,7 +285,14 @@ def review_steps(alert: Mapping[str, Any]) -> list[dict[str, Any]]:
     alert closes (FR-015)."""
     texts = texts_for(rule_for(alert["kind"]).rule_id)
     values = _values(alert)
-    lines = [fill(step, values) for step in texts.steps] + [CLOSING + texts.closes]
+    steps = [fill(step, values) for step in texts.steps]
+    state = alert.get("state", "open")
+    if state != "open":
+        # Only an open alert (an excepted one included) can be dismissed (``alert dismiss``), so a
+        # closed or dismissed alert's view leaves out the steps that dismiss it and says why.
+        steps = [step for step in steps if DISMISS_COMMAND not in step]
+        steps.append(CLOSED_STEP.format(state=state))
+    lines = [*steps, CLOSING + texts.closes]
     return [{"number": number, "text": text} for number, text in enumerate(lines, start=1)]
 
 
@@ -301,9 +353,10 @@ def advice_view(
     }
 
 
-def advice_summary(listed: int) -> dict[str, Any]:
-    """``advice_summary`` of ``alerts ID --advice``: the views listed and, for none, the note."""
-    return {"alerts_listed": listed, "note": EMPTY_MODEL_NOTE if listed == 0 else None}
+def advice_summary(listed: int, state: str = "open") -> dict[str, Any]:
+    """``advice_summary`` of ``alerts ID --advice``: the views listed and, for none, the note
+    worded for the ``--state`` filter applied (``EMPTY_LISTING_NOTES``)."""
+    return {"alerts_listed": listed, "note": EMPTY_LISTING_NOTES[state] if listed == 0 else None}
 
 
 # --- text ---------------------------------------------------------------------------------------

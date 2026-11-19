@@ -116,7 +116,7 @@ alert's stored fields (research R4). The last step is the rule's `closes` text, 
 ## Advice summary (`alerts ID --advice` only)
 
 `{alerts_listed, note}`: `alerts_listed` counts the advisory views in the payload (the `alerts` and
-`excepted` lists, FR-003); `note` is the empty-model note of research R10 when `alerts_listed` is 0,
+`excepted` lists, FR-003); `note` is the empty-listing note for the `--state` filter (contracts/cli.md) when `alerts_listed` is 0,
 otherwise null.
 
 ## Rule texts file
@@ -164,7 +164,8 @@ the text changes without a new version (as `tests/unit/test_safe_globals.py` doe
   pages add the last step, `How this alert closes: ` followed by `closes`, so `closes` is written
   once. `not_established` needs two or more items (the impact question and at least one of the
   rule's own).
-- A withdrawn or cleared alert's extra established statement reads
+- (Superseded by review round 1, M10-R2, below.) A withdrawn or cleared alert's extra established
+  statement reads
   `the source withdrew the cause (<source> at <retrieved_at>)` or `the source cleared the cause (…)`,
   citing the alert's last evidence row that is not an exception's.
 - Conditional not-established items, in order: `which inventory entry this alert is about: <reason>`
@@ -173,3 +174,13 @@ the text changes without a new version (as `tests/unit/test_safe_globals.py` doe
   the source` (hub weight file); `whether the file's bytes match their record: the bytes were not
   read in this place` (`weight_file_absent`); `whether <package> is installed where the model runs`
   (every package alert, ruling Q1). The package marker limitation is a second `limitations` item.
+- Review round 1 (M10-R2): the closing rows of a withdrawn alert are its rows whose detail records
+  `withdrawn` (one per advisory of an alias group); of a cleared alert, the rows of the latest check
+  run among its rows (the last row when none has a run). They are not also listed as
+  `<source> reported …`; one statement cites them all:
+  `the source withdrew the cause (<sources>, retrieved <times>; withdrawn <dates>)` or
+  `the source cleared the cause (<sources>, retrieved <times>)`.
+- Review round 1 (M10-R6): for an alert that is not open (fixed, withdrawn, cleared or dismissed)
+  the review steps leave out every step that runs `alert dismiss` and add, before the closing step,
+  `This alert is <state>, and only an open alert can be dismissed: the steps above are for reference
+  if the same cause is raised again.` An excepted alert is stored open and keeps every step.

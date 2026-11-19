@@ -101,3 +101,51 @@ def test_an_alias_group_is_one_view_with_every_id_and_its_stored_severity(
     assert advice["severity"]["value"] == "HIGH"
     assert "GHSA-cp9v-662q-vvx9, GHSA-24rc-8hj2-v98c" in advice["review_steps"][0]["text"]
     assert rule_for("package_advisory").page == advice["rule_doc"]
+
+
+# --- review round 1, M10-R2: the closing statement cites the closing rows ------------------------
+
+
+def _row(evidence_id: int, run_id: int | None, detail: dict | None = None) -> dict:
+    return {
+        "evidence_id": evidence_id,
+        "source": "osv.dev",
+        "url": f"https://api.osv.dev/v1/vulns/{evidence_id}",
+        "retrieved_at": "2026-10-24T03:54:34Z",
+        "matched_identifier": "pkg:pypi/pillow@12.3.0",
+        "redacted_fields": [],
+        "run_id": run_id,
+        "detail": detail,
+    }
+
+
+def test_a_withdrawal_cites_every_withdrawal_row_and_none_is_also_reported() -> None:
+    from model_dependabot.assurance.advice import established
+
+    rows = [
+        _row(21, 1, {"local_match": True}),
+        _row(22, 1, {"local_match": True}),
+        _row(30, 2, {"withdrawn": "2026-11-18T00:00:00Z"}),
+        _row(31, 2, {"withdrawn": "2026-11-18T00:00:00Z"}),
+    ]
+    statements = established({"state": "withdrawn"}, rows)
+    assert [s["evidence_ids"] for s in statements] == [[21], [22], [30, 31]]
+    assert statements[-1]["text"].startswith("the source withdrew the cause (osv.dev")
+    assert "withdrawn 2026-11-18T00:00:00Z" in statements[-1]["text"]
+    assert all("reported" not in s["text"] for s in statements[-1:])
+
+
+def test_a_clearance_cites_the_rows_of_the_closing_run() -> None:
+    from model_dependabot.assurance.advice import established
+
+    rows = [_row(5, 1), _row(9, 3), _row(7, 3)]
+    statements = established({"state": "cleared"}, sorted(rows, key=lambda r: r["evidence_id"]))
+    assert [s["evidence_ids"] for s in statements] == [[5], [7, 9]]
+    assert statements[-1]["text"].startswith("the source cleared the cause")
+
+
+def test_an_open_alert_has_no_closing_statement() -> None:
+    from model_dependabot.assurance.advice import established
+
+    statements = established({"state": "open"}, [_row(1, 1), _row(2, 2)])
+    assert [s["evidence_ids"] for s in statements] == [[1], [2]]

@@ -34,12 +34,17 @@ def test_every_view_ends_with_its_rule_s_numbered_steps(
         advice = payload["advice"]
         texts = rules.texts_for(payload["rule_id"])
         assert advice["rule_doc"] == f"docs/rules/{payload['rule_id']}.md"
-        assert len(advice["review_steps"]) == len(texts.steps) + 1
-        assert advice["review_steps"][-1]["text"] == rules.CLOSING + texts.closes
-        assert str(alert_id) in advice["review_steps"][0]["text"]
+        steps = advice["review_steps"]
+        if payload["state"] in ("open", "excepted"):
+            assert len(steps) == len(texts.steps) + 1
+        else:  # review round 1, M10-R6: no dismissal step for an alert that cannot be dismissed
+            assert all("alert dismiss" not in step["text"] for step in steps)
+            assert steps[-2]["text"].startswith(f"This alert is {payload['state']}, and only")
+        assert steps[-1]["text"] == rules.CLOSING + texts.closes
+        assert str(alert_id) in steps[0]["text"]
         text = run(db, "alert", "show", str(alert_id), "--advice")
         lines = text.rstrip("\n").splitlines()
-        assert lines[-1] == f"    {len(texts.steps) + 1}. {rules.CLOSING}{texts.closes}"
+        assert lines[-1] == f"    {len(steps)}. {rules.CLOSING}{texts.closes}"
         assert "  Review steps:" in lines
 
 
