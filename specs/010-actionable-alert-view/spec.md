@@ -67,8 +67,11 @@ What exists and this feature reuses unchanged:
 
 ## Clarifications
 
-No session yet. Three questions are open and marked [NEEDS CLARIFICATION] in FR-001, FR-008 and FR-012, each with
-a recommended answer.
+### Session 2026-11-19
+
+- Q: How does a maintainer ask for the advisory view (FR-001)? → A: An opt-in `--advice` flag on `alert show` and `alerts`; no new command.
+- Q: Where does a `declared` runtime-use state come from (FR-008)? → A: Only a `not_used_at_runtime` dismissal, for that alert only; no manifest key in this feature.
+- Q: Can the owner record an impact conclusion (FR-012)? → A: No. The view stays read-only and impact always reads `impact undetermined`.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -224,9 +227,8 @@ JSON and exit codes byte for byte.
 
 - **FR-001**: Maintainers MUST be able to ask for the advisory view of one alert and of every alert of a model in
   one command, as an option the existing output does not show by default.
-  [NEEDS CLARIFICATION: interface. Recommended: an opt-in flag on the existing commands, `alert show ALERT_ID
-  --advice` and `alerts ID --advice`, so the view sits next to the alert it explains and no new command name is
-  needed; the alternative is a separate read-only command `alert advise ALERT_ID`.]
+  Resolved 2026-11-19: an opt-in flag on the existing commands, `alert show ALERT_ID --advice`
+  and `alerts ID --advice`; no new command.
 - **FR-002**: The view MUST be read-only: it MUST NOT write to the store, change an alert's state, open or close an
   alert, record a run or reach any network source. It is computed from stored rows at read time.
 - **FR-003**: The view MUST be deterministic: the same stored rows give byte-identical JSON and text, with lists
@@ -255,13 +257,11 @@ JSON and exit codes byte for byte.
   its basis: who declared it and when, which source observed it or why it is unknown. A `declared` state carries a
   polarity, `used` or `not_used`.
 - **FR-008**: The basis of a `declared` runtime-use state MUST be a record the owner made.
-  [NEEDS CLARIFICATION: where a declaration comes from in this feature, and what it covers. Recommended: no new
-  input. The only declaration is a dismissal with `not_used_at_runtime` (`store.py:72`), read as `declared`,
-  polarity `not_used`, attributed to who dismissed it and when; it is the only value this feature produces, and
-  `observed` is defined but no source produces it. It applies to that alert only: another alert on the same entry
-  reads `unknown` and names the dismissal as context. A manifest key for runtime use is left to a later feature,
-  because adding one makes manifests unreadable by earlier releases (`manifest.py:3-4`); the alternative is an
-  optional per-entry manifest key now.]
+  Resolved 2026-11-19: no new input. The only declaration is a dismissal with
+  `not_used_at_runtime` (`store.py:72`), read as `declared`, polarity `not_used`, attributed to who dismissed it
+  and when; `observed` is defined but no source produces it. It applies to that alert only: another alert on the
+  same entry reads `unknown` and names the dismissal as context. A manifest key for runtime use is left to a later
+  feature (`manifest.py:3-4`).
 
 **Established, not established, limitations (US2)**
 
@@ -277,11 +277,9 @@ JSON and exit codes byte for byte.
   MUST check every rule ID's view against a fixed list of such verdict phrases.
 - **FR-012**: Impact MUST read `impact undetermined` for every alert in this feature. Dismissals and exceptions
   MUST be shown only in their own owner-decision block (who, when, reason, note), never as an impact conclusion.
-  [NEEDS CLARIFICATION: whether this feature lets the owner record an impact conclusion. Recommended: no; the
-  feature stays read-only (FR-002), impact always reads `impact undetermined`, and a dismissal of any reason
-  (`risk_accepted` and `fix_not_available` say nothing about impact) or an exception is shown as a decision, not
-  as impact. A conclusion other than `impact undetermined` waits for a feature that adds a record for it, such as
-  `alert assess ALERT_ID --impact affected|not-affected --reason TEXT --by NAME`.]
+  Resolved 2026-11-19: no. The feature stays read-only (FR-002) and impact always reads
+  `impact undetermined`; a dismissal of any reason or an exception is shown as a decision, not as impact.
+  Recording an impact conclusion waits for a later feature.
 - **FR-013**: A claim the inventory holds as `unverified` or `contradicted` (feature 003, decision D6) MUST be
   shown with that state and MUST NOT appear as established.
 

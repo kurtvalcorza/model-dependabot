@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain
+- [x] No [NEEDS CLARIFICATION] markers remain
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -44,3 +44,5 @@
 - Command names (`alert show`, `alerts`, `check --fail-on`) and file references appear because they are the
   user-facing interface and the current behaviour this feature must leave unchanged, not implementation.
 - The review step table is scope, not wording; the plan fixes the text.
+- Clarified 2026-11-19 (owner): all three markers resolved with the recommended answers; see the spec's
+  Clarifications session.
