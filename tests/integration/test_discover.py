@@ -142,3 +142,28 @@ def test_the_proposed_manifest_registers_only_what_is_measured_or_pinned(
     assert code == EXIT_INVALID_INPUT
     code, _ = invoke("discover", str(detector_project), "-o", str(out), "--force")
     assert code == EXIT_OK
+
+
+# --- feature 011: the US5 independent test (T049) ----------------------------------------------
+
+
+def test_a_card_with_two_merged_base_models_proposes_two_typed_parents(
+    invoke, tmp_path: Path
+) -> None:
+    project = Path(__file__).resolve().parent.parent / "fixtures" / "projects" / "card-two-merge"
+    out = tmp_path / "proposed.toml"
+    code, payload = invoke("discover", str(project), "-o", str(out))
+    assert code == EXIT_OK
+    bases = [item for item in payload["candidates"] if item["kind"] == "base_model"]
+    assert [item["identity"]["hub_repo"] for item in bases] == [
+        "example-org/base-a",
+        "example-org/base-b",
+    ]
+    for item in bases:
+        assert item["identity"]["relationship"] == "merged-from"
+        assert item["status"] == "declared-but-unverified"
+        assert item["gaps"] == ["no revision"]
+    text = out.read_text(encoding="utf-8")
+    assert text.count("# [[parents]]") == 2
+    assert text.count('# relationship = "merged-from"') == 2
+    assert "several base models" not in json.dumps(payload) + text

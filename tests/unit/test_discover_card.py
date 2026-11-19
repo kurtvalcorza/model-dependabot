@@ -39,8 +39,16 @@ def test_only_the_named_keys_are_read(tmp_path: Path) -> None:
     )
     candidates, skipped = run(tmp_path)
     [base] = by_kind(candidates, "base_model")
-    assert base["identity"] == {"hub_repo": "org/base", "revision": None, "relation": "finetune"}
-    assert base["origin"] == {"file": "README.md", "key": "base_model"}
+    assert base["identity"] == {
+        "hub_repo": "org/base",
+        "revision": None,
+        "relationship": "fine-tuned-from",
+    }
+    assert base["origin"] == {
+        "file": "README.md",
+        "key": "base_model_relation",
+        "value": "finetune",
+    }
     assert base["status"] == "declared-but-unverified"
     assert base["gaps"] == ["no revision"]
     [dataset] = by_kind(candidates, "dataset")
@@ -57,12 +65,36 @@ def test_only_the_named_keys_are_read(tmp_path: Path) -> None:
     ]
 
 
-def test_several_base_models_each_get_the_lineage_gap(tmp_path: Path) -> None:
+def test_several_base_models_are_each_a_candidate_without_the_lineage_gap(tmp_path: Path) -> None:
     card(tmp_path, "base_model:\n  - org/one\n  - org/two\n")
     candidates, _ = run(tmp_path)
     assert [item["identity"]["hub_repo"] for item in candidates] == ["org/one", "org/two"]
     for item in candidates:
-        assert item["gaps"] == ["no revision", "several base models; multi-parent lineage is #9"]
+        assert item["gaps"] == ["no revision"]  # FR-028: the #9 gap is gone
+        assert item["identity"]["relationship"] == "unspecified"
+        assert item["origin"] == {"file": "README.md", "key": "base_model"}
+
+
+@pytest.mark.parametrize(
+    ("relation", "relationship"),
+    [
+        ("finetune", "fine-tuned-from"),
+        ("adapter", "adapter-for"),
+        ("merge", "merged-from"),
+        ("quantized", "quantized-from"),
+        ("other", "unspecified"),
+    ],
+)
+def test_the_card_relation_maps_to_a_type_and_is_kept_as_origin(
+    tmp_path: Path, relation: str, relationship: str
+) -> None:
+    card(tmp_path, f"base_model:\n  - org/one\n  - org/two\nbase_model_relation: {relation}\n")
+    candidates, _ = run(tmp_path)
+    assert len(candidates) == 2
+    for item in candidates:  # one value applies to every listed name
+        assert item["identity"]["relationship"] == relationship
+        assert item["origin"]["value"] == relation
+        assert item["status"] == "declared-but-unverified"
 
 
 def test_other_licence_uses_the_licence_name(tmp_path: Path) -> None:

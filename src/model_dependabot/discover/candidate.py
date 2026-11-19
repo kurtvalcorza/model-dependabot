@@ -17,7 +17,6 @@ NO_REVISION = "no revision"
 NOT_LOCKED = "not locked"
 NO_EXACT_VERSION = "no exact version"
 NOT_A_REGISTRY_PACKAGE = "not a registry package"
-SEVERAL_BASE_MODELS = "several base models; multi-parent lineage is #9"
 NOT_A_HUB_NAME = "not a hub repository name (owner/name)"
 
 STATEMENT = (

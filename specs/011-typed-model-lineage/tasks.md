@@ -175,17 +175,17 @@ inherited watch events.
 
 ### Tests first
 
-- [ ] T045 [P] [US5] Extend `tests/unit/test_discover_card.py` (fails first): the four `base_model_relation` values map to the four types; `other` and an absent relation give `unspecified` with the card value kept in the origin; one value applies to every listed name; the gap "several base models; multi-parent lineage is #9" never appears (FR-028)
-- [ ] T046 [P] [US5] Extend `tests/unit/test_discover_compare.py` (fails first): each candidate is matched against every hub parent of `Manifest.parents`, not only one (FR-029)
-- [ ] T047 [P] [US5] Extend `tests/unit/test_discover_propose.py` (fails first): one commented `[[parents]]` block per candidate with `relationship` when mapped, the placeholder line of research L9 when `unspecified`; the proposal, uncommented without choosing a type, is refused by `load_manifest`
+- [x] T045 [P] [US5] Extend `tests/unit/test_discover_card.py` (fails first): the four `base_model_relation` values map to the four types; `other` and an absent relation give `unspecified` with the card value kept in the origin; one value applies to every listed name; the gap "several base models; multi-parent lineage is #9" never appears (FR-028)
+- [x] T046 [P] [US5] Extend `tests/unit/test_discover_compare.py` (fails first): each candidate is matched against every hub parent of `Manifest.parents`, not only one (FR-029)
+- [x] T047 [P] [US5] Extend `tests/unit/test_discover_propose.py` (fails first): one commented `[[parents]]` block per candidate with `relationship` when mapped, the placeholder line of research L9 when `unspecified`; the proposal, uncommented without choosing a type, is refused by `load_manifest`
 - [x] T048 [P] [US5] Extend `tests/contract/test_cli_audit.py` (fails first): `inventory audit` JSON and text carry `lineage.edges`, `lineage.problems` and `lineage.notes` as contracts/edge-evidence.md states, including "resolved by id and version only"; no output of `register`, `import`, `inventory show`, `inventory audit`, `alerts` or `check` contains an edge state `verified` (SC-006)
-- [ ] T049 [P] [US5] Extend `tests/integration/test_discover.py` (fails first) with the US5 independent test on `tests/fixtures/projects/card-two-merge/`
+- [x] T049 [P] [US5] Extend `tests/integration/test_discover.py` (fails first) with the US5 independent test on `tests/fixtures/projects/card-two-merge/`
 
 ### Implementation
 
-- [ ] T050 [US5] Map `base_model_relation` in `_base_models` (`discover/model_card.py:102-119`) and remove `SEVERAL_BASE_MODELS` (`discover/candidate.py:20`) and its use (`model_card.py:108-109`), in `src/model_dependabot/discover/model_card.py` and `src/model_dependabot/discover/candidate.py`
-- [ ] T051 [US5] Match every candidate against every parent of `Manifest.parents` in `src/model_dependabot/discover/compare.py` (`:149-169`)
-- [ ] T052 [US5] Write commented `[[parents]]` blocks in `_block` of `src/model_dependabot/discover/propose.py` (`:161-172`)
+- [x] T050 [US5] Map `base_model_relation` in `_base_models` (`discover/model_card.py:102-119`) and remove `SEVERAL_BASE_MODELS` (`discover/candidate.py:20`) and its use (`model_card.py:108-109`), in `src/model_dependabot/discover/model_card.py` and `src/model_dependabot/discover/candidate.py`
+- [x] T051 [US5] Match every candidate against every parent of `Manifest.parents` in `src/model_dependabot/discover/compare.py` (`:149-169`)
+- [x] T052 [US5] Write commented `[[parents]]` blocks in `_block` of `src/model_dependabot/discover/propose.py` (`:161-172`)
 - [x] T053 [US5] Add the `lineage` block to `audit_report` in `src/model_dependabot/assurance/audit.py` (`:227`), from `store.edges`, `store.all_edges` and `lineage.graph`, read-only
 - [x] T054 [US5] Add the "Lineage" section to `audit_text` in `src/model_dependabot/reports.py` (`:322`)
 
