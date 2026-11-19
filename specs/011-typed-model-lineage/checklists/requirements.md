@@ -43,6 +43,12 @@
   registered-model ancestors have a CycloneDX form (FR-010a); the FR-017 matrix is closed with a default of
   "does not travel"; a Constitution Check flags the preamble amendment as the owner's decision. Still 3
   [NEEDS CLARIFICATION] markers.
+- Re-review 2026-11-19 (S11-R2-1 to R2-9) applied: the import-then-export round trip states what is kept and
+  what changes (FR-011, SC-002); ancestors keep the indexed `base-model:<index>` ref with the registered model id
+  and version in properties (FR-010a); imported registered-model references need a version, stay unverified and
+  carry no findings until the owner declares the edge; edges reuse feature 003's `owner`/`unverified` states;
+  FR-027 follows FR-020's answer; the Constitution Check recommends MINOR per Governance, as the owner's call.
+  Still 3 [NEEDS CLARIFICATION] markers.
 - Renumbered from 006 to 011 on 2026-11-19: 005-009 were used by earlier merged work and 010 by the alert view (#7).
 - Manifest, CycloneDX and command names (`[base_model]`, `pedigree.ancestors[]`, `inventory audit`) appear because
   they are the user-facing interface and open standard named in #9, not implementation.

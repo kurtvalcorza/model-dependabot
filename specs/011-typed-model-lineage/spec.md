@@ -19,7 +19,7 @@ D5 (first relationship types) and D6 (an imported claim is a claim, not a measur
 (manifest, inventory, CycloneDX profile), feature 002 (base model watch and alert identity), feature 003
 (discovery and `inventory audit`), feature 004 (check overview and `--fail-on` gate) and the two earlier features
 whose text lives inside `specs/001-inventory-alerts/`: feature 005 (registration from a record; version origin
-`record`, `src/model_dependabot/store.py:96`, `:106`) and feature 006 (stable evidence identity and one alert per
+`record`, `src/model_dependabot/store.py:106`; its `weight_file_absent` watch kind, `store.py:96-97`) and feature 006 (stable evidence identity and one alert per
 alias group; `store.py:18`, `specs/001-inventory-alerts/data-model.md:120`).
 
 **Numbering**: this is feature 011. Numbers 005-009 were used by earlier merged work and 010 by the actionable
@@ -80,8 +80,9 @@ inventory truthful for multi-parent models and puts every parent under the exist
 
 **Independent Test**: register a manifest with three parents of different types and revisions; `inventory
 show` lists three edges with their types, revisions and origin `manifest`; a check watches all three
-repositories. Register an unchanged single-`[base_model]` manifest; its inventory and check output match the
-pre-feature output.
+repositories. Register an unchanged single-`[base_model]` manifest; its entry identifiers, gaps, cause keys,
+alert count, alert states and severities, watch event kinds and exit codes match the pre-feature output, and any
+other difference is one of the fields FR-003 allows.
 
 **Acceptance Scenarios**:
 
@@ -132,7 +133,7 @@ BOM with two untyped ancestors: two edges with relationship `unspecified` and or
    as evidence, not dropped.
 4. **Given** a third-party BOM whose ancestors claim origin `manifest`, **When** it is imported, **Then** the
    edges are origin `import` and unverified, the claim is recorded as claimed origin only, and nothing about
-   them is shown as owner-declared (FR-007, D6).
+   them carries the state `owner` (FR-007, D6).
 
 ---
 
@@ -227,7 +228,8 @@ deliver value without it.
    carries the mapped type and the card's own value as its origin; a value that does not map leaves the type
    `unspecified` with the card value recorded.
 3. **Given** any registered model, **When** `inventory audit` runs, **Then** each edge is listed with its type,
-   origin (`manifest`, `import` or `discovery`), verification state and any lineage problem, and no edge is
+   origin (`manifest`, `record` or `import`), verification state and any lineage problem (origin `discovery`
+   exists only on unregistered candidates, FR-007), and no edge is
    shown as verified on the strength of model-card or BOM text alone.
 
 ### Edge Cases
@@ -288,13 +290,14 @@ deliver value without it.
 
 **Evidence and verification (US2, US5)**
 
-- **FR-007**: An edge declared in the owner's manifest or registration record MUST be shown as owner-declared. An
+- **FR-007**: An edge declared in the owner's manifest or registration record MUST carry the state `owner`. An
   edge read from an imported BOM MUST have origin `import` and be shown as unverified (D6), whatever origin or
   state the BOM claims. An edge read from a model card MUST remain a proposal and MUST
   NOT be registered unless the owner writes it into a manifest.
 - **FR-008**: No edge MAY carry the verification state `verified` in this feature: nothing it reads establishes
-  lineage from bytes. The allowed states are `owner-declared`, `unverified` and, for discovery candidates,
-  `declared-but-unverified` (feature 003).
+  lineage from bytes. Edges reuse feature 003's claim states (`src/model_dependabot/assurance/trust.py:10-14`):
+  `owner` or `unverified`. Discovery candidates keep feature 003's candidate status `declared-but-unverified`,
+  which is not an edge state.
 - **FR-009**: An edge's relationship type and origin MUST be part of the evidence cited by any finding that
   travels along it (constitution I).
 
@@ -304,15 +307,23 @@ deliver value without it.
   type, the edge's origin and any claimed origin in documented `model-dependabot:` properties (constitution II:
   CycloneDX 1.7 has no field for a relationship type), and MUST validate against the official 1.7 schema.
 - **FR-010a**: An edge to a registered model (FR-016) MUST be written as an ancestor of type
-  `machine-learning-model` without a purl, with `bom-ref` `model:<id>@<version>` (the form export uses for a
-  model version) and `model-dependabot:` properties for the parent's model id and version. Import MUST read these
-  as a registered-model reference and resolve it in the importing store (FR-021a); an unresolvable one becomes the
-  gap "parent not registered". An ancestor with neither a `pkg:huggingface` purl nor these properties keeps
+  `machine-learning-model` without a purl, with the existing indexed `bom-ref` `base-model:<index>`
+  (`src/model_dependabot/inventory/cyclonedx.py:227`), so every ancestor's ref stays unique even when one parent
+  has two edge types or a model references itself (the root is `model:<id>@<version>`, `cyclonedx.py:293`). The
+  parent's model id and version are carried only in `model-dependabot:` properties, and both are required: an
+  ancestor with a model id and no version is the gap "no version". Import MUST read these as a registered-model
+  reference and resolve it by model id and version in the importing store (FR-021a); an unresolvable one becomes
+  the gap "parent not registered". A resolved imported reference stays `unverified`, is named in the audit as
+  "resolved by id and version only", and no finding travels along it until the owner declares the same edge in a
+  manifest or registration record, because a BOM from another store can name an unrelated model with the same id. An ancestor with neither a `pkg:huggingface` purl nor these properties keeps
   today's gap "no Hugging Face purl" (`src/model_dependabot/inventory/cyclonedx.py:467-468`).
 - **FR-011**: Export followed by import MUST reproduce every edge's parent reference (repository and revision, or
   model id and version), type and gap, and MUST record the exported origin as the edge's claimed origin. The
   imported edge's origin is `import` and its state `unverified` (FR-007): trust does not travel through a BOM.
-  Import followed by export MUST reproduce the ancestors and their properties.
+  Import followed by export MUST reproduce each ancestor's parent reference, revision, gap and recognised type.
+  What changes is stated: the origin property becomes `import`, the BOM's own origin is written as the claimed
+  origin, and an unrecognised type value is written as type `unspecified` with the original value kept as
+  recorded evidence (FR-012). Bom-refs are reassigned by index (FR-010a).
 - **FR-012**: An imported ancestor without a relationship property, or with an unrecognised value, MUST become an
   edge of type `unspecified`, keeping any unrecognised value as recorded evidence.
 - **FR-013**: The inventory profile contract MUST list the new properties, completing the custom property table
@@ -378,8 +389,10 @@ deliver value without it.
   MUST carry its open alerts forward, not close and reopen them.
 - **FR-026**: The documented alert closure rules (`README.md:165-175`) MUST hold for every edge: a version that
   no longer has the parent closes its alerts as `fixed`; a gap never counts as a fix.
-- **FR-027**: `check` exit codes and the `--fail-on` gate of feature 004 MUST be unchanged; an inherited watch
-  event (FR-020) MUST NOT count for `--fail-on`.
+- **FR-027**: `check` exit codes and the `--fail-on` gate of feature 004 MUST be unchanged for the child's own
+  findings. How an inherited finding counts follows FR-020's answer: as a watch event (the recommendation) it does
+  not count, as watch events never do; if FR-020 settles on an alert, inherited alerts MUST NOT count for the
+  child's `--fail-on`, since the parent's gate already counts them.
 
 **Discovery and audit (US5)**
 
@@ -415,7 +428,10 @@ deliver value without it.
 - **SC-002**: Export then import of versions with 0, 1, 2 and 4 parents (one of each type, one of them a
   registered-model reference) reproduces 100% of parent references, revisions, types and gaps, records the
   exported origin as claimed origin on 100% of edges, gives origin `import` and state `unverified` on 100% of
-  imported edges, and every export validates against the CycloneDX 1.7 schema.
+  imported edges, and every export validates against the CycloneDX 1.7 schema. Import then export of a
+  third-party BOM reproduces 100% of parent references, revisions, gaps and recognised types, writes origin
+  `import` with the BOM's origin as claimed origin, writes unrecognised types as `unspecified` with the value
+  kept, and gives 0 duplicate bom-refs, including a BOM with one parent under two types and a self-reference.
 - **SC-003**: For a cause carried by N edges to one child (N = 1 to 4), exactly 1 alert opens for that child.
 - **SC-004**: For each cell of the FR-017 relevance matrix, a test shows the finding travelling or not
   travelling, so 0 findings reach a child along an edge type that the matrix excludes.
@@ -445,10 +461,12 @@ deliver value without it.
 
 - The constitution's preamble (`.specify/memory/constitution.md:3-4`) names "the base model it was fine-tuned
   from" as what is watched. Several parents of four types widen that scope, and the constitution supersedes
-  conflicting specifications (Governance). The plan MUST propose a PATCH amendment of the preamble (for example
-  "the models it was derived from"), or a MINOR one if the owner judges the scope materially expanded, or record
-  the exception in Complexity Tracking. **This is the owner's decision**; this specification does not change the
-  constitution.
+  conflicting specifications (Governance). The constitution's own rule is MINOR "when a principle or section is
+  added or materially expanded" and PATCH "for clarifications". Widening the watched scope from one fine-tuned
+  base model to several parents of four types reads as a material expansion, so the plan SHOULD propose a MINOR
+  amendment of the preamble (for example "the models it was derived from"); PATCH is the alternative if the
+  owner reads it as a clarification, and recording an exception in Complexity Tracking is the third. **This is
+  the owner's decision**; this specification does not change the constitution.
 - Principle IV (precision first) is why the FR-017 matrix is closed with "does not travel" as its default and why
   FR-020 recommends watch events for inherited findings.
 
