@@ -197,9 +197,9 @@ inherited watch events.
 
 - [x] T055 [P] Extend `tests/integration/test_never_writes.py`: `inventory audit` on a store with edges, problems and unresolved references writes nothing (file hash unchanged), and never upgrades a pre-011 file
 - [x] T056 Update the shared documentation once the code is settled: `[[parents]]` in `specs/001-inventory-alerts/contracts/manifest.md` (beside `:23-25`), the six property rows in `specs/001-inventory-alerts/contracts/inventory-profile.md` (`:19-25`, FR-013) and the manifest and closure sections of `README.md` (`:165-175`); check every statement against the code
-- [ ] T057 Run every scenario of `specs/011-typed-model-lineage/quickstart.md` and record what each printed in `specs/011-typed-model-lineage/validation.md`
-- [ ] T058 Run `uv run pytest -q`, `uv run ruff check` and `uv run ruff format --check` with their real exit codes (no pipe) and record the counts against T005's baseline in `specs/011-typed-model-lineage/validation.md`
-- [ ] T060 In each pull request that changes CLI text or JSON (Phases 3, 4, 5, 6 and 7: register and `inventory show` lineage, alert cause `edges`, `check` problems and inherited events, the audit section), re-record feature 010's FR-016 CLI baseline with 010's recorder in the same pull request, list every changed invocation and the requirement that changes it in `specs/011-typed-model-lineage/validation.md`, and confirm no exit code changed (owner's ruling C6, review R7)
+- [x] T057 Run every scenario of `specs/011-typed-model-lineage/quickstart.md` and record what each printed in `specs/011-typed-model-lineage/validation.md`
+- [x] T058 Run `uv run pytest -q`, `uv run ruff check` and `uv run ruff format --check` with their real exit codes (no pipe) and record the counts against T005's baseline in `specs/011-typed-model-lineage/validation.md`
+- [x] T060 In each pull request that changes CLI text or JSON (Phases 3, 4, 5, 6 and 7: register and `inventory show` lineage, alert cause `edges`, `check` problems and inherited events, the audit section), re-record feature 010's FR-016 CLI baseline with 010's recorder in the same pull request, list every changed invocation and the requirement that changes it in `specs/011-typed-model-lineage/validation.md`, and confirm no exit code changed (owner's ruling C6, review R7)
 
 ---
 
