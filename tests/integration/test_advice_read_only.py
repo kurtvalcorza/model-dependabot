@@ -97,3 +97,50 @@ def test_the_advice_commands_leave_every_file_byte_identical(
     assert spy.requests == []
     half = len(outputs) // 2
     assert outputs[:half] == outputs[half:], "two runs give identical bytes (FR-003)"
+
+
+# --- review round 1, M10-R5: what the no-network check guards ------------------------------------
+#
+# The spy above only sees requests made through the handlers' fetcher, which the advice code is
+# never handed. The checks below cover the other routes: every socket connection is already refused
+# for this test run (``tests/conftest.py`` ``_block_network``, so any attempt would exit 3 and fail
+# the exit-code assertions); here the default fetcher may not even be constructed, and the advice
+# modules may import no source client or network module.
+
+
+class _NoFetcher:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise AssertionError("the advisory view constructed a fetcher")
+
+
+def test_the_advice_commands_never_construct_a_fetcher(
+    advice_db: tuple[Path, dict[str, int]], monkeypatch: Any
+) -> None:
+    import model_dependabot.cli as cli
+    import model_dependabot.sources.fetcher as fetcher
+
+    monkeypatch.setattr(cli, "UrlFetcher", _NoFetcher)
+    monkeypatch.setattr(fetcher, "UrlFetcher", _NoFetcher)
+    db, ids = advice_db
+    handlers = make_handlers(fetcher=None, now=lambda: NOW)
+    for argv in (
+        ["alert", "show", str(ids["package_advisory"]), "--advice"],
+        ["alerts", "advice-model", "--state", "all", "--advice", "--json"],
+    ):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            assert main([*argv, "--db", str(db)], handlers=handlers) == 0
+
+
+def test_the_advice_modules_import_no_source_or_network_module() -> None:
+    import ast
+
+    import model_dependabot.assurance.advice as advice
+    import model_dependabot.assurance.affected as affected
+
+    banned = ("model_dependabot.sources", "socket", "urllib", "http", "requests", "ssl")
+    for module in (advice, affected):
+        tree = ast.parse(Path(module.__file__).read_text("utf-8"))
+        names = [a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names]
+        names += [n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)]
+        assert not [name for name in names if name.startswith(banned)], module.__name__
