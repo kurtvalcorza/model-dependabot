@@ -413,3 +413,28 @@ def detector_project(tmp_path: Path) -> Path:
     venv.mkdir(parents=True)
     (venv / "inside-venv.safetensors").write_bytes(b"\x80\x04K\x03.")
     return project
+
+
+# --- feature 010: the advisory-view fixture store (tests/fixtures/advice/NOTES.md) ---------------
+
+
+def load_advice_build() -> ModuleType:
+    """``tests/fixtures/advice/build.py``, loaded once."""
+    import sys
+
+    name = "advice_build"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, FIXTURES / "advice" / "build.py")
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
+
+@pytest.fixture
+def advice_db(tmp_path: Path) -> tuple[Path, dict[str, int]]:
+    """A store with one alert of every rule ID (``build.py``): its path and the alert ids."""
+    path = tmp_path / "advice" / "md.db"
+    path.parent.mkdir(parents=True)
+    return path, load_advice_build().build(path)
