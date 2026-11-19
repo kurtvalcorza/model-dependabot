@@ -4,6 +4,10 @@ Every command accepts ``--db PATH`` and ``--json``, before or after the command 
 handler that takes the parsed arguments and returns a ``CommandResult``; the frame prints it and
 turns the outcome into an exit code: 0 success, 1 invalid input, 2 a source failed, 3 an unexpected
 error. No command changes a model or writes to a model's repository (FR-017).
+
+Feature 010: ``alert show ALERT_ID --advice`` and ``alerts ID --advice`` add the advisory view of
+each alert (``assurance/advice.py``) after today's unchanged output; the option reads only and
+changes no exit code (contracts/cli.md of feature 010).
 """
 
 from __future__ import annotations
@@ -21,6 +25,8 @@ from typing import Any
 from jsonschema import ValidationError
 
 from model_dependabot.assurance import exceptions, overview
+from model_dependabot.assurance.advice import advice_summary, advice_text, advice_view
+from model_dependabot.assurance.affected import model_versions
 from model_dependabot.assurance.audit import DEFAULT_STALE_AFTER_HOURS, audit_report
 from model_dependabot.assurance.format_check import measure_imported, record_import_contradictions
 from model_dependabot.discover.project import discover, write_proposal
@@ -68,6 +74,10 @@ EXIT_UNEXPECTED = 3
 EXIT_GATE = 4  # feature 004: check --fail-on tripped; 3 and 2 take precedence (research S5)
 
 DEFAULT_DB = "./model-dependabot.db"
+ADVICE_HELP = (
+    "also show the advisory view: the affected entry, what is and is not established and the"
+    " review steps (reads only; changes no exit code)"
+)
 UPSTREAM_SOURCES = ("hf-hub", "hf-takedowns", "crossref", "datacite", "zenodo", "figshare")
 CHECK_SOURCES = ("osv", "picklescan", "hf-scan", "format-check", *UPSTREAM_SOURCES)
 
@@ -271,11 +281,13 @@ def build_parser() -> argparse.ArgumentParser:
     alerts = leaf(commands, "alerts", "alerts", "list alerts, then watch events")
     alerts.add_argument("model_id", metavar="ID")
     alerts.add_argument("--state", choices=("open", "excepted", "closed", "all"), default="open")
+    alerts.add_argument("--advice", action="store_true", help=ADVICE_HELP)
 
     alert = commands.add_parser("alert", help="show or dismiss one alert")
     alert_commands = alert.add_subparsers(dest="alert_command", required=True)
     alert_show = leaf(alert_commands, "show", "alert show", "one alert with all its evidence")
     alert_show.add_argument("alert_id", metavar="ALERT_ID", type=int)
+    alert_show.add_argument("--advice", action="store_true", help=ADVICE_HELP)
     dismiss = leaf(alert_commands, "dismiss", "alert dismiss", "dismiss with a listed reason")
     dismiss.add_argument("alert_id", metavar="ALERT_ID", type=int)
     dismiss.add_argument("--reason", choices=DISMISSAL_REASONS, required=True)
@@ -852,7 +864,24 @@ def make_handlers(
         with _open(args.db) as store:
             _version_of(store, args.model_id, None)
             payload = alerts_report(store, args.model_id, state=args.state)
-        return CommandResult(payload, alerts_text(payload))
+            text = alerts_text(payload)
+            if args.advice:
+                # Feature 010: the model's versions and alerts are read once for every view.
+                versions = model_versions(store, args.model_id)
+                model_alerts = store.alerts_for(args.model_id)
+                blocks = []
+                for name in ("alerts", "excepted"):
+                    for item in payload[name]:
+                        alert = store.get_alert(item["alert_id"])
+                        assert alert is not None
+                        item["advice"] = advice_view(
+                            store, alert, versions=versions, model_alerts=model_alerts
+                        )
+                        blocks.append(advice_text(item["advice"]))
+                payload["advice_summary"] = advice_summary(len(blocks))
+                note = payload["advice_summary"]["note"]
+                text += "\n\n" + "\n\n".join(blocks or [note])
+        return CommandResult(payload, text)
 
     def history(args: argparse.Namespace) -> CommandResult:
         with _open(args.db) as store:
@@ -866,7 +895,11 @@ def make_handlers(
             if alert is None:
                 raise InvalidInputError(f"no alert {args.alert_id}")
             payload = {"model_id": alert["model_id"], **alert_view(store, alert)}
-        return CommandResult(payload, _alert_text(payload))
+            text = _alert_text(payload)
+            if args.advice:
+                payload["advice"] = advice_view(store, alert)
+                text += "\n\n" + advice_text(payload["advice"])
+        return CommandResult(payload, text)
 
     def alert_dismiss(args: argparse.Namespace) -> CommandResult:
         with _open(args.db) as store:
