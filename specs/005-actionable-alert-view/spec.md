@@ -133,7 +133,7 @@ that no view contains any phrase on the fixed list of impact verdicts (FR-011).
 
 ### User Story 3 - Follow fixed review steps for the alert's kind (Priority: P2)
 
-The view ends with numbered review steps fixed for the alert's rule ID: what to check, in what order, and how
+The view ends with numbered review steps fixed for the alert's rule ID: what to check, in what order and how
 the alert can close (by a new version, by its source or by a recorded dismissal or exception). The steps are the
 same for every alert of a rule ID, filled in only with that alert's own identifiers, so two maintainers looking at
 the same alert see the same steps.
@@ -224,7 +224,7 @@ invocations before and after the feature, without the new option; compare text a
 - **FR-006**: When the alert's identifier matches no entry of the model, the entry MUST read `unresolved` with the
   reason. The view MUST NOT choose an entry by similarity, name or partial match.
 - **FR-007**: Runtime use or deployment of the entry MUST read one of `declared`, `observed` or `unknown`, with
-  its basis: who declared it and when, or which source observed it, or why it is unknown.
+  its basis: who declared it and when, which source observed it or why it is unknown.
 - **FR-008**: The basis of a `declared` runtime-use state MUST be a record the owner made.
   [NEEDS CLARIFICATION: where a declaration comes from in this feature. Recommended: no new input in 005. The
   state is `declared not used` only where the owner dismissed the alert with `not_used_at_runtime`, attributed to
@@ -259,7 +259,7 @@ invocations before and after the feature, without the new option; compare text a
   placeholders filled only from the alert's own stored fields. The rule page's "How to fix or accept it" section
   and the view MUST come from the same text. A test MUST fail if a rule ID has no step list.
 - **FR-015**: Every step MUST be an action for the maintainer, never one the tool takes (constitution III), and
-  the last step MUST say how the alert can close: by a new version, by its source, or by a recorded dismissal or
+  the last step MUST say how the alert can close: by a new version, by its source or by a recorded dismissal or
   exception.
 
 **Compatibility (US4)**
