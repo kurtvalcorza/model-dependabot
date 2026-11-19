@@ -148,7 +148,7 @@ def test_the_proposed_manifest_registers_only_what_is_measured_or_pinned(
 
 
 def test_a_card_with_two_merged_base_models_proposes_two_typed_parents(
-    invoke, tmp_path: Path
+    invoke, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     project = Path(__file__).resolve().parent.parent / "fixtures" / "projects" / "card-two-merge"
     out = tmp_path / "proposed.toml"
@@ -167,3 +167,12 @@ def test_a_card_with_two_merged_base_models_proposes_two_typed_parents(
     assert text.count("# [[parents]]") == 2
     assert text.count('# relationship = "merged-from"') == 2
     assert "several base models" not in json.dumps(payload) + text
+    for item in bases:  # review R9: where the name was read, and where the type came from
+        assert item["origin"] == {"file": "README.md", "key": "base_model"}
+        assert item["identity"]["relation"] == "merge"
+        assert item["identity"]["relationship_origin"]["key"] == "base_model_relation"
+    # The proposal says where each parent was seen: the card's base_model key (origin_text).
+    assert text.count("from README.md (base_model)") == 2
+    assert "README.md (base_model_relation)" not in text
+    assert main(["discover", str(project)], handlers=make_handlers(now=lambda: NOW)) == EXIT_OK
+    assert "base_model_relation" not in capsys.readouterr().out

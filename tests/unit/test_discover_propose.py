@@ -383,8 +383,18 @@ def test_a_lock_that_pins_a_conflicting_package_is_only_a_comment(
 def test_one_commented_parents_block_per_candidate(project: Path, tmp_path: Path) -> None:
     mapped = candidate(
         "base_model",
-        {"hub_repo": "org/one", "revision": None, "relationship": "merged-from"},
-        {"file": "README.md", "key": "base_model_relation", "value": "merge"},
+        {
+            "hub_repo": "org/one",
+            "revision": None,
+            "relationship": "merged-from",
+            "relation": "merge",
+            "relationship_origin": {
+                "file": "README.md",
+                "key": "base_model_relation",
+                "value": "merge",
+            },
+        },
+        {"file": "README.md", "key": "base_model"},
         DECLARED,
         NOW,
         ["no revision"],

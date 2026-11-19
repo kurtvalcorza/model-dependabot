@@ -43,12 +43,14 @@ def test_only_the_named_keys_are_read(tmp_path: Path) -> None:
         "hub_repo": "org/base",
         "revision": None,
         "relationship": "fine-tuned-from",
+        "relation": "finetune",
+        "relationship_origin": {
+            "file": "README.md",
+            "key": "base_model_relation",
+            "value": "finetune",
+        },
     }
-    assert base["origin"] == {
-        "file": "README.md",
-        "key": "base_model_relation",
-        "value": "finetune",
-    }
+    assert base["origin"] == {"file": "README.md", "key": "base_model"}
     assert base["status"] == "declared-but-unverified"
     assert base["gaps"] == ["no revision"]
     [dataset] = by_kind(candidates, "dataset")
@@ -93,7 +95,9 @@ def test_the_card_relation_maps_to_a_type_and_is_kept_as_origin(
     assert len(candidates) == 2
     for item in candidates:  # one value applies to every listed name
         assert item["identity"]["relationship"] == relationship
-        assert item["origin"]["value"] == relation
+        assert item["origin"] == {"file": "README.md", "key": "base_model"}
+        assert item["identity"]["relation"] == relation
+        assert item["identity"]["relationship_origin"]["value"] == relation
         assert item["status"] == "declared-but-unverified"
 
 

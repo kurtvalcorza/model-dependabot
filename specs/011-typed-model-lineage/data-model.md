@@ -149,7 +149,10 @@ Never an alert, so it does not count for `--fail-on` (FR-027).
 ## Discovery candidate (extended)
 
 A `base_model` candidate (`discover/model_card.py:102-119`) gains `identity.relationship` (a type or
-`unspecified`) and keeps the card value in `origin.value` with `origin.key = "base_model_relation"`. The
+`unspecified`). Its `origin` stays `{file, key: "base_model"}`, where the name was read; when the card
+has a `base_model_relation`, its value is kept as the origin of the type (FR-028) in
+`identity.relationship_origin = {file, key: "base_model_relation", value}` and as the pre-011
+`identity.relation` (owner's ruling on review R9, 2026-11-20). The
 gap `several base models; multi-parent lineage is #9` is removed (`discover/candidate.py:20`). Status
 stays `declared-but-unverified`.
 

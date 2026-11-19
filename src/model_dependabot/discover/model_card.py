@@ -128,9 +128,16 @@ def _base_models(meta: Mapping[str, Any], observed_at: str) -> list[dict[str, An
             "revision": None,
             "relationship": relationship,
         }
-        origin: dict[str, Any] = {"file": CARD, "key": "base_model"}
-        if stated is not None:  # the card's own value is kept as the type's origin
-            origin = {"file": CARD, "key": "base_model_relation", "value": stated}
+        if stated is not None:
+            # Owner's ruling on review R9: the card's value is the origin of the type, kept beside
+            # the candidate's own origin (where the name was read) and as the pre-011 ``relation``.
+            identity["relation"] = stated
+            identity["relationship_origin"] = {
+                "file": CARD,
+                "key": "base_model_relation",
+                "value": stated,
+            }
+        origin = {"file": CARD, "key": "base_model"}
         found.append(candidate("base_model", identity, origin, status, observed_at, gaps))
     return found
 
