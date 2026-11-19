@@ -1,6 +1,6 @@
 # Feature Specification: An Actionable Alert View for Model Maintainers
 
-**Feature Branch**: `010-actionable-alert-view`
+**Feature Branch**: `spec/010-actionable-alert-view`
 
 **Created**: 2026-11-19
 
@@ -241,8 +241,10 @@ JSON and exit codes byte for byte.
 
 - **FR-005**: The view MUST name the affected inventory entry (entry kind, identifier, manifest section, model
   version) and one relationship from a fixed list keyed by entry kind and alert kind, with its basis: the version's
-  origin (`manifest`, `record` or `import`), the manifest section and the version. The relationship is declared by
-  the owner's inventory; it is neither established by evidence nor inferred. The initial list: `weight file of this
+  origin (`manifest`, `record` or `import`), the manifest section and the version. The relationship is what the
+  stored inventory declares: the owner's own declaration for a `manifest` or `record` version, a third-party
+  declaration the owner imported for an `import` version (shown as imported, never as the owner's own). It is
+  neither established by evidence nor inferred. The initial list: `weight file of this
   model` (local or hub, with its location), `package pinned in this model's environment lock`, `declared base
   model`, `declared dataset` and `paper cited by a declared dataset` (two steps from the model). The list is
   versioned with the code; a test MUST fail if an alert kind has no relationship.
