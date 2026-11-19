@@ -1,0 +1,650 @@
+{
+ "recorded_from": "0037f43",
+ "scenarios": {
+  "check_base_model.disabled": {
+   "md": {
+    "alerts": [
+     {
+      "cause": "{\"identifier\": \"pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e\", \"base_model\": \"pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e\", \"repo\": \"openai-community/gpt2\", \"disabled\": true, \"source\": \"hf-hub\"}",
+      "cause_key": "base_model_disabled:pkg:huggingface/openai-community/gpt2",
+      "closed_by_version": null,
+      "current_version": 1,
+      "dismissal_reason": null,
+      "dismissed_by": null,
+      "evidence": [
+       {
+        "body_sha256": "38f08c94f25365f3476eb06172bc84e24e7ac1b13c97a5526df305a967f89764",
+        "canonical_sha256": "60f5a214c2821079f6eaaaa86a221cca4b2be70859f0d285a64206a3944ff63b",
+        "detail": null,
+        "matched_identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+        "original_sha256": "38f08c94f25365f3476eb06172bc84e24e7ac1b13c97a5526df305a967f89764",
+        "redacted_fields": "[]",
+        "source": "hf-hub",
+        "url": "https://huggingface.co/api/models/openai-community/gpt2?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha&expand[]=lastModified"
+       }
+      ],
+      "kind": "base_model_disabled",
+      "model_id": "based",
+      "note": null,
+      "opened_in_version": 1,
+      "severity": "MODERATE",
+      "severity_origin": "policy",
+      "state": "open"
+     }
+    ],
+    "entries": [
+     {
+      "gap_reason": null,
+      "identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+      "kind": "base_model",
+      "model_id": "based",
+      "pinned": 1,
+      "version": 1
+     }
+    ],
+    "exit_codes": [
+     [
+      "register",
+      0
+     ],
+     [
+      "check",
+      0
+     ],
+     [
+      "alerts",
+      0
+     ]
+    ],
+    "watch_events": []
+   }
+  },
+  "check_base_model.disabled_then_enabled": {
+   "md": {
+    "alerts": [
+     {
+      "cause": "{\"identifier\": \"pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e\", \"base_model\": \"pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e\", \"repo\": \"openai-community/gpt2\", \"disabled\": true, \"source\": \"hf-hub\"}",
+      "cause_key": "base_model_disabled:pkg:huggingface/openai-community/gpt2",
+      "closed_by_version": null,
+      "current_version": 1,
+      "dismissal_reason": null,
+      "dismissed_by": null,
+      "evidence": [
+       {
+        "body_sha256": "38f08c94f25365f3476eb06172bc84e24e7ac1b13c97a5526df305a967f89764",
+        "canonical_sha256": "60f5a214c2821079f6eaaaa86a221cca4b2be70859f0d285a64206a3944ff63b",
+        "detail": null,
+        "matched_identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+        "original_sha256": "38f08c94f25365f3476eb06172bc84e24e7ac1b13c97a5526df305a967f89764",
+        "redacted_fields": "[]",
+        "source": "hf-hub",
+        "url": "https://huggingface.co/api/models/openai-community/gpt2?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha&expand[]=lastModified"
+       },
+       {
+        "body_sha256": "a81d177558d52e184f92a252b8e0115b7d2a16cc323303d4472ff8331a8161cd",
+        "canonical_sha256": "074d34d095a277cfd450a8be5d3e0381aef831eb435527dc37ea422cc9c88359",
+        "detail": null,
+        "matched_identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+        "original_sha256": "a81d177558d52e184f92a252b8e0115b7d2a16cc323303d4472ff8331a8161cd",
+        "redacted_fields": "[]",
+        "source": "hf-hub",
+        "url": "https://huggingface.co/api/models/openai-community/gpt2?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha&expand[]=lastModified"
+       }
+      ],
+      "kind": "base_model_disabled",
+      "model_id": "based",
+      "note": null,
+      "opened_in_version": 1,
+      "severity": "MODERATE",
+      "severity_origin": "policy",
+      "state": "cleared"
+     }
+    ],
+    "entries": [
+     {
+      "gap_reason": null,
+      "identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+      "kind": "base_model",
+      "model_id": "based",
+      "pinned": 1,
+      "version": 1
+     }
+    ],
+    "exit_codes": [
+     [
+      "register",
+      0
+     ],
+     [
+      "check",
+      0
+     ],
+     [
+      "check",
+      0
+     ]
+    ],
+    "watch_events": []
+   }
+  },
+  "check_base_model.failed_source": {
+   "md": {
+    "alerts": [
+     {
+      "cause": "{\"identifier\": \"pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e\", \"base_model\": \"pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e\", \"repo\": \"openai-community/gpt2\", \"disabled\": true, \"source\": \"hf-hub\"}",
+      "cause_key": "base_model_disabled:pkg:huggingface/openai-community/gpt2",
+      "closed_by_version": null,
+      "current_version": 1,
+      "dismissal_reason": null,
+      "dismissed_by": null,
+      "evidence": [
+       {
+        "body_sha256": "38f08c94f25365f3476eb06172bc84e24e7ac1b13c97a5526df305a967f89764",
+        "canonical_sha256": "60f5a214c2821079f6eaaaa86a221cca4b2be70859f0d285a64206a3944ff63b",
+        "detail": null,
+        "matched_identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+        "original_sha256": "38f08c94f25365f3476eb06172bc84e24e7ac1b13c97a5526df305a967f89764",
+        "redacted_fields": "[]",
+        "source": "hf-hub",
+        "url": "https://huggingface.co/api/models/openai-community/gpt2?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha&expand[]=lastModified"
+       }
+      ],
+      "kind": "base_model_disabled",
+      "model_id": "based",
+      "note": null,
+      "opened_in_version": 1,
+      "severity": "MODERATE",
+      "severity_origin": "policy",
+      "state": "open"
+     }
+    ],
+    "entries": [
+     {
+      "gap_reason": null,
+      "identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+      "kind": "base_model",
+      "model_id": "based",
+      "pinned": 1,
+      "version": 1
+     }
+    ],
+    "exit_codes": [
+     [
+      "register",
+      0
+     ],
+     [
+      "check",
+      3
+     ],
+     [
+      "check",
+      4
+     ]
+    ],
+    "watch_events": []
+   }
+  },
+  "check_base_model.new_revision": {
+   "md": {
+    "alerts": [],
+    "entries": [
+     {
+      "gap_reason": null,
+      "identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+      "kind": "base_model",
+      "model_id": "based",
+      "pinned": 1,
+      "version": 1
+     }
+    ],
+    "exit_codes": [
+     [
+      "register",
+      0
+     ],
+     [
+      "check",
+      0
+     ],
+     [
+      "check",
+      0
+     ]
+    ],
+    "watch_events": [
+     {
+      "detail": "{\"source\": \"hf-hub\", \"pinned\": \"607a30d783dfa663caf39e06633721c8d4cfcd7e\", \"newest\": \"ffffffffffffffffffffffffffffffffffffffff\"}",
+      "entry_identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+      "evidence": [
+       {
+        "body_sha256": "63f495b720f29550aee49e0b6632ea5bb406a78906f5979fab5f4db03f2bb076",
+        "canonical_sha256": "df8d5c5f21dae5c341280c85d747a525ae36eb920e7b4425c86d4cee5274ea29",
+        "detail": null,
+        "matched_identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+        "original_sha256": "63f495b720f29550aee49e0b6632ea5bb406a78906f5979fab5f4db03f2bb076",
+        "redacted_fields": "[]",
+        "source": "hf-hub",
+        "url": "https://huggingface.co/api/models/openai-community/gpt2?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha&expand[]=lastModified"
+       }
+      ],
+      "kind": "base_model_new_revision",
+      "model_id": "based",
+      "version": 1
+     }
+    ]
+   }
+  },
+  "check_base_model.reachable": {
+   "md": {
+    "alerts": [],
+    "entries": [
+     {
+      "gap_reason": null,
+      "identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+      "kind": "base_model",
+      "model_id": "based",
+      "pinned": 1,
+      "version": 1
+     }
+    ],
+    "exit_codes": [
+     [
+      "register",
+      0
+     ],
+     [
+      "check",
+      0
+     ]
+    ],
+    "watch_events": []
+   }
+  },
+  "check_base_model.refusals": {
+   "md": {
+    "alerts": [
+     {
+      "cause": "{\"identifier\": \"pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e\", \"base_model\": \"pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e\", \"repo\": \"openai-community/gpt2\", \"statement\": \"no longer publicly available (deleted or made private)\", \"source\": \"hf-hub\", \"refusals\": [{\"run_id\": 1, \"observed_at\": \"2026-10-24T06:00:00Z\", \"http_status\": 401}, {\"run_id\": 2, \"observed_at\": \"2026-10-25T06:00:00Z\", \"http_status\": 401}], \"first_refused_at\": \"2026-10-24T06:00:00Z\", \"latest_refused_at\": \"2026-10-25T06:00:00Z\"}",
+      "cause_key": "base_model_unavailable:pkg:huggingface/openai-community/gpt2",
+      "closed_by_version": null,
+      "current_version": 1,
+      "dismissal_reason": null,
+      "dismissed_by": null,
+      "evidence": [
+       {
+        "body_sha256": "65842e3d84e6b7f62a470c85204e80b953bb8f944e9b69813130a9d7f3eaa1d8",
+        "canonical_sha256": "65842e3d84e6b7f62a470c85204e80b953bb8f944e9b69813130a9d7f3eaa1d8",
+        "detail": null,
+        "matched_identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+        "original_sha256": "65842e3d84e6b7f62a470c85204e80b953bb8f944e9b69813130a9d7f3eaa1d8",
+        "redacted_fields": "[]",
+        "source": "hf-hub",
+        "url": "https://huggingface.co/api/models/openai-community/gpt2?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha&expand[]=lastModified"
+       },
+       {
+        "body_sha256": "65842e3d84e6b7f62a470c85204e80b953bb8f944e9b69813130a9d7f3eaa1d8",
+        "canonical_sha256": "65842e3d84e6b7f62a470c85204e80b953bb8f944e9b69813130a9d7f3eaa1d8",
+        "detail": null,
+        "matched_identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+        "original_sha256": "65842e3d84e6b7f62a470c85204e80b953bb8f944e9b69813130a9d7f3eaa1d8",
+        "redacted_fields": "[]",
+        "source": "hf-hub",
+        "url": "https://huggingface.co/api/models/openai-community/gpt2?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha&expand[]=lastModified"
+       },
+       {
+        "body_sha256": "a81d177558d52e184f92a252b8e0115b7d2a16cc323303d4472ff8331a8161cd",
+        "canonical_sha256": "074d34d095a277cfd450a8be5d3e0381aef831eb435527dc37ea422cc9c88359",
+        "detail": null,
+        "matched_identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+        "original_sha256": "a81d177558d52e184f92a252b8e0115b7d2a16cc323303d4472ff8331a8161cd",
+        "redacted_fields": "[]",
+        "source": "hf-hub",
+        "url": "https://huggingface.co/api/models/openai-community/gpt2?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha&expand[]=lastModified"
+       }
+      ],
+      "kind": "base_model_unavailable",
+      "model_id": "based",
+      "note": null,
+      "opened_in_version": 1,
+      "severity": "LOW",
+      "severity_origin": "policy",
+      "state": "cleared"
+     }
+    ],
+    "entries": [
+     {
+      "gap_reason": null,
+      "identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+      "kind": "base_model",
+      "model_id": "based",
+      "pinned": 1,
+      "version": 1
+     }
+    ],
+    "exit_codes": [
+     [
+      "register",
+      0
+     ],
+     [
+      "check",
+      0
+     ],
+     [
+      "check",
+      0
+     ],
+     [
+      "check",
+      0
+     ]
+    ],
+    "watch_events": [
+     {
+      "detail": "{\"source\": \"hf-hub\", \"http_status\": 401, \"trigger\": \"scheduled\", \"observed_at\": \"2026-10-24T06:00:00Z\", \"scheduled_refusals_in_run\": 1, \"first_refused_at\": \"2026-10-24T06:00:00Z\"}",
+      "entry_identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+      "evidence": [
+       {
+        "body_sha256": "65842e3d84e6b7f62a470c85204e80b953bb8f944e9b69813130a9d7f3eaa1d8",
+        "canonical_sha256": "65842e3d84e6b7f62a470c85204e80b953bb8f944e9b69813130a9d7f3eaa1d8",
+        "detail": null,
+        "matched_identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+        "original_sha256": "65842e3d84e6b7f62a470c85204e80b953bb8f944e9b69813130a9d7f3eaa1d8",
+        "redacted_fields": "[]",
+        "source": "hf-hub",
+        "url": "https://huggingface.co/api/models/openai-community/gpt2?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha&expand[]=lastModified"
+       }
+      ],
+      "kind": "base_model_refused",
+      "model_id": "based",
+      "version": 1
+     }
+    ]
+   }
+  },
+  "lifecycle_base_model.versions": {
+   "md": {
+    "alerts": [
+     {
+      "cause": "{\"identifier\": \"pkg:huggingface/openai-community/gpt2@ffffffffffffffffffffffffffffffffffffffff\", \"base_model\": \"pkg:huggingface/openai-community/gpt2@ffffffffffffffffffffffffffffffffffffffff\", \"repo\": \"openai-community/gpt2\", \"disabled\": true, \"source\": \"hf-hub\"}",
+      "cause_key": "base_model_disabled:pkg:huggingface/openai-community/gpt2",
+      "closed_by_version": 4,
+      "current_version": 2,
+      "dismissal_reason": null,
+      "dismissed_by": null,
+      "evidence": [
+       {
+        "body_sha256": "38f08c94f25365f3476eb06172bc84e24e7ac1b13c97a5526df305a967f89764",
+        "canonical_sha256": "60f5a214c2821079f6eaaaa86a221cca4b2be70859f0d285a64206a3944ff63b",
+        "detail": null,
+        "matched_identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+        "original_sha256": "38f08c94f25365f3476eb06172bc84e24e7ac1b13c97a5526df305a967f89764",
+        "redacted_fields": "[]",
+        "source": "hf-hub",
+        "url": "https://huggingface.co/api/models/openai-community/gpt2?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha&expand[]=lastModified"
+       },
+       {
+        "body_sha256": "962cd9e718cd4d24ab5161ee4f6643321ee17f6af96f92bf5c4ae76f6d5bf994",
+        "canonical_sha256": "962cd9e718cd4d24ab5161ee4f6643321ee17f6af96f92bf5c4ae76f6d5bf994",
+        "detail": "{\"previous_version\": 2, \"version\": 4, \"found\": null}",
+        "matched_identifier": "pkg:huggingface/openai-community/gpt2@ffffffffffffffffffffffffffffffffffffffff",
+        "original_sha256": "962cd9e718cd4d24ab5161ee4f6643321ee17f6af96f92bf5c4ae76f6d5bf994",
+        "redacted_fields": "[]",
+        "source": "inventory",
+        "url": ""
+       }
+      ],
+      "kind": "base_model_disabled",
+      "model_id": "based",
+      "note": null,
+      "opened_in_version": 1,
+      "severity": "MODERATE",
+      "severity_origin": "policy",
+      "state": "fixed"
+     }
+    ],
+    "entries": [
+     {
+      "gap_reason": null,
+      "identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+      "kind": "base_model",
+      "model_id": "based",
+      "pinned": 1,
+      "version": 1
+     },
+     {
+      "gap_reason": null,
+      "identifier": "pkg:huggingface/openai-community/gpt2@ffffffffffffffffffffffffffffffffffffffff",
+      "kind": "base_model",
+      "model_id": "based",
+      "pinned": 1,
+      "version": 2
+     },
+     {
+      "gap_reason": "no revision",
+      "identifier": null,
+      "kind": "base_model",
+      "model_id": "based",
+      "pinned": 0,
+      "version": 3
+     }
+    ],
+    "exit_codes": [
+     [
+      "register",
+      0
+     ],
+     [
+      "check",
+      0
+     ],
+     [
+      "register",
+      0
+     ],
+     [
+      "register",
+      0
+     ],
+     [
+      "register",
+      0
+     ],
+     [
+      "history",
+      0
+     ]
+    ],
+    "watch_events": []
+   }
+  },
+  "lifecycle_base_model_moved.disabled": {
+   "md": {
+    "alerts": [
+     {
+      "cause": "{\"identifier\": \"pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e\", \"base_model\": \"pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e\", \"repo\": \"openai-community/gpt2\", \"moved_to\": \"openai-community/gpt2-renamed\", \"disabled\": true, \"source\": \"hf-hub\"}",
+      "cause_key": "base_model_disabled:pkg:huggingface/openai-community/gpt2",
+      "closed_by_version": null,
+      "current_version": 1,
+      "dismissal_reason": null,
+      "dismissed_by": null,
+      "evidence": [
+       {
+        "body_sha256": "bc55e260d66edc9fe992456034b4c8e7409f02363b92145060a97a7f79913055",
+        "canonical_sha256": null,
+        "detail": null,
+        "matched_identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+        "original_sha256": "bc55e260d66edc9fe992456034b4c8e7409f02363b92145060a97a7f79913055",
+        "redacted_fields": "[]",
+        "source": "hf-hub",
+        "url": "https://huggingface.co/api/models/openai-community/gpt2?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha&expand[]=lastModified"
+       },
+       {
+        "body_sha256": "49f64c6bc3a1881bcb63add5bd1f633b9ba5b5379bd13f95c0906bd84234dc96",
+        "canonical_sha256": "495aacb17c2d2049597e9b74f4d57f02e2cef0dd3849f0e758fc0060569309fc",
+        "detail": null,
+        "matched_identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+        "original_sha256": "49f64c6bc3a1881bcb63add5bd1f633b9ba5b5379bd13f95c0906bd84234dc96",
+        "redacted_fields": "[]",
+        "source": "hf-hub",
+        "url": "https://huggingface.co/api/models/openai-community/gpt2-renamed?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha&expand[]=lastModified"
+       }
+      ],
+      "kind": "base_model_disabled",
+      "model_id": "based",
+      "note": null,
+      "opened_in_version": 1,
+      "severity": "MODERATE",
+      "severity_origin": "policy",
+      "state": "open"
+     }
+    ],
+    "entries": [
+     {
+      "gap_reason": null,
+      "identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+      "kind": "base_model",
+      "model_id": "based",
+      "pinned": 1,
+      "version": 1
+     }
+    ],
+    "exit_codes": [
+     [
+      "register",
+      0
+     ],
+     [
+      "check",
+      0
+     ]
+    ],
+    "watch_events": [
+     {
+      "detail": "{\"source\": \"hf-hub\", \"http_status\": 307, \"from\": \"openai-community/gpt2\", \"to\": \"openai-community/gpt2-renamed\", \"redirected_to\": \"https://huggingface.co/api/models/openai-community/gpt2-renamed?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha&expand[]=lastModified\", \"target_http_status\": 200, \"target_outcome\": \"reachable\", \"target_disabled\": true}",
+      "entry_identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+      "evidence": [
+       {
+        "body_sha256": "bc55e260d66edc9fe992456034b4c8e7409f02363b92145060a97a7f79913055",
+        "canonical_sha256": null,
+        "detail": null,
+        "matched_identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+        "original_sha256": "bc55e260d66edc9fe992456034b4c8e7409f02363b92145060a97a7f79913055",
+        "redacted_fields": "[]",
+        "source": "hf-hub",
+        "url": "https://huggingface.co/api/models/openai-community/gpt2?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha&expand[]=lastModified"
+       },
+       {
+        "body_sha256": "49f64c6bc3a1881bcb63add5bd1f633b9ba5b5379bd13f95c0906bd84234dc96",
+        "canonical_sha256": "495aacb17c2d2049597e9b74f4d57f02e2cef0dd3849f0e758fc0060569309fc",
+        "detail": null,
+        "matched_identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+        "original_sha256": "49f64c6bc3a1881bcb63add5bd1f633b9ba5b5379bd13f95c0906bd84234dc96",
+        "redacted_fields": "[]",
+        "source": "hf-hub",
+        "url": "https://huggingface.co/api/models/openai-community/gpt2-renamed?expand[]=disabled&expand[]=gated&expand[]=private&expand[]=cardData&expand[]=sha&expand[]=lastModified"
+       }
+      ],
+      "kind": "base_model_moved",
+      "model_id": "based",
+      "version": 1
+     }
+    ]
+   }
+  },
+  "register.no_revision": {
+   "md": {
+    "alerts": [],
+    "entries": [
+     {
+      "gap_reason": "no revision",
+      "identifier": null,
+      "kind": "base_model",
+      "model_id": "based",
+      "pinned": 0,
+      "version": 1
+     }
+    ],
+    "exit_codes": [
+     [
+      "register",
+      0
+     ]
+    ],
+    "watch_events": []
+   }
+  },
+  "register.not_a_commit": {
+   "md": {
+    "alerts": [],
+    "entries": [
+     {
+      "gap_reason": "revision is not a commit",
+      "identifier": null,
+      "kind": "base_model",
+      "model_id": "based",
+      "pinned": 0,
+      "version": 1
+     }
+    ],
+    "exit_codes": [
+     [
+      "register",
+      0
+     ]
+    ],
+    "watch_events": []
+   }
+  },
+  "register.pinned": {
+   "md": {
+    "alerts": [],
+    "entries": [
+     {
+      "gap_reason": null,
+      "identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+      "kind": "base_model",
+      "model_id": "based",
+      "pinned": 1,
+      "version": 1
+     }
+    ],
+    "exit_codes": [
+     [
+      "register",
+      0
+     ],
+     [
+      "inventory",
+      0
+     ]
+    ],
+    "watch_events": []
+   }
+  },
+  "register.with_licence": {
+   "md": {
+    "alerts": [],
+    "entries": [
+     {
+      "gap_reason": null,
+      "identifier": "pkg:huggingface/openai-community/gpt2@607a30d783dfa663caf39e06633721c8d4cfcd7e",
+      "kind": "base_model",
+      "model_id": "based",
+      "pinned": 1,
+      "version": 1
+     }
+    ],
+    "exit_codes": [
+     [
+      "register",
+      0
+     ]
+    ],
+    "watch_events": []
+   }
+  }
+ },
+ "src_tree": "c66a0b582c9dd4167396a2f977fef51fe0e7f631"
+}
