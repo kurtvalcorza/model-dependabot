@@ -27,6 +27,8 @@ from model_dependabot.assurance.trust import (
     latest_check,
     needs_confirmation,
 )
+from model_dependabot.lineage.edges import edge_line
+from model_dependabot.lineage.graph import note_text, problem_text
 from model_dependabot.matching.severity import severity_rank
 from model_dependabot.rules import rule_for
 from model_dependabot.store import SCOPE_ALL as SCOPE_ALL  # moved to the store (feature 003)
@@ -374,7 +376,21 @@ def audit_text(payload: Mapping[str, Any]) -> str:
     for item in coverage["uncheckable"]:
         where = item["location"] or item["identifier"] or ""
         lines.append(f"    {item['kind']} {where}: {item['reason']}".replace("  :", " :"))
+    if "lineage" in payload:
+        lines += lineage_audit_text(payload["lineage"])
     return "\n".join(lines)
+
+
+def lineage_audit_text(lineage: Mapping[str, Any]) -> list[str]:
+    """The audit's lineage section (feature 011, contracts/edge-evidence.md, Audit)."""
+    edges, problems = lineage["edges"], lineage["problems"]
+    edge_word = "edge" if len(edges) == 1 else "edges"
+    problem_word = "problem" if len(problems) == 1 else "problems"
+    lines = [f"Lineage ({len(edges)} {edge_word}, {len(problems)} {problem_word}):"]
+    lines += [edge_line(view) for view in edges]
+    lines += [f"  problem {problem_text(problem)}" for problem in problems]
+    lines += [f"  note {note_text(note)}" for note in lineage.get("notes", [])]
+    return lines
 
 
 def _identity_text(item: Mapping[str, Any]) -> str:

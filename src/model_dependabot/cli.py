@@ -530,6 +530,9 @@ def _check_text(payload: Mapping[str, Any]) -> str:
             f" {len(model['carried_forward'])} carried forward, {len(model['closed'])} closed,"
             f" {len(model['watch_events'])} watch events"
         )
+        # Feature 011 (FR-021, review R4): lineage problems of the checked version; no exit code.
+        for problem in (model.get("lineage") or {}).get("problems", []):
+            lines.append(f"  lineage problem {lineage_graph.problem_text(problem)}")
     return "\n".join(lines)
 
 
@@ -823,6 +826,14 @@ def make_handlers(
             )
             # Research U13: keep the ETag cache bounded; bodies evidence refers to stay.
             store.prune_etag_cache()
+            # Feature 011 (FR-021, US4 AS1, review R4): each checked version's lineage problems,
+            # listed only when there are some, with no overview row and no exit code change.
+            all_edges = store.all_edges()
+            for model in outcome.models:
+                checked = [(model["model_id"], model["version"])]
+                found_problems = lineage_graph.problems(all_edges, store.version_exists, checked)
+                if found_problems:
+                    model["lineage"] = {"problems": found_problems}
             covered = overview.payload(store, outcome.run_id)
             found = None
             if args.fail_on is not None:

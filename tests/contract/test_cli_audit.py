@@ -39,6 +39,7 @@ TOP = {
     "findings",
     "assurance",
     "coverage",
+    "lineage",  # feature 011 (FR-030)
 }
 
 
@@ -67,6 +68,7 @@ def test_the_json_has_every_field_of_the_contract(audit) -> None:
     assert set(report["findings"]) == {"state", "alerts", "excepted", "watch_events"}
     assert set(report["assurance"]) == {"entries", "undeclared_kinds"}
     assert set(report["coverage"]) == {"sources", "uncheckable"}
+    assert set(report["lineage"]) == {"edges", "problems", "notes"}
     assert report["produced_at"] == "2026-11-13T09:00:00Z"
     assert report["stale_after_hours"] == 24
     [entry] = report["assurance"]["entries"]
@@ -198,3 +200,93 @@ def test_coverage_items_carry_the_last_overview_state(
     after = cli("inventory", "audit", "m")
     [scan] = after["coverage"]["sources"]
     assert (scan["source"], scan["last_state"]) == ("picklescan", "passed")
+
+
+# --- feature 011: the lineage section (T048, FR-030, SC-006) ------------------------------------
+
+LINEAGE_FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "lineage"
+
+
+def test_the_lineage_section_lists_edges_problems_and_notes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from lineage_support import Cli
+
+    cli = Cli(tmp_path, capsys)
+    base = tmp_path / "base.toml"
+    base.write_text('[model]\nid = "example-adapter-base"\n', encoding="utf-8")
+    cli.ok("register", str(base))
+    cli.ok("register", str(LINEAGE_FIXTURES / "four-types.toml"))
+    exported = tmp_path / "four.json"
+    cli.ok("inventory", "export", "example-four", "-o", str(exported))
+    cli.ok("import", str(exported), "--model-id", "example-imported")
+    report = cli.ok("inventory", "audit", "example-imported")
+    edges = report["lineage"]["edges"]
+    assert [e["relationship"] for e in edges] == [
+        "fine-tuned-from",
+        "merged-from",
+        "quantized-from",
+        "adapter-for",
+    ]
+    assert {(e["origin"], e["claimed_origin"], e["state"]) for e in edges} == {
+        ("import", "manifest", "unverified")
+    }
+    assert edges[3]["note"] == "resolved by id and version only"
+    assert set(edges[3]) == {
+        "edge_id",
+        "relationship",
+        "relationship_recorded",
+        "parent",
+        "origin",
+        "claimed_origin",
+        "state",
+        "source",
+        "recorded_at",
+        "declared_count",
+        "gap",
+        "resolved",
+        "note",
+    }
+    cli.ok("register", str(LINEAGE_FIXTURES / "merge-one-parent.toml"))
+    merged = cli.ok("inventory", "audit", "example-merge-one")
+    assert [note["kind"] for note in merged["lineage"]["notes"]] == ["merge_with_one_parent"]
+    cli.ok("register", str(LINEAGE_FIXTURES / "duplicate.toml"))
+    code, text = cli.run("inventory", "audit", "example-duplicate", as_json=False)
+    assert code == EXIT_OK
+    assert "Lineage (1 edge, 1 problem):" in text
+    assert "  problem duplicate_parent: hf:example-org/base-a@" in text
+    code, text = cli.run("inventory", "audit", "example-merge-one", as_json=False)
+    assert "  note merge with one parent" in text
+
+
+def test_no_output_shows_an_edge_as_verified(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """SC-006: the state of every edge in every output is owner or unverified."""
+    from lineage_support import Cli
+
+    cli = Cli(tmp_path, capsys)
+    outputs = [cli.ok("register", str(LINEAGE_FIXTURES / "merge-two.toml"))]
+    outputs.append(
+        cli.ok("import", str(LINEAGE_FIXTURES / "claims-manifest.json"), "--model-id", "i")
+    )
+    outputs.append(cli.ok("inventory", "show", "example-merge"))
+    outputs.append(cli.ok("inventory", "audit", "example-merge"))
+    outputs.append(cli.ok("inventory", "audit", "i"))
+    outputs.append(cli.ok("alerts", "example-merge"))
+    outputs.append(cli.ok("check", "example-merge", "--source", "picklescan"))
+
+    def states(value: Any) -> list[str]:
+        if isinstance(value, dict):
+            found = [value["state"]] if {"relationship", "state"} <= set(value) else []
+            return found + [s for item in value.values() for s in states(item)]
+        if isinstance(value, list):
+            return [s for item in value for s in states(item)]
+        return []
+
+    seen = [state for output in outputs for state in states(output)]
+    assert seen and set(seen) <= {"owner", "unverified"}
+    for argv in (("inventory", "show", "example-merge"), ("inventory", "audit", "i")):
+        code, text = cli.run(*argv, as_json=False)
+        section = text[text.index("Lineage (") :]  # the lineage section is last
+        assert code == EXIT_OK and "verified" not in section.replace("unverified", "")

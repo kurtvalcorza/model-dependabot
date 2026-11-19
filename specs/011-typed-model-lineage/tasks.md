@@ -127,14 +127,14 @@ English, British spelling, no serial comma; fixture names `example-org/*`, no in
 
 ### Tests first
 
-- [ ] T032 [P] [US4] Write `tests/unit/test_lineage_graph.py` (fails first) for SC-005: cycles of length 1 (`self.toml`), 2 and 3 each reported once with members in path order; `duplicate_parent`, `ambiguous_relationship` and `parent_not_registered` each exactly once; version 2 referencing version 1 of the same id reports nothing; a reference that resolves after its parent registers stops being a gap and one that stops resolving becomes it again (FR-021a); the note `merge_with_one_parent`
-- [ ] T033 [P] [US4] Write `tests/integration/test_lineage_problems.py` (fails first): US4 AS1 to AS6 through `register`, `inventory audit` and `check`, with exit codes unchanged and registration never refused; the mutual pair forms its cycle only after the second registration (AS5)
+- [x] T032 [P] [US4] Write `tests/unit/test_lineage_graph.py` (fails first) for SC-005: cycles of length 1 (`self.toml`), 2 and 3 each reported once with members in path order; `duplicate_parent`, `ambiguous_relationship` and `parent_not_registered` each exactly once; version 2 referencing version 1 of the same id reports nothing; a reference that resolves after its parent registers stops being a gap and one that stops resolving becomes it again (FR-021a); the note `merge_with_one_parent`
+- [x] T033 [P] [US4] Write `tests/integration/test_lineage_problems.py` (fails first): US4 AS1 to AS6 through `register`, `inventory audit` and `check`, with exit codes unchanged and registration never refused; the mutual pair forms its cycle only after the second registration (AS5)
 
 ### Implementation
 
-- [ ] T034 [US4] Write `src/model_dependabot/lineage/graph.py`: `resolve(edges, exists)`, `problems(edges_by_version, exists)` with iterative depth-first cycle search and the rotation rule of research L8, pure functions of edge rows
-- [ ] T035 [US4] Report `lineage.problems` in the `register` and `import` payloads and text (`cli.py:604-679`), from `store.all_edges()` and `version_exists`, in `src/model_dependabot/cli.py`
-- [ ] T059 [US4] Report lineage problems in `check`: add `lineage.problems` for every checked version to the check payload and a "Lineage problems" line per problem to `_check_text` (`cli.py:481-490`), from `lineage.graph` over `store.all_edges()`, with no overview row and no exit code change (FR-021, US4 AS1; T033 asserts it, review R4), in `src/model_dependabot/cli.py`
+- [x] T034 [US4] Write `src/model_dependabot/lineage/graph.py`: `resolve(edges, exists)`, `problems(edges_by_version, exists)` with iterative depth-first cycle search and the rotation rule of research L8, pure functions of edge rows
+- [x] T035 [US4] Report `lineage.problems` in the `register` and `import` payloads and text (`cli.py:604-679`), from `store.all_edges()` and `version_exists`, in `src/model_dependabot/cli.py`
+- [x] T059 [US4] Report lineage problems in `check`: add `lineage.problems` for every checked version to the check payload and a "Lineage problems" line per problem to `_check_text` (`cli.py:481-490`), from `lineage.graph` over `store.all_edges()`, with no overview row and no exit code change (FR-021, US4 AS1; T033 asserts it, review R4), in `src/model_dependabot/cli.py`
 
 **Checkpoint**: T032, T033 pass.
 
@@ -178,7 +178,7 @@ inherited watch events.
 - [ ] T045 [P] [US5] Extend `tests/unit/test_discover_card.py` (fails first): the four `base_model_relation` values map to the four types; `other` and an absent relation give `unspecified` with the card value kept in the origin; one value applies to every listed name; the gap "several base models; multi-parent lineage is #9" never appears (FR-028)
 - [ ] T046 [P] [US5] Extend `tests/unit/test_discover_compare.py` (fails first): each candidate is matched against every hub parent of `Manifest.parents`, not only one (FR-029)
 - [ ] T047 [P] [US5] Extend `tests/unit/test_discover_propose.py` (fails first): one commented `[[parents]]` block per candidate with `relationship` when mapped, the placeholder line of research L9 when `unspecified`; the proposal, uncommented without choosing a type, is refused by `load_manifest`
-- [ ] T048 [P] [US5] Extend `tests/contract/test_cli_audit.py` (fails first): `inventory audit` JSON and text carry `lineage.edges`, `lineage.problems` and `lineage.notes` as contracts/edge-evidence.md states, including "resolved by id and version only"; no output of `register`, `import`, `inventory show`, `inventory audit`, `alerts` or `check` contains an edge state `verified` (SC-006)
+- [x] T048 [P] [US5] Extend `tests/contract/test_cli_audit.py` (fails first): `inventory audit` JSON and text carry `lineage.edges`, `lineage.problems` and `lineage.notes` as contracts/edge-evidence.md states, including "resolved by id and version only"; no output of `register`, `import`, `inventory show`, `inventory audit`, `alerts` or `check` contains an edge state `verified` (SC-006)
 - [ ] T049 [P] [US5] Extend `tests/integration/test_discover.py` (fails first) with the US5 independent test on `tests/fixtures/projects/card-two-merge/`
 
 ### Implementation
@@ -186,8 +186,8 @@ inherited watch events.
 - [ ] T050 [US5] Map `base_model_relation` in `_base_models` (`discover/model_card.py:102-119`) and remove `SEVERAL_BASE_MODELS` (`discover/candidate.py:20`) and its use (`model_card.py:108-109`), in `src/model_dependabot/discover/model_card.py` and `src/model_dependabot/discover/candidate.py`
 - [ ] T051 [US5] Match every candidate against every parent of `Manifest.parents` in `src/model_dependabot/discover/compare.py` (`:149-169`)
 - [ ] T052 [US5] Write commented `[[parents]]` blocks in `_block` of `src/model_dependabot/discover/propose.py` (`:161-172`)
-- [ ] T053 [US5] Add the `lineage` block to `audit_report` in `src/model_dependabot/assurance/audit.py` (`:227`), from `store.edges`, `store.all_edges` and `lineage.graph`, read-only
-- [ ] T054 [US5] Add the "Lineage" section to `audit_text` in `src/model_dependabot/reports.py` (`:322`)
+- [x] T053 [US5] Add the `lineage` block to `audit_report` in `src/model_dependabot/assurance/audit.py` (`:227`), from `store.edges`, `store.all_edges` and `lineage.graph`, read-only
+- [x] T054 [US5] Add the "Lineage" section to `audit_text` in `src/model_dependabot/reports.py` (`:322`)
 
 **Checkpoint**: T045 to T049 pass.
 
