@@ -16,13 +16,15 @@ from pathlib import Path
 from typing import Any
 
 from model_dependabot.doi import normalise_doi
+from model_dependabot.lineage import RELATIONSHIPS, UNSPECIFIED
 from model_dependabot.sources.hf import parse_hub
 
-_TOP_KEYS = {"model", "weights", "environment", "base_model", "datasets"}
+_TOP_KEYS = {"model", "weights", "environment", "base_model", "parents", "datasets"}
 _MODEL_KEYS = {"id", "name", "owner"}
 _WEIGHT_KEYS = {"path", "hub", "revision", "file"}
 _ENVIRONMENT_KEYS = {"lock"}
 _BASE_MODEL_KEYS = {"hub", "revision"}
+_PARENT_KEYS = {"hub", "revision", "model", "version", "relationship"}
 _DATASET_KEYS = {"doi", "sha256", "hub", "revision", "paper_doi"}
 _HUB_DATASET_PREFIX = "hf:datasets/"
 
@@ -46,6 +48,25 @@ class WeightSpec:
 class BaseModelSpec:
     repo: str
     revision: str | None
+
+
+@dataclass(frozen=True)
+class ParentSpec:
+    """One parent of the model (feature 011, data-model.md, Parent spec).
+
+    ``form`` is ``parents`` for a ``[[parents]]`` table (``index`` its position) or ``base_model``
+    for the legacy ``[base_model]`` table, whose relationship is ``unspecified`` (C1). Exactly one
+    of ``repo`` (a hub repository, with an optional ``revision``) and ``model_id`` (a model
+    registered in the same store, with an optional ``model_version``) is set.
+    """
+
+    index: int
+    form: str
+    repo: str | None
+    revision: str | None
+    model_id: str | None
+    model_version: int | None
+    relationship: str
 
 
 @dataclass(frozen=True)
@@ -73,6 +94,16 @@ class Manifest:
     lock: Path | None
     base_model: BaseModelSpec | None
     datasets: tuple[DatasetSpec, ...]
+    # Feature 011: every parent, a legacy [base_model] included as one unspecified parent.
+    parents: tuple[ParentSpec, ...] = ()
+
+
+def parents_of(manifest: Manifest) -> tuple[ParentSpec, ...]:
+    """The manifest's parents; a ``Manifest`` built without them reads its ``base_model``."""
+    if manifest.parents or manifest.base_model is None:
+        return manifest.parents
+    base = manifest.base_model
+    return (ParentSpec(0, "base_model", base.repo, base.revision, None, None, UNSPECIFIED),)
 
 
 def _table(value: Any, where: str, allowed: set[str]) -> Mapping[str, Any]:
@@ -168,6 +199,31 @@ def _dataset(table: Mapping[str, Any], where: str) -> DatasetSpec:
     )
 
 
+def _parent(table: Mapping[str, Any], index: int) -> ParentSpec:
+    """One ``[[parents]]`` table (contracts/manifest-parents.md, Rules)."""
+    where = f"parents[{index}]"
+    relationship = table.get("relationship")
+    if relationship not in RELATIONSHIPS:
+        raise ManifestError(f"{where}.relationship must be one of {', '.join(RELATIONSHIPS)}")
+    hub = _text(table, "hub", where)
+    model = _text(table, "model", where)
+    if (hub is None) == (model is None):
+        raise ManifestError(f"{where} needs exactly one of hub and model")
+    if hub is not None:
+        if "version" in table:
+            raise ManifestError(f"{where}.version needs model")
+        revision = _text(table, "revision", where)
+        return ParentSpec(index, "parents", _hub(hub, where), revision, None, None, relationship)
+    if "revision" in table:
+        raise ManifestError(f"{where}.revision needs hub")
+    version = table.get("version")
+    if version is not None and (
+        isinstance(version, bool) or not isinstance(version, int) or version < 1
+    ):
+        raise ManifestError(f"{where}.version must be a positive integer")
+    return ParentSpec(index, "parents", None, None, model, version, relationship)
+
+
 def load_manifest(path: Path | str, *, weights_present: bool = True) -> Manifest:
     """Read and check a manifest; raise ``ManifestError`` if it is not valid.
 
@@ -202,6 +258,12 @@ def load_manifest(path: Path | str, *, weights_present: bool = True) -> Manifest
         lock_text = _text(environment, "lock", "environment")
         lock = None if lock_text is None else _local(base, lock_text, "environment.lock")
 
+    if "base_model" in data and "parents" in data:
+        raise ManifestError("use either [base_model] or [[parents]], not both")
+    parents = tuple(
+        _parent(table, index)
+        for index, table in enumerate(_tables(data.get("parents", []), "parents", _PARENT_KEYS))
+    )
     base_model = None
     if "base_model" in data:
         table = _table(data["base_model"], "base_model", _BASE_MODEL_KEYS)
@@ -227,4 +289,14 @@ def load_manifest(path: Path | str, *, weights_present: bool = True) -> Manifest
         lock=lock,
         base_model=base_model,
         datasets=datasets,
+        parents=parents
+        or (
+            ()
+            if base_model is None
+            else (
+                ParentSpec(
+                    0, "base_model", base_model.repo, base_model.revision, None, None, UNSPECIFIED
+                ),
+            )
+        ),
     )
