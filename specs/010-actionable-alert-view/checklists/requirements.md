@@ -32,9 +32,15 @@
 ## Notes
 
 - Three markers are open, each with a recommended answer: FR-001 (interface: `--advice` on `alert show` and
-  `alerts`), FR-008 (where a runtime-use declaration comes from: only a `not_used_at_runtime` dismissal in this
-  feature) and FR-012 (no owner-recorded impact conclusion in this feature). Resolve with `/speckit-clarify`
-  before `/speckit-plan`.
+  `alerts`), FR-008 (runtime use: the only declaration is a `not_used_at_runtime` dismissal, read as `declared`
+  with polarity `not_used`, for that alert only) and FR-012 (no command records impact; impact always reads
+  `impact undetermined`, and dismissals and exceptions sit in their own owner-decision block). Resolve with
+  `/speckit-clarify` before `/speckit-plan`.
+- Numbered 010, not 005: features 005 and 006 were merged (PRs #6 and #1) and specified inside specs/001, and 007
+  to 009 were review-fix branches. The parallel lineage specification (#9) is 011.
+- Review 2026-11-19 (13 findings, R1 to R13) applied: renumbering, a recorded CLI baseline shared by FR-016 and
+  SC-002, runtime-use polarity, impact always undetermined, shared closing text, CLI-only review steps, the
+  mapping of #7's "inferred", citations and Background corrections. All items except the markers still pass.
 - Command names (`alert show`, `alerts`, `check --fail-on`) and file references appear because they are the
   user-facing interface and the current behaviour this feature must leave unchanged, not implementation.
 - The review step table is scope, not wording; the plan fixes the text.
