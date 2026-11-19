@@ -25,6 +25,8 @@ if TYPE_CHECKING:
 NO_VERSION = "no version"
 PARENT_NOT_REGISTERED = "parent not registered"
 RESOLVED_BY_ID = "resolved by id and version only"
+# A version registered before feature 003 has no recorded origin; its synthesised edges show this.
+NO_ORIGIN = "origin not recorded"
 
 EDGE_FIELDS = (
     "position",
@@ -243,7 +245,8 @@ def edge_line(view: Mapping[str, Any]) -> str:
     else:
         revision = "" if parent["revision"] is None else f"@{parent['revision']}"
         label = f"hf:{parent['repo']}{revision}"
-    line = f"  {view['relationship']:<16} {label}  origin {view['origin']}, {view['state']}"
+    origin = view["origin"] or NO_ORIGIN
+    line = f"  {view['relationship']:<16} {label}  origin {origin}, {view['state']}"
     if view.get("claimed_origin"):
         line += f" (claimed {view['claimed_origin']})"
     if view.get("relationship_recorded"):

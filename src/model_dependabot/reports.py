@@ -27,7 +27,7 @@ from model_dependabot.assurance.trust import (
     latest_check,
     needs_confirmation,
 )
-from model_dependabot.lineage.edges import edge_line
+from model_dependabot.lineage.edges import NO_ORIGIN, edge_line
 from model_dependabot.lineage.graph import note_text, problem_text
 from model_dependabot.matching.severity import severity_rank
 from model_dependabot.rules import rule_for
@@ -135,7 +135,8 @@ def inherited_text(detail: Mapping[str, Any]) -> str:
 def edge_lines(cause: Mapping[str, Any]) -> list[str]:
     """One line per edge that carries a hub finding (FR-009, FR-024)."""
     return [
-        f"      via {edge['relationship']} edge ({edge['origin']}, {edge['state']}) at"
+        f"      via {edge['relationship']} edge ({edge['origin'] or NO_ORIGIN},"
+        f" {edge['state']}) at"
         f" {edge['revision'] or 'no revision'}"
         for edge in cause.get("edges") or []
     ]
