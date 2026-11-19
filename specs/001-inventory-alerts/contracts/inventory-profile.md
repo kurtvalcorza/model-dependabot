@@ -23,6 +23,12 @@ Custom properties (the complete list; constitution II):
 | `model-dependabot:hub-revision` | hub-hosted weight file | The full commit the file is pinned to (the model-info `sha`, or `X-Repo-Commit` when a response carries one; research R5) |
 | `model-dependabot:hub-file` | hub-hosted weight file | The file's path in the repository, the key for the hub scan verdict (research R5) |
 | `model-dependabot:gap` | any entry | The gap reason (FR-003) |
+| `model-dependabot:relationship` | every ancestor (feature 011) | `fine-tuned-from`, `adapter-for`, `merged-from`, `quantized-from` or `unspecified` |
+| `model-dependabot:relationship-recorded` | ancestor whose imported relationship was unrecognised | The original value, kept as evidence |
+| `model-dependabot:edge-origin` | every ancestor | `manifest`, `record` or `import`: the edge's origin in the exporting store |
+| `model-dependabot:claimed-origin` | ancestor of an imported edge | The `edge-origin` the imported document stated, if any |
+| `model-dependabot:parent-model` | ancestor naming a registered model | The parent's model id (the ancestor has no purl) |
+| `model-dependabot:parent-version` | ancestor naming a registered model | The parent's version, a decimal string |
 
 Hub location is split this way because CycloneDX has no fields for a repository and revision on a
 `file` component; the `distribution` external reference carries the same location as a URL for other
