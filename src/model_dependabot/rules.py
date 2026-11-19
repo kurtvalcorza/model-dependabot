@@ -117,6 +117,7 @@ RULES = (
             "gating_changed",
             "card_changed",
             "base_model_moved",
+            "lineage_inherited",  # feature 011: a registered parent's finding (FR-020)
         ),
     ),
     Rule(
