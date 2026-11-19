@@ -118,3 +118,16 @@ line, as today.
 
 Unchanged: 0 on success, 1 for an unknown alert or model or an invalid option, 3 for an unexpected
 error. `--advice` adds no code and changes none (FR-017).
+
+## As built (T040)
+
+- A section with no item prints `  <Title>: none` (`Established`, `Not established`, `Limitations`,
+  `Claims`).
+- A runtime use of `unknown` with context prints one line per other alert:
+  `    alert #<id> on the same identifier was dismissed not_used_at_runtime by <by> at <at>`.
+- A weight file's relationship line reads `weight file of this model (local) <location>` or
+  `(hub) hf:<repo>/<file>`, then `(<owner's|imported|legacy> declaration, v<N>)`.
+- `alerts ID --advice` with nothing listed prints, after today's text and a blank line, the
+  empty-model note of `advice_summary`.
+- `check`, `history`, `run show` and every other command refuse `--advice` as any unknown option
+  (exit 1).

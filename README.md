@@ -99,8 +99,8 @@ output; both may go before or after the command name.
 | `discover PATH [--manifest FILE] [--model-id ID] [--upstream] [-o FILE [--force]]` | Proposes candidate dependencies for a project folder; see [Discovering dependencies](#discovering-dependencies). Reads nothing outside `PATH` and opens no database. Makes no request unless `--upstream`. Writes nothing unless `-o`, never replaces a file unless `--force` and refuses an `-o` path that is a link or passes through a link inside `PATH` |
 | `check (ID \| --all) [--scheduled] [--source ...] [--fail-on SEVERITY]` | Runs the checks now, records a check run and ends with its [check overview](#the-check-overview). `--fail-on` turns it into a gate; see [Exit codes](#exit-codes). Sources: `osv`, `picklescan`, `hf-scan`, `format-check`, `hf-hub`, `hf-takedowns`, `crossref`, `datacite`, `zenodo` and `figshare`; without `--source` every source runs. `--scheduled` marks the run as scheduled and needs `--all` (`check ID --scheduled` exits 1); see [Scheduling](#scheduling) |
 | `policy ID [--format (default\|strict)] [--globals (default\|strict)] --by NAME` | At least one of the two options. `--format` sets the model's weight-format policy, recording who set it and when. Under `default` a format that can run code when loaded is a watch event; under `strict` a code-capable weight file with no pinned code-free file beside it in the same version raises an alert (an unpinned name proves nothing). Takes effect at the next check. `--globals strict`: any global in a scanned pickle file of the model that is neither on the safe list (`src/model_dependabot/safe_globals/`) nor excepted, dangerous ones included, raises one MODERATE `globals_policy` alert per file; a dangerous global also keeps its HIGH alert |
-| `alerts ID [--state open\|excepted\|closed\|all]` | Lists alerts by severity (`CRITICAL`, `HIGH`, `MODERATE`, `LOW`, `UNKNOWN`), then the excepted alerts in their own list, then the watch events, each with its evidence. The `alerts` list never holds an excepted alert; `--state excepted` lists only the excepted ones |
-| `alert show ALERT_ID` | One alert with all its evidence; for a redacted response, both hashes and the fields removed |
+| `alerts ID [--state open\|excepted\|closed\|all] [--advice]` | Lists alerts by severity (`CRITICAL`, `HIGH`, `MODERATE`, `LOW`, `UNKNOWN`), then the excepted alerts in their own list, then the watch events, each with its evidence. The `alerts` list never holds an excepted alert; `--state excepted` lists only the excepted ones. `--advice` adds the [advisory view](#the-advisory-view) of every listed alert, in the same order |
+| `alert show ALERT_ID [--advice]` | One alert with all its evidence; for a redacted response, both hashes and the fields removed. `--advice` adds its [advisory view](#the-advisory-view) |
 | `alert dismiss ALERT_ID --reason REASON [--note TEXT] --by NAME` | Dismisses an alert, an excepted one included; `REASON` is `not_used_at_runtime`, `risk_accepted`, `false_positive` or `fix_not_available` |
 | `exception record --global GLOBAL --sha256 HEX --reason TEXT --by NAME [--expires YYYY-MM-DD]` | Accepts one reviewed global in files with exactly this SHA-256, wherever they are registered; see [Exceptions for globals](#exceptions-for-globals). Changes no alert until the next check that asks a weight source |
 | `exception list [--all] [--sha256 HEX]` | Lists active exceptions (`--all`: also revoked and expired), each with where it applies and whether it is in use |
@@ -255,6 +255,33 @@ trip `--fail-on`.
 Every alert carries a stable rule ID (`MDB101` to `MDB502`, one per alert kind) and a link to its page
 in [`docs/rules/`](docs/rules/README.md), which says what raises it, what it does not prove, how it
 closes and how to fix or accept it. Text output shows the ID after the alert id. An ID is never reused.
+
+### The advisory view
+
+`alert show ALERT_ID --advice` and `alerts ID --advice` add, after today's unchanged output, one
+advisory view per alert (JSON: an `advice` key, last, on each alert; `alerts` also gains
+`advice_summary`). For each alert it shows:
+
+- the affected inventory entry: its kind, identifier, the manifest section that declares it and every
+  version and location that holds it, or `unresolved` with the reason (no entry is picked by name or
+  similarity);
+- how the entry relates to the model, from a fixed list, and the basis: the version, its manifest
+  section and whether the declaration is the owner's or imported;
+- runtime use: `declared` only when the owner dismissed this alert as `not_used_at_runtime`,
+  otherwise `unknown` (no source observes runtime use);
+- what the alert's evidence establishes, each statement citing its evidence rows; what it does not
+  establish, always starting with whether the alert affects the model; and the rule's limitations;
+- the entry's claim states (feature 003), never presented as established;
+- `impact undetermined`, always;
+- the owner's decision (a dismissal or an exception), kept apart from what the evidence shows;
+- the rule's numbered review steps, filled in with the alert's own identifiers, the last saying how
+  the alert closes.
+
+The view reads only: it writes nothing to the store, asks no source and changes no exit code. It
+scores nothing and settles no impact. Package alerts state one limitation of the inventory: it does
+not record environment markers, so whether a package is installed where the model runs is not
+established (issue #28). The fixed texts come from `src/model_dependabot/rule_texts/rule-texts.toml`,
+which also renders three sections of every rule page.
 
 ### Dismissals hold
 

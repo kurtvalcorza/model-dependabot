@@ -155,3 +155,21 @@ the text changes without a new version (as `tests/unit/test_safe_globals.py` doe
   `not_established` impact first, then the rule's list, then the conditional items in the order of
   research R6; `claims` as `claim_verification`; `owner_decision.items` by `exception_id`;
   `runtime_use.context` by alert id.
+
+## As built (T040)
+
+- `claims` items are `{field, value, origin, verification, reason}`: `trust.claim_verification`
+  names the first key `claim`; the view renames it `field`, as this document says.
+- `rule-texts.toml` `steps` holds the steps before the closing one; the view and the rendered rule
+  pages add the last step, `How this alert closes: ` followed by `closes`, so `closes` is written
+  once. `not_established` needs two or more items (the impact question and at least one of the
+  rule's own).
+- A withdrawn or cleared alert's extra established statement reads
+  `the source withdrew the cause (<source> at <retrieved_at>)` or `the source cleared the cause (…)`,
+  citing the alert's last evidence row that is not an exception's.
+- Conditional not-established items, in order: `which inventory entry this alert is about: <reason>`
+  (unresolved); `whether the imported declaration of <identifier> is accurate: it is not the owner's
+  own` (import version); `what the file holds: no local scan read this file; the hub's own verdict is
+  the source` (hub weight file); `whether the file's bytes match their record: the bytes were not
+  read in this place` (`weight_file_absent`); `whether <package> is installed where the model runs`
+  (every package alert, ruling Q1). The package marker limitation is a second `limitations` item.
