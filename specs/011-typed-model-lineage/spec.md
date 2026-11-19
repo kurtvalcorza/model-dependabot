@@ -63,8 +63,11 @@ unverified links.
 
 ## Clarifications
 
-Open questions are marked [NEEDS CLARIFICATION] in the requirements (FR-003, FR-017, FR-020), each with a
-recommended answer. They are to be settled with `/speckit.clarify` or by the owner before planning.
+### Session 2026-11-19
+
+- Q: What relationship does a legacy `[base_model]` record, and may it carry a type (FR-003)? → A: `unspecified`, never inferred; no type key in `[base_model]`. A typed parent uses the parent list.
+- Q: Which of a registered parent's findings travel to a child (FR-017)? → A: The matrix as shown: weight-file findings only through `adapter-for`, package advisories never.
+- Q: Is an inherited finding an alert or a watch event on the child (FR-020)? → A: A watch event marked inherited, citing the parent's alert; never a second alert.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -273,12 +276,9 @@ deliver value without it.
   kinds and exit codes MUST be unchanged. The only allowed differences are the new edge fields (FR-006:
   relationship, origin, source location, recorded time, verification state), the edge type and origin in finding
   evidence (FR-009) and the new `model-dependabot:` properties on exported ancestors (FR-010). The edge's
-  relationship is [NEEDS CLARIFICATION: what relationship does a legacy `[base_model]` edge record, and may
-  `[base_model]` carry a type? Recommended: `unspecified`, never inferred; the constitution's "fine-tuned from"
-  wording is not treated as a declaration. On typing, two options: (A, recommended) no new key: an owner who wants
-  a type moves to the parent list; (B) an optional `relation` key in `[base_model]`, in which case FR-004, FR-023
-  and FR-025 treat a typed `[base_model]` as a one-element parent list. Either way a legacy edge is hub-only, so
-  FR-014 applies whatever its type and behaviour is unchanged.]
+  relationship is `unspecified`, never inferred; the constitution's "fine-tuned from" wording is not treated as a
+  declaration. `[base_model]` takes no type key: an owner who wants a type moves to the parent list. A legacy edge
+  is hub-only, so FR-014 applies and behaviour is unchanged (resolved 2026-11-19).
 - **FR-004**: A manifest MUST NOT contain both `[base_model]` and the parent list; this MUST be an error with exit
   code 1 that names both forms.
 - **FR-005**: A parent without a revision, or with a revision that is not a commit, MUST be recorded as a gap
@@ -340,8 +340,8 @@ deliver value without it.
 - **FR-016**: A parent edge MAY reference a registered model id and version in the same store. Only such edges
   can carry findings from the parent's own inventory, and only they can form a multi-level graph.
 - **FR-017**: Which findings of a registered parent's own inventory travel to a child MUST depend on the edge type:
-  [NEEDS CLARIFICATION: confirm the relevance matrix below. Recommended as shown: `adapter-for` is the only type
-  that loads the parent's weights, and the child's own lock is what is deployed.] The matrix is closed: any
+  as the matrix below shows (confirmed 2026-11-19): `adapter-for` is the only type that loads the
+  parent's weights, and the child's own lock is what is deployed. The matrix is closed: any
   finding kind not listed, including any kind added later, does not travel until the matrix lists it
   (constitution IV).
 
@@ -361,9 +361,9 @@ deliver value without it.
 - **FR-019**: Along an `unspecified` edge only findings that travel on all four types MAY travel, marked
   "relationship unspecified".
 - **FR-020**: A finding that reaches a child from a registered parent MUST appear as
-  [NEEDS CLARIFICATION: an alert on the child or a watch event? Recommended: a watch event on the child, marked
-  inherited (direct or transitive, FR-018) and citing the parent's alert, never a second alert: the parent's alert is the confirmed match
-  (constitution IV) and the parent's owner closes it. Direct hub findings (FR-014) stay alerts, as today.]
+  a watch event on the child, marked inherited (direct or transitive, FR-018) and citing the parent's
+  alert, never a second alert: the parent's alert is the confirmed match (constitution IV) and the parent's owner
+  closes it. Direct hub findings (FR-014) stay alerts, as today (resolved 2026-11-19).
 
 **Graph problems (US4)**
 
@@ -390,9 +390,8 @@ deliver value without it.
 - **FR-026**: The documented alert closure rules (`README.md:165-175`) MUST hold for every edge: a version that
   no longer has the parent closes its alerts as `fixed`; a gap never counts as a fix.
 - **FR-027**: `check` exit codes and the `--fail-on` gate of feature 004 MUST be unchanged for the child's own
-  findings. How an inherited finding counts follows FR-020's answer: as a watch event (the recommendation) it does
-  not count, as watch events never do; if FR-020 settles on an alert, inherited alerts MUST NOT count for the
-  child's `--fail-on`, since the parent's gate already counts them.
+  findings. An inherited finding is a watch event (FR-020), so it does not count for the child's `--fail-on`, as
+  watch events never do; the parent's gate already counts the parent's alert.
 
 **Discovery and audit (US5)**
 

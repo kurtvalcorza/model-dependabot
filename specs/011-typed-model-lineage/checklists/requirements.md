@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain
+- [x] No [NEEDS CLARIFICATION] markers remain
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -53,3 +53,5 @@
 - Manifest, CycloneDX and command names (`[base_model]`, `pedigree.ancestors[]`, `inventory audit`) appear because
   they are the user-facing interface and open standard named in #9, not implementation.
 - The `base_model_relation` mapping in Assumptions cites the Hugging Face model card documentation.
+- Clarified 2026-11-19 (owner): all three markers resolved with the recommended answers; see the spec's
+  Clarifications session.
