@@ -44,6 +44,8 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any
 
+from model_dependabot.assurance.trust import EDGE_STATES, edge_state
+from model_dependabot.lineage import EDGE_KINDS, RELATIONSHIPS, UNSPECIFIED
 from model_dependabot.sources.fetcher import Headers, Response
 
 ENTRY_KINDS = ("weight_file", "package", "base_model", "dataset")
@@ -100,6 +102,8 @@ WATCH_KINDS = (
     # feature 003 (data-model.md, Watch event): an imported code-free claim checked
     "format_claim_contradicted",
     "format_claim_unreadable",
+    # feature 011 (data-model.md, Inherited finding): a registered parent's alert reached a child
+    "lineage_inherited",
 )
 # Feature 003 (data-model.md): how a version was registered and where a weight file's format
 # claim came from; which claim a claim check confirmed and how it came out.
@@ -432,6 +436,44 @@ WHEN NOT (
 )
 BEGIN SELECT RAISE(ABORT, 'only the revocation of an exception can be set, once'); END;
 
+-- Feature 011 (data-model.md, Lineage edge): one row per edge identity of a model version.
+CREATE TABLE IF NOT EXISTS lineage_edges (
+    edge_id INTEGER PRIMARY KEY,
+    model_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    position INTEGER NOT NULL CHECK (position >= 0),
+    parent_kind TEXT NOT NULL CHECK (parent_kind IN {_in(EDGE_KINDS)}),
+    parent_repo TEXT,
+    parent_revision TEXT,
+    parent_model_id TEXT,
+    parent_version INTEGER CHECK (parent_version IS NULL OR parent_version >= 1),
+    relationship TEXT NOT NULL CHECK (relationship IN {_in((*RELATIONSHIPS, UNSPECIFIED))}),
+    relationship_recorded TEXT,
+    origin TEXT NOT NULL CHECK (origin IN {_in(VERSION_ORIGINS)}),
+    claimed_origin TEXT,
+    source_file TEXT,
+    source_sha256 TEXT,
+    source_key TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN {_in(EDGE_STATES)}),
+    gap_reason TEXT,
+    entry_identifier TEXT,
+    declared_count INTEGER NOT NULL DEFAULT 1 CHECK (declared_count >= 1),
+    FOREIGN KEY (model_id, version) REFERENCES model_versions (model_id, version),
+    UNIQUE (model_id, version, position),
+    CHECK (parent_kind = 'model' OR (parent_model_id IS NULL AND parent_version IS NULL)),
+    CHECK (parent_kind = 'hub' OR (parent_model_id IS NOT NULL AND parent_repo IS NULL
+        AND parent_revision IS NULL))
+);
+
+-- FR-023: edge identity. An edge without a parent identity is keyed by its source key (review R2).
+CREATE UNIQUE INDEX IF NOT EXISTS lineage_edge_identity ON lineage_edges (
+    model_id, version, parent_kind, COALESCE(lower(parent_repo), ''),
+    COALESCE(parent_revision, ''), COALESCE(parent_model_id, ''), COALESCE(parent_version, 0),
+    relationship,
+    CASE WHEN parent_repo IS NULL AND parent_model_id IS NULL THEN source_key ELSE '' END
+);
+
 -- FR-005: a recorded model version and its inventory never change.
 CREATE TRIGGER IF NOT EXISTS model_versions_no_update BEFORE UPDATE ON model_versions
 BEGIN SELECT RAISE(ABORT, 'a recorded model version is immutable (FR-005)'); END;
@@ -441,7 +483,32 @@ CREATE TRIGGER IF NOT EXISTS inventory_entries_no_update BEFORE UPDATE ON invent
 BEGIN SELECT RAISE(ABORT, 'a recorded inventory entry is immutable (FR-005)'); END;
 CREATE TRIGGER IF NOT EXISTS inventory_entries_no_delete BEFORE DELETE ON inventory_entries
 BEGIN SELECT RAISE(ABORT, 'a recorded inventory entry is immutable (FR-005)'); END;
+CREATE TRIGGER IF NOT EXISTS lineage_edges_no_update BEFORE UPDATE ON lineage_edges
+BEGIN SELECT RAISE(ABORT, 'a recorded lineage edge is immutable (FR-005)'); END;
+CREATE TRIGGER IF NOT EXISTS lineage_edges_no_delete BEFORE DELETE ON lineage_edges
+BEGIN SELECT RAISE(ABORT, 'a recorded lineage edge is immutable (FR-005)'); END;
 """
+
+EDGE_COLUMNS = (
+    "position",
+    "parent_kind",
+    "parent_repo",
+    "parent_revision",
+    "parent_model_id",
+    "parent_version",
+    "relationship",
+    "relationship_recorded",
+    "origin",
+    "claimed_origin",
+    "source_file",
+    "source_sha256",
+    "source_key",
+    "recorded_at",
+    "state",
+    "gap_reason",
+    "entry_identifier",
+    "declared_count",
+)
 
 ENTRY_FIELDS = (
     "kind",
@@ -1378,6 +1445,7 @@ class Store:
         base_dir: Path | str | None = None,
         registration_record_sha256: str | None = None,
         origin: str | None = None,
+        edges: Iterable[Mapping[str, Any]] = (),
     ) -> int:
         """Record the next version of a model with its inventory and entries, all or nothing.
 
@@ -1385,10 +1453,12 @@ class Store:
         manifest's or the imported inventory's), so a check can find the files to scan.
         ``registration_record_sha256`` is set when the local weight files were registered from a
         registration record, without their bytes (feature 005). ``origin`` is how the version was
-        registered: ``manifest``, ``record`` or ``import`` (feature 003).
+        registered: ``manifest``, ``record`` or ``import`` (feature 003). ``edges`` are its lineage
+        edges (feature 011), recorded in the same transaction with the registration time.
         """
         with self.conn:
             version = (self.latest_version(model_id) or 0) + 1
+            stamp = self._stamp()
             self.conn.execute(
                 "INSERT INTO model_versions (model_id, version, registered_at, manifest_sha256,"
                 " inventory, base_dir, registration_record_sha256, origin)"
@@ -1396,7 +1466,7 @@ class Store:
                 (
                     model_id,
                     version,
-                    self._stamp(),
+                    stamp,
                     manifest_sha256,
                     json.dumps(inventory),
                     None if base_dir is None else str(Path(base_dir).resolve()),
@@ -1406,7 +1476,90 @@ class Store:
             )
             for entry in entries:
                 self._insert_entry(model_id, version, entry)
+            for edge in edges:
+                self._insert_edge(model_id, version, edge, stamp)
         return version
+
+    def _insert_edge(
+        self, model_id: str, version: int, edge: Mapping[str, Any], stamp: str
+    ) -> None:
+        unknown = set(edge) - set(EDGE_COLUMNS) - {"edge_id", "model_id", "version"}
+        if unknown:
+            raise ValueError(f"unknown lineage edge fields: {sorted(unknown)}")
+        values = {name: edge.get(name) for name in EDGE_COLUMNS}
+        values["recorded_at"] = stamp
+        values["declared_count"] = values["declared_count"] or 1
+        names = ", ".join(EDGE_COLUMNS)
+        marks = ", ".join("?" for _ in EDGE_COLUMNS)
+        self.conn.execute(
+            f"INSERT INTO lineage_edges (model_id, version, {names}) VALUES (?, ?, {marks})",
+            (model_id, version, *values.values()),
+        )
+
+    # --- lineage edges (feature 011, data-model.md) ---------------------------------------------
+
+    def version_exists(self, model_id: str, version: int) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM model_versions WHERE model_id = ? AND version = ?", (model_id, version)
+        ).fetchone()
+        return row is not None
+
+    def edges(self, model_id: str, version: int) -> list[dict[str, Any]]:
+        """The version's lineage edges in declaration order, stored or synthesised.
+
+        A version registered before feature 011 has no rows: it reads one ``unspecified`` edge per
+        ``base_model`` entry, origin the version's origin, state ``owner`` for ``manifest`` and
+        ``record`` and ``unverified`` otherwise, never written back (research L2). A database
+        opened read-only without the table reads it as empty.
+        """
+        if "lineage_edges" in self.tables():
+            rows = self.conn.execute(
+                "SELECT * FROM lineage_edges WHERE model_id = ? AND version = ? ORDER BY position",
+                (model_id, version),
+            ).fetchall()
+            if rows:
+                return [dict(row) for row in rows]
+        record = self.get_version(model_id, version)
+        if record is None:
+            return []
+        origin = record.get("origin")
+        bases = [e for e in self.entries(model_id, version) if e["kind"] == "base_model"]
+        return [
+            {
+                "edge_id": None,
+                "model_id": model_id,
+                "version": version,
+                "position": position,
+                "parent_kind": "hub",
+                "parent_repo": entry["name"],
+                "parent_revision": entry["version"],
+                "parent_model_id": None,
+                "parent_version": None,
+                "relationship": UNSPECIFIED,
+                "relationship_recorded": None,
+                "origin": origin,
+                "claimed_origin": None,
+                "source_file": None,
+                "source_sha256": record["manifest_sha256"],
+                "source_key": "base_model",
+                "recorded_at": record["registered_at"],
+                "state": edge_state(origin),
+                "gap_reason": entry["gap_reason"],
+                "entry_identifier": entry["identifier"],
+                "declared_count": 1,
+            }
+            for position, entry in enumerate(bases)
+        ]
+
+    def all_edges(self) -> dict[tuple[str, int], list[dict[str, Any]]]:
+        """Every version's edges, for the lineage graph (stored or synthesised)."""
+        rows = self.conn.execute(
+            "SELECT model_id, version FROM model_versions ORDER BY model_id, version"
+        ).fetchall()
+        return {
+            (row["model_id"], row["version"]): self.edges(row["model_id"], row["version"])
+            for row in rows
+        }
 
     def _insert_entry(self, model_id: str, version: int, entry: Mapping[str, Any]) -> None:
         unknown = set(entry) - set(ENTRY_FIELDS)
