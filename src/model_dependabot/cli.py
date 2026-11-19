@@ -66,6 +66,7 @@ from model_dependabot.reports import (
     audit_text,
     claim_note,
     discover_text,
+    edge_lines,
     evidence_line,
     history_report,
     history_text,
@@ -538,6 +539,7 @@ def _check_text(payload: Mapping[str, Any]) -> str:
 
 def _alert_text(payload: Mapping[str, Any]) -> str:
     lines = [alert_line(payload).strip(), f"Model: {payload['model_id']}"]
+    lines += [line.removeprefix("    ") for line in edge_lines(payload["cause"])]
     lines += [f"  {evidence_line(evidence)}" for evidence in payload["evidence"]]
     return "\n".join(lines)
 

@@ -81,6 +81,8 @@ from model_dependabot.assurance.trust import (
     needs_confirmation,
 )
 from model_dependabot.inventory.build import HUB_DATASET_PREFIX, hash_stream, huggingface_purl
+from model_dependabot.lineage import propagate
+from model_dependabot.lineage.edges import cause_edges
 from model_dependabot.matching.severity import severity_of, severity_rank
 from model_dependabot.matching.versions import (
     affected_ranges,
@@ -377,6 +379,8 @@ class _Target:
     tally: dict[str, dict[str, set[Any]]] = field(default_factory=dict)
     held: dict[str, list[int]] = field(default_factory=dict)  # held dismissals by source (FR-020)
     uncheckable: list[dict[str, Any]] = field(default_factory=list)  # review K3
+    # Feature 011: the version's lineage edges, which hub findings cite (FR-009, FR-024).
+    edges: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -555,7 +559,39 @@ def _check(
             target.source = UPSTREAM_PASS
             _apply_upstream(store, target, observed, upstream)
     completed.update(UPSTREAM_SOURCES)
+    # Feature 011 (research L7, review R5): the lineage pass is the last step, inside run_check's
+    # error handling; it is not a source, adds no overview row and touches no tally.
+    _apply_lineage(store, targets)
     return targets
+
+
+def _apply_lineage(store: Store, targets: Sequence[_Target]) -> None:
+    """Record each finding a registered parent passes to a target as a watch event (FR-020).
+
+    One ``lineage_inherited`` event per parent alert per child, on the child's current version,
+    linking the parent alert's evidence; never an alert, so ``--fail-on`` is unchanged (FR-027).
+    """
+    for target in targets:
+        findings = propagate.inherited(
+            (target.model_id, target.version),
+            lambda node: store.edges(*node),
+            store.alerts_for,
+            lambda node: store.entries(*node),
+            store.version_exists,
+        )
+        for finding in findings:
+            alert_id = finding["parent_alert"]["alert_id"]
+            evidence = [record["evidence_id"] for record in store.alert_evidence(alert_id)]
+            watch_event_id = store.record_watch_event(
+                model_id=target.model_id,
+                version=target.version,
+                entry_identifier=propagate.entry_identifier(finding),
+                kind=propagate.LINEAGE_INHERITED,
+                detail=propagate.detail(finding),
+                evidence_ids=evidence,
+            )
+            if watch_event_id not in target.summary["watch_events"]:
+                target.summary["watch_events"].append(watch_event_id)
 
 
 def _read_osv(store: Store, client: OsvClient, targets: list[_Target]) -> _OsvRead:
@@ -3167,6 +3203,7 @@ def _apply_base_model(
     )
     evidence = [observation["evidence_ref"]]
     base: dict[str, Any] = {"identifier": item, "base_model": item, "repo": entry["name"]}
+    base["edges"] = cause_edges(target.edges, entry["name"])  # feature 011 (FR-009, FR-024)
     if model.outcome == "refused":
         _apply_refusal(store, target, entry, base, observation)
         return
@@ -3231,6 +3268,7 @@ def _apply_moved_base_model(
         "from": entry["name"],
         "to": model.moved_to,
         "redirected_to": model.response.redirected_to,
+        "edges": cause_edges(target.edges, entry["name"]),
     }
     answer = model.target
     if answer is None:
@@ -3245,6 +3283,7 @@ def _apply_moved_base_model(
     detail |= _target_detail(answer)
     _upstream_watch(store, target, BASE_MODEL_MOVED, item, detail, evidence)
     base = {"identifier": item, "base_model": item, "repo": entry["name"]}
+    base["edges"] = cause_edges(target.edges, entry["name"])
     base["moved_to"] = model.moved_to
     if refused:
         _apply_refusal(store, target, entry, base, observation, evidence[1:])
@@ -3264,7 +3303,7 @@ def _base_model_events(
     item = entry["identifier"]
     previous = previous_answer(store, observation)
     evidence = [observation["evidence_ref"]]
-    source = {"source": HF_HUB}
+    source = {"source": HF_HUB, "edges": cause_edges(target.edges, entry["name"])}
     newest = observation["head_revision"]
     pinned = entry.get("version")
     if newest and newest != pinned and appeared(previous, observation, "head_revision"):
@@ -3480,6 +3519,8 @@ def _apply_licence(
             "source": latest["source"],
             "sources": reporting,
         }
+        if entry["kind"] == "base_model":
+            cause["edges"] = cause_edges(target.edges, entry["name"])  # feature 011 (FR-009)
         evidence_ids = [o["evidence_ref"] for o in changed]
         _upstream_alert(store, target, LICENCE_CHANGED, key, cause, evidence_ids)
         return
@@ -3521,6 +3562,8 @@ def _apply_upstream(
     store: Store, target: _Target, observed: _Observed, read: _UpstreamRead
 ) -> None:
     reads = {source: read.reads[source] for source in read.reads if read.statuses[source] == "ok"}
+    # Feature 011 (research L6): every edge of the version, so a cause names all that carry it.
+    target.edges = store.edges(target.model_id, target.version)
     for entry in target.entries:
         if entry["kind"] == "base_model" and entry["pinned"]:
             _apply_base_model(store, target, observed, reads, entry)

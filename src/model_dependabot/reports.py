@@ -93,7 +93,7 @@ def alert_view(store: Store, alert: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def watch_view(event: Mapping[str, Any]) -> dict[str, Any]:
-    return {
+    view = {
         "kind": event["kind"],
         "version": event["version"],
         "identifier": event["entry_identifier"],
@@ -102,6 +102,43 @@ def watch_view(event: Mapping[str, Any]) -> dict[str, Any]:
         "last_seen": event["last_seen"],
         "evidence": [evidence_view(e) for e in event["evidence"]],
     }
+    if event["kind"] == "lineage_inherited":  # feature 011, contracts/edge-evidence.md
+        view["text"] = inherited_text(event["detail"])
+    return view
+
+
+def _version_text(text: str) -> str:
+    model_id, _, version = str(text).rpartition("@")
+    return f"{model_id} v{version}"
+
+
+def inherited_text(detail: Mapping[str, Any]) -> str:
+    """An inherited finding for people (FR-018, contracts/edge-evidence.md)."""
+    alert = detail["parent_alert"]
+    parent = _version_text(detail["parent"])
+    path = detail["paths"][0]
+    if detail["reach"] == "direct":
+        text = (
+            f"inherited from parent {parent} over {path[0]['relationship']} ({path[0]['origin']})"
+        )
+    else:
+        hops = " ".join(f"-{hop['relationship']}-> {_version_text(hop['parent'])}" for hop in path)
+        text = (
+            f"inherited from parent {parent} (transitive: {_version_text(path[0]['child'])} {hops})"
+        )
+    text += f": alert {alert['alert_id']} {alert['kind']} {alert['severity']}"
+    if detail.get("relationship_unspecified"):
+        text += " [relationship unspecified]"
+    return text
+
+
+def edge_lines(cause: Mapping[str, Any]) -> list[str]:
+    """One line per edge that carries a hub finding (FR-009, FR-024)."""
+    return [
+        f"      via {edge['relationship']} edge ({edge['origin']}, {edge['state']}) at"
+        f" {edge['revision'] or 'no revision'}"
+        for edge in cause.get("edges") or []
+    ]
 
 
 def history_view(store: Store, alert: Mapping[str, Any]) -> dict[str, Any]:
@@ -251,6 +288,7 @@ def alerts_text(payload: Mapping[str, Any]) -> str:
     lines.append(f"Alerts ({len(payload['alerts'])}):")
     for alert in payload["alerts"]:
         lines.append(alert_line(alert))
+        lines += edge_lines(alert["cause"])
         if alert["evidence"]:
             lines.append(f"      evidence: {evidence_line(alert['evidence'][-1])}")
     excepted = payload.get("excepted") or []
@@ -266,6 +304,8 @@ def alerts_text(payload: Mapping[str, Any]) -> str:
     lines.append(f"Watch events ({len(payload['watch_events'])}):")
     for event in payload["watch_events"]:
         lines.append(f"  {event['kind']} {event['identifier']}")
+        if event.get("text"):
+            lines.append(f"      {event['text']}")
         if event["evidence"]:
             lines.append(f"      evidence: {evidence_line(event['evidence'][-1])}")
     return "\n".join(lines)
