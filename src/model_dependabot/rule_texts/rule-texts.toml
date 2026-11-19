@@ -1,0 +1,199 @@
+# Rule texts: one source of the fixed text of each rule ID (feature 010, FR-014).
+# Read README.md beside this file before changing it; bump `version` with any change.
+
+version = 1
+
+[MDB101]
+limitations = "It does not prove the file is malicious: a dangerous global is one that can run code when the file is loaded, and many legitimate checkpoints import one. It does not prove that the file is safe when absent either: a scan that could not finish is a `scan_incomplete` watch event, and an import the scanner could not resolve is reported as `unknown`."
+closes = "It is fixed when a new version of the model no longer pins the file. It shows as `excepted`, still the same alert, while every dangerous global in its cause is covered by an active exception for the file's SHA-256; a revoked or expired exception returns it to open at the next check, whatever sources it asks."
+fix = "Replace the file with a code-free format (safetensors, ONNX) and register the new version. If you have reviewed the global in this exact file, record an exception: `exception record --global MODULE.NAME --sha256 HEX --reason TEXT --by NAME`. One exception covers the global in this alert and in the file's MDB104 alert. A global whose module or name contains `unknown` can never be excepted; dismiss the alert with a reason instead. A dismissal holds: a later check that finds the same cause with no new evidence opens no new alert and lists the dismissed alert under the model's `dismissals_held`. New evidence (a changed record, another matched identifier, a higher severity) opens a new alert whose cause names the dismissed one under `reopens`."
+not_established = [
+  "whether this alert affects model {model_id}",
+  "whether loading {location} would run the code its globals name",
+  "where the file at {location} came from",
+]
+steps = [
+  "Read which dangerous globals raised the alert and the scan that found them: `model-dependabot alert show {alert_id}`.",
+  "Find out where the file at {location} came from, and treat it as untrusted until you know.",
+  "If you need to look inside it, load it only in an isolated place, or not at all.",
+  "Convert the weights to a code-free format (safetensors, ONNX), point the manifest at the new file and register the new version: `model-dependabot register MANIFEST.toml --model-id {model_id}`.",
+  "Or, if you have reviewed a global in this exact file, record an exception for the file's hash: `model-dependabot exception record --global MODULE.NAME --sha256 HEX --reason TEXT --by NAME`. A global whose module or name contains `unknown` can never be excepted: dismiss the alert with a reason instead, `model-dependabot alert dismiss {alert_id} --reason risk_accepted --by NAME`.",
+]
+
+[MDB102]
+limitations = "It reports the hub's verdict, not a scan by this tool: no globals are read from hub files, so exceptions and the strict globals policy do not apply to them. A verdict the hub does not give is a `hub_scan_unknown` watch event, not a clean result."
+closes = "It is cleared when the hub's scan of the same file no longer calls it unsafe, and fixed when a new version no longer pins the file."
+fix = "Pin a revision whose file the hub scan accepts, or move to a code-free format. If you accept the risk, dismiss it with a reason. A dismissal holds: a later check that finds the same cause with no new evidence opens no new alert and lists the dismissed alert under the model's `dismissals_held`. New evidence (a changed record, another matched identifier, a higher severity) opens a new alert whose cause names the dismissed one under `reopens`."
+not_established = [
+  "whether this alert affects model {model_id}",
+  "whether the hub's verdict on {location} is right",
+  "whether the pinned revision of {location} is the one you deploy",
+]
+steps = [
+  "Read the hub's verdict on {location} and the date it was retrieved: `model-dependabot alert show {alert_id}`.",
+  "Check whether the revision the manifest pins is the one you deploy.",
+  "Pin a revision or a file the hub's scan accepts, or a code-free format, and register the new version: `model-dependabot register MANIFEST.toml --model-id {model_id}`.",
+  "Or, if you accept the risk, dismiss the alert with a reason: `model-dependabot alert dismiss {alert_id} --reason risk_accepted --by NAME`.",
+]
+
+[MDB103]
+limitations = "It says nothing about what the file contains: it is a rule about formats. Under the default policy the same file is only a `pickle_format` watch event."
+closes = "It is cleared when the policy returns to `default` or a code-free file is pinned beside it, and fixed when a new version no longer pins the file."
+fix = "Export the weights to a code-free format and register the new version, or set the policy back to `default`. A dismissal holds: a later check that finds the same cause with no new evidence opens no new alert and lists the dismissed alert under the model's `dismissals_held`. New evidence (a changed record, another matched identifier, a higher severity) opens a new alert whose cause names the dismissed one under `reopens`."
+not_established = [
+  "whether this alert affects model {model_id}",
+  "whether {location} contains anything that runs code",
+]
+steps = [
+  "Read which file is code-capable and the policy that raised the alert: `model-dependabot alert show {alert_id}`.",
+  "Check whether a pinned, confirmed code-free file of the same weights can be pinned beside it: `model-dependabot inventory show {model_id}`.",
+  "Register a version with the code-free file: `model-dependabot register MANIFEST.toml --model-id {model_id}`.",
+  "Or set the format policy back to default, recorded with who set it and when: `model-dependabot policy {model_id} --format default --by NAME`.",
+]
+
+[MDB104]
+limitations = "It does not say a listed global is harmful: only that the owner has not accepted it. A dangerous global is listed here and also keeps its MDB101 alert. Hub weight files are not judged, because no source reads their globals."
+closes = "It is cleared at the next check that asks a weight source when the policy returns to `default` (note `cleared: policy`), or when nothing is left unlisted because the safe list or exceptions now cover the rest (note `cleared: safe_list` or `cleared: exception`). It is fixed when a new version no longer pins the file."
+fix = "Record an exception for each global you have reviewed in this exact file; one exception also covers the global in the file's MDB101 alert. A global whose module or name contains `unknown` stays listed for good; dismiss the alert with a reason if you accept it. A dismissal holds: a later check that finds the same cause with no new evidence opens no new alert and lists the dismissed alert under the model's `dismissals_held`. New evidence (a changed record, another matched identifier, a higher severity) opens a new alert whose cause names the dismissed one under `reopens`."
+not_established = [
+  "whether this alert affects model {model_id}",
+  "whether each listed global in {location} is harmful",
+  "whether each listed global belongs to the framework the model uses",
+]
+steps = [
+  "Read each listed global: `model-dependabot alert show {alert_id}`.",
+  "For each one, check whether it belongs to the framework the model uses.",
+  "Record an exception per global you have reviewed in this exact file: `model-dependabot exception record --global MODULE.NAME --sha256 HEX --reason TEXT --by NAME`. A global whose module or name contains `unknown` cannot be excepted.",
+  "Or convert the file to a code-free format and register the new version (`model-dependabot register MANIFEST.toml --model-id {model_id}`), or set the globals policy back to default: `model-dependabot policy {model_id} --globals default --by NAME`.",
+]
+
+[MDB201]
+limitations = "It does not prove the vulnerable code is reachable from the model. A match the local evaluation cannot confirm is an `advisory_unmatched` watch event; a record that has gone from the source is an `advisory_gone` watch event and the alert stays open."
+closes = "It is fixed when a new version pins an unaffected package version, withdrawn when the source withdraws the advisory and cleared when the record no longer affects the pinned version."
+fix = "Upgrade to a fixed version and register the new inventory. If the code is not used at runtime, dismiss the alert with that reason. A dismissal holds: a later check that finds the same cause with no new evidence opens no new alert and lists the dismissed alert under the model's `dismissals_held`. New evidence (a changed record, another matched identifier, a higher severity) opens a new alert whose cause names the dismissed one under `reopens`."
+not_established = [
+  "whether this alert affects model {model_id}",
+  "whether the affected part of {package} is used by the model's code",
+  "whether the vulnerable code in {package} is reachable from the model",
+]
+steps = [
+  "Read the advisories {advisory_ids}: their affected ranges and fixed versions (`model-dependabot alert show {alert_id}`).",
+  "Check whether the affected part of {package} is used by the model's code.",
+  "Lock a fixed version of {package} and register the new version: `model-dependabot register MANIFEST.toml --model-id {model_id}`.",
+  "Or, if the affected code is not used at runtime, dismiss the alert with that reason: `model-dependabot alert dismiss {alert_id} --reason not_used_at_runtime --by NAME`.",
+]
+
+[MDB301]
+limitations = "It reports the record's state, not why the dataset was retracted. A notice that is not a retraction is an `upstream_notice` watch event."
+closes = "It is cleared when the record no longer says so, and fixed when a new version no longer pins the dataset."
+fix = "Move to another dataset or version and register the new inventory, or dismiss it with a reason. A dismissal holds: a later check that finds the same cause with no new evidence opens no new alert and lists the dismissed alert under the model's `dismissals_held`. New evidence (a changed record, another matched identifier, a higher severity) opens a new alert whose cause names the dismissed one under `reopens`."
+not_established = [
+  "whether this alert affects model {model_id}",
+  "whether the model was trained or evaluated on this version of {dataset}",
+  "why {dataset} was retracted",
+]
+steps = [
+  "Read the retraction notice for {dataset}: `model-dependabot alert show {alert_id}`.",
+  "Check whether the model was trained or evaluated on this version of the data.",
+  "Register a version without the dataset, or with another one: `model-dependabot register MANIFEST.toml --model-id {model_id}`.",
+  "Or dismiss the alert with a reason: `model-dependabot alert dismiss {alert_id} --reason risk_accepted --by NAME`.",
+]
+
+[MDB302]
+limitations = "It does not say the dataset itself is wrong. A paper DOI that cannot be found is a `paper_not_found` watch event."
+closes = "It is cleared when the paper's record no longer says so, and fixed when a new version no longer pins the dataset."
+fix = "Review whether the retraction affects the data you use; move to another dataset, or dismiss it with a reason. A dismissal holds: a later check that finds the same cause with no new evidence opens no new alert and lists the dismissed alert under the model's `dismissals_held`. New evidence (a changed record, another matched identifier, a higher severity) opens a new alert whose cause names the dismissed one under `reopens`."
+not_established = [
+  "whether this alert affects model {model_id}",
+  "whether the retraction affects the data this model was trained or evaluated on",
+  "whether the retraction's reason touches {dataset}",
+]
+steps = [
+  "Read the retraction notice for the paper {paper_doi} and its stated reason: `model-dependabot alert show {alert_id}`.",
+  "Check whether that reason touches the data of {dataset} that the model used.",
+  "Register a version with another dataset: `model-dependabot register MANIFEST.toml --model-id {model_id}`.",
+  "Or dismiss the alert with a reason: `model-dependabot alert dismiss {alert_id} --reason risk_accepted --by NAME`.",
+]
+
+[MDB303]
+limitations = "It does not say why it was removed. A dataset that moved is a `dataset_moved` watch event and one replaced by another record is `dataset_replaced`."
+closes = "It is cleared when the dataset is reachable again, and fixed when a new version no longer pins it."
+fix = "Pin a copy you control or another dataset and register the new inventory, or dismiss it with a reason. A dismissal holds: a later check that finds the same cause with no new evidence opens no new alert and lists the dismissed alert under the model's `dismissals_held`. New evidence (a changed record, another matched identifier, a higher severity) opens a new alert whose cause names the dismissed one under `reopens`."
+not_established = [
+  "whether this alert affects model {model_id}",
+  "why {dataset} was removed",
+  "whether a copy of {dataset} with the pinned hash is held",
+  "whether the dataset's terms allow continued use, a matter for the owner's own review",
+]
+steps = [
+  "Read the removal record for {dataset}: `model-dependabot alert show {alert_id}`.",
+  "Check whether you hold a copy with the pinned hash.",
+  "Check, for your own review, whether the dataset's terms allow continued use.",
+  "Pin a copy you control or another dataset and register the new version: `model-dependabot register MANIFEST.toml --model-id {model_id}`.",
+  "Or dismiss the alert with a reason: `model-dependabot alert dismiss {alert_id} --reason risk_accepted --by NAME`.",
+]
+
+[MDB304]
+limitations = "It does not prove the data has gone: a repository that does not answer is a `dataset_unreachable` watch event, and a newer version of the dataset is `dataset_new_version`."
+closes = "It is cleared when the DOI is findable again, and fixed when a new version no longer pins it."
+fix = "Check the DOI with its agency and pin a findable identifier, or dismiss it with a reason. A dismissal holds: a later check that finds the same cause with no new evidence opens no new alert and lists the dismissed alert under the model's `dismissals_held`. New evidence (a changed record, another matched identifier, a higher severity) opens a new alert whose cause names the dismissed one under `reopens`."
+not_established = [
+  "whether this alert affects model {model_id}",
+  "whether the data of {dataset} has gone",
+  "whether the DOI {dataset} moved",
+]
+steps = [
+  "Read the failed lookups for {dataset}: `model-dependabot alert show {alert_id}`.",
+  "Check with the DOI's registration agency whether the DOI moved.",
+  "Pin a findable identifier and register the new version: `model-dependabot register MANIFEST.toml --model-id {model_id}`.",
+  "Or dismiss the alert with a reason: `model-dependabot alert dismiss {alert_id} --reason risk_accepted --by NAME`.",
+]
+
+[MDB401]
+limitations = "It does not judge whether the new licence allows your use. A licence that cannot be recognised is a `licence_unrecognised` watch event, and one the source does not give is `licence_missing`."
+closes = "It is cleared when the reported licence matches the recorded one again, and fixed when a new version records the new licence."
+fix = "Review the new licence; register a new version that records it, or move to another dependency. A dismissal holds: a later check that finds the same cause with no new evidence opens no new alert and lists the dismissed alert under the model's `dismissals_held`. New evidence (a changed record, another matched identifier, a higher severity) opens a new alert whose cause names the dismissed one under `reopens`."
+not_established = [
+  "whether this alert affects model {model_id}",
+  "the effect of the new licence on the licence the model was obtained under, a matter for the owner's own review",
+  "whether the new licence of {item} allows the model's use",
+]
+steps = [
+  "Read the recorded and the new licence of {item}: `model-dependabot alert show {alert_id}`.",
+  "Find which licence the model was obtained under.",
+  "Ask whoever decides licensing for you to review the change.",
+  "Register a version that records the new licence, or move to another dependency: `model-dependabot register MANIFEST.toml --model-id {model_id}`.",
+  "Or dismiss the alert with a reason: `model-dependabot alert dismiss {alert_id} --reason risk_accepted --by NAME`.",
+]
+
+[MDB501]
+limitations = "It does not say why. Other changes to the base model are watch events: a new revision (`base_model_new_revision`), a new version pointer (`base_model_new_version_pointer`), changed gating (`gating_changed`), a changed card (`card_changed`) or a move (`base_model_moved`)."
+closes = "It is cleared when the repository is no longer disabled, and fixed when a new version no longer pins the base model."
+fix = "Move to another base model and register the new inventory, or dismiss it with a reason. A dismissal holds: a later check that finds the same cause with no new evidence opens no new alert and lists the dismissed alert under the model's `dismissals_held`. New evidence (a changed record, another matched identifier, a higher severity) opens a new alert whose cause names the dismissed one under `reopens`."
+not_established = [
+  "whether this alert affects model {model_id}",
+  "why {repo} was disabled",
+  "whether the pinned revision of {repo} is still held locally",
+]
+steps = [
+  "Read the hub's status for {repo}: `model-dependabot alert show {alert_id}`.",
+  "Check whether the pinned revision is still held locally.",
+  "Register a version with another base model: `model-dependabot register MANIFEST.toml --model-id {model_id}`.",
+  "Or dismiss the alert with a reason: `model-dependabot alert dismiss {alert_id} --reason risk_accepted --by NAME`.",
+]
+
+[MDB502]
+limitations = "Without an account a deletion and a move to private look alike, so it does not say which. A refused request is a `base_model_refused` watch event, and an answer this tool cannot read is `base_model_unrecognised`."
+closes = "It is cleared when the base model is public again, and fixed when a new version no longer pins it."
+fix = "Find where the base model now lives and pin it, or dismiss the alert with a reason. A dismissal holds: a later check that finds the same cause with no new evidence opens no new alert and lists the dismissed alert under the model's `dismissals_held`. New evidence (a changed record, another matched identifier, a higher severity) opens a new alert whose cause names the dismissed one under `reopens`."
+not_established = [
+  "whether this alert affects model {model_id}",
+  "how {repo} became unavailable (gated or removed)",
+  "whether the pinned revision of {repo} is still held locally",
+]
+steps = [
+  "Read how {repo} became unavailable: `model-dependabot alert show {alert_id}`.",
+  "Check whether the pinned revision is still held locally.",
+  "Find where the base model now lives and pin it, or register a version with another base model: `model-dependabot register MANIFEST.toml --model-id {model_id}`.",
+  "Or dismiss the alert with a reason: `model-dependabot alert dismiss {alert_id} --reason risk_accepted --by NAME`.",
+]

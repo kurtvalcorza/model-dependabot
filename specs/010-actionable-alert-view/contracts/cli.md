@@ -79,8 +79,10 @@ The values above are illustrative; the field names, order and value sets are the
 step and limitation wording comes from `rule-texts.toml`.
 
 `advice_summary` (on `alerts --advice` only): `{"alerts_listed": N, "note": null}`, or with
-`alerts_listed` 0 the note "No alert is open for this model. That is not an assessment of the model or
-of how complete its inventory is."
+`alerts_listed` 0 a note worded for the `--state` filter applied, then "That is not an assessment
+of the model or of how complete its inventory is.": `open` "No alert is open for this model.",
+`excepted` "No alert of this model is excepted.", `closed` "No alert of this model is closed.",
+`all` "This model has no alert." (US2 scenario 6; review round 1, M10-R1).
 
 ## Text: the advice block
 
@@ -118,3 +120,16 @@ line, as today.
 
 Unchanged: 0 on success, 1 for an unknown alert or model or an invalid option, 3 for an unexpected
 error. `--advice` adds no code and changes none (FR-017).
+
+## As built (T040)
+
+- A section with no item prints `  <Title>: none` (`Established`, `Not established`, `Limitations`,
+  `Claims`).
+- A runtime use of `unknown` with context prints one line per other alert:
+  `    alert #<id> on the same identifier was dismissed not_used_at_runtime by <by> at <at>`.
+- A weight file's relationship line reads `weight file of this model (local) <location>` or
+  `(hub) hf:<repo>/<file>`, then `(<owner's|imported|legacy> declaration, v<N>)`.
+- `alerts ID --advice` with nothing listed prints, after today's text and a blank line, the
+  note of `advice_summary`, worded for the `--state` filter.
+- `check`, `history`, `run show` and every other command refuse `--advice` as any unknown option
+  (exit 1).

@@ -1,0 +1,570 @@
+{
+ "recorded_from": "6d40ae3",
+ "src_tree": "4ca0c708b930870cbf5bce02b3f2ef20f4797882",
+ "invocations": [
+  {
+   "name": "alerts weights-model --state open",
+   "argv": [
+    "alerts",
+    "weights-model",
+    "--state",
+    "open"
+   ],
+   "db": "md",
+   "stdout": "weights-model v2\nAlerts (1):\n  #2 MDB101 HIGH     open      weight_file_scan b.pkl (sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669)\n      evidence: picklescan <work>/model/b.pkl at 2026-11-19T09:00:00Z for sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669 (sha256 04a9908776809d0ff938611ce5ee266f6c3f518a21519f26f4c382652cdcfb04)\nExcepted (1):\n  #1 MDB101 HIGH     excepted  weight_file_scan a.pkl (sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546)\n      excepted: os.system by exception 1 (Owner, 2026-11-19T09:00:00Z)\nWatch events (2):\n  pickle_format sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\n      evidence: format-rule  at 2026-11-19T09:00:00Z for sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546 (sha256 f31e8a923eedf71537c7fce53f4a0dc05bd68e03f2c99796e557eee5edf05c94)\n  pickle_format sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\n      evidence: format-rule  at 2026-11-19T09:00:00Z for sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669 (sha256 52878f5640a7fea4408d4f342e5525f62d16e172302e9aa96bab0b55567ba42b)\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alerts weights-model --state open --json",
+   "argv": [
+    "alerts",
+    "weights-model",
+    "--state",
+    "open",
+    "--json"
+   ],
+   "db": "md",
+   "stdout": "{\n  \"model_id\": \"weights-model\",\n  \"current_version\": 2,\n  \"alerts\": [\n    {\n      \"alert_id\": 2,\n      \"rule_id\": \"MDB101\",\n      \"rule_doc\": \"docs/rules/MDB101.md\",\n      \"kind\": \"weight_file_scan\",\n      \"state\": \"open\",\n      \"severity\": \"HIGH\",\n      \"severity_origin\": \"policy\",\n      \"cause\": {\n        \"identifier\": \"sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\",\n        \"scanner\": \"picklescan\",\n        \"scanner_version\": \"1.0.5\",\n        \"location\": \"b.pkl\",\n        \"format\": \"pickle\",\n        \"dangerous\": [\n          \"builtins.eval\",\n          \"os.system\"\n        ],\n        \"suspicious\": [],\n        \"complete\": true,\n        \"position\": 31\n      },\n      \"opened_in_version\": 1,\n      \"current_version\": 2,\n      \"opened_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_at\": null,\n      \"closed_by_version\": null,\n      \"dismissal_reason\": null,\n      \"dismissed_by\": null,\n      \"note\": null,\n      \"evidence\": [\n        {\n          \"source\": \"picklescan\",\n          \"url\": \"<work>/model/b.pkl\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\",\n          \"original_sha256\": \"04a9908776809d0ff938611ce5ee266f6c3f518a21519f26f4c382652cdcfb04\",\n          \"body_sha256\": \"04a9908776809d0ff938611ce5ee266f6c3f518a21519f26f4c382652cdcfb04\",\n          \"canonical_sha256\": \"04a9908776809d0ff938611ce5ee266f6c3f518a21519f26f4c382652cdcfb04\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"scanner\": \"picklescan\",\n            \"scanner_version\": \"1.0.5\",\n            \"location\": \"b.pkl\",\n            \"format\": \"pickle\",\n            \"dangerous\": [\n              \"builtins.eval\",\n              \"os.system\"\n            ],\n            \"suspicious\": [],\n            \"complete\": true,\n            \"position\": 31\n          }\n        }\n      ]\n    }\n  ],\n  \"excepted\": [\n    {\n      \"alert_id\": 1,\n      \"rule_id\": \"MDB101\",\n      \"rule_doc\": \"docs/rules/MDB101.md\",\n      \"kind\": \"weight_file_scan\",\n      \"state\": \"excepted\",\n      \"severity\": \"HIGH\",\n      \"severity_origin\": \"policy\",\n      \"cause\": {\n        \"identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n        \"scanner\": \"picklescan\",\n        \"scanner_version\": \"1.0.5\",\n        \"location\": \"a.pkl\",\n        \"format\": \"pickle\",\n        \"dangerous\": [\n          \"os.system\"\n        ],\n        \"suspicious\": [],\n        \"complete\": true,\n        \"position\": 48,\n        \"excepted\": [\n          {\n            \"global\": \"os.system\",\n            \"exception_id\": 1,\n            \"accepted_by\": \"Owner\",\n            \"recorded_at\": \"2026-11-19T09:00:00Z\",\n            \"expires_on\": null\n          }\n        ]\n      },\n      \"opened_in_version\": 1,\n      \"current_version\": 2,\n      \"opened_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_at\": null,\n      \"closed_by_version\": null,\n      \"dismissal_reason\": null,\n      \"dismissed_by\": null,\n      \"note\": null,\n      \"evidence\": [\n        {\n          \"source\": \"picklescan\",\n          \"url\": \"<work>/model/a.pkl\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n          \"original_sha256\": \"f0c71c43175ca476e5aa9f586be610aad1fa2d22d7e5b5f9593be5806a043aeb\",\n          \"body_sha256\": \"f0c71c43175ca476e5aa9f586be610aad1fa2d22d7e5b5f9593be5806a043aeb\",\n          \"canonical_sha256\": \"f0c71c43175ca476e5aa9f586be610aad1fa2d22d7e5b5f9593be5806a043aeb\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"scanner\": \"picklescan\",\n            \"scanner_version\": \"1.0.5\",\n            \"location\": \"a.pkl\",\n            \"format\": \"pickle\",\n            \"dangerous\": [\n              \"os.system\"\n            ],\n            \"suspicious\": [],\n            \"complete\": true,\n            \"position\": 48\n          }\n        },\n        {\n          \"source\": \"exception\",\n          \"url\": \"exception:1\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n          \"original_sha256\": \"36baefe8ab027559873988aa4c8a101a65dbe91f2ba2e0dc370ae7d0dc2ed6b8\",\n          \"body_sha256\": \"36baefe8ab027559873988aa4c8a101a65dbe91f2ba2e0dc370ae7d0dc2ed6b8\",\n          \"canonical_sha256\": \"36baefe8ab027559873988aa4c8a101a65dbe91f2ba2e0dc370ae7d0dc2ed6b8\",\n          \"redacted_fields\": [],\n          \"detail\": null\n        }\n      ]\n    }\n  ],\n  \"watch_events\": [\n    {\n      \"kind\": \"pickle_format\",\n      \"version\": 2,\n      \"identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n      \"detail\": {\n        \"format\": \"pickle\",\n        \"reason\": \"the format can run code when loaded\",\n        \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\",\n        \"location\": \"a.pkl\"\n      },\n      \"first_seen\": \"2026-11-19T09:00:00Z\",\n      \"last_seen\": \"2026-11-19T09:00:00Z\",\n      \"evidence\": [\n        {\n          \"source\": \"format-rule\",\n          \"url\": \"\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n          \"original_sha256\": \"f31e8a923eedf71537c7fce53f4a0dc05bd68e03f2c99796e557eee5edf05c94\",\n          \"body_sha256\": \"f31e8a923eedf71537c7fce53f4a0dc05bd68e03f2c99796e557eee5edf05c94\",\n          \"canonical_sha256\": \"f31e8a923eedf71537c7fce53f4a0dc05bd68e03f2c99796e557eee5edf05c94\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"format\": \"pickle\",\n            \"reason\": \"the format can run code when loaded\",\n            \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\",\n            \"location\": \"a.pkl\"\n          }\n        }\n      ]\n    },\n    {\n      \"kind\": \"pickle_format\",\n      \"version\": 2,\n      \"identifier\": \"sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\",\n      \"detail\": {\n        \"format\": \"pickle\",\n        \"reason\": \"the format can run code when loaded\",\n        \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\",\n        \"location\": \"b.pkl\"\n      },\n      \"first_seen\": \"2026-11-19T09:00:00Z\",\n      \"last_seen\": \"2026-11-19T09:00:00Z\",\n      \"evidence\": [\n        {\n          \"source\": \"format-rule\",\n          \"url\": \"\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\",\n          \"original_sha256\": \"52878f5640a7fea4408d4f342e5525f62d16e172302e9aa96bab0b55567ba42b\",\n          \"body_sha256\": \"52878f5640a7fea4408d4f342e5525f62d16e172302e9aa96bab0b55567ba42b\",\n          \"canonical_sha256\": \"52878f5640a7fea4408d4f342e5525f62d16e172302e9aa96bab0b55567ba42b\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"format\": \"pickle\",\n            \"reason\": \"the format can run code when loaded\",\n            \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\",\n            \"location\": \"b.pkl\"\n          }\n        }\n      ]\n    }\n  ],\n  \"last_check\": {\n    \"run_id\": 2,\n    \"trigger\": \"on_demand\",\n    \"sources\": {\n      \"picklescan\": \"ok\"\n    }\n  }\n}\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alerts weights-model --state excepted",
+   "argv": [
+    "alerts",
+    "weights-model",
+    "--state",
+    "excepted"
+   ],
+   "db": "md",
+   "stdout": "weights-model v2\nAlerts (0):\nExcepted (1):\n  #1 MDB101 HIGH     excepted  weight_file_scan a.pkl (sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546)\n      excepted: os.system by exception 1 (Owner, 2026-11-19T09:00:00Z)\nWatch events (2):\n  pickle_format sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\n      evidence: format-rule  at 2026-11-19T09:00:00Z for sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546 (sha256 f31e8a923eedf71537c7fce53f4a0dc05bd68e03f2c99796e557eee5edf05c94)\n  pickle_format sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\n      evidence: format-rule  at 2026-11-19T09:00:00Z for sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669 (sha256 52878f5640a7fea4408d4f342e5525f62d16e172302e9aa96bab0b55567ba42b)\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alerts weights-model --state excepted --json",
+   "argv": [
+    "alerts",
+    "weights-model",
+    "--state",
+    "excepted",
+    "--json"
+   ],
+   "db": "md",
+   "stdout": "{\n  \"model_id\": \"weights-model\",\n  \"current_version\": 2,\n  \"alerts\": [],\n  \"excepted\": [\n    {\n      \"alert_id\": 1,\n      \"rule_id\": \"MDB101\",\n      \"rule_doc\": \"docs/rules/MDB101.md\",\n      \"kind\": \"weight_file_scan\",\n      \"state\": \"excepted\",\n      \"severity\": \"HIGH\",\n      \"severity_origin\": \"policy\",\n      \"cause\": {\n        \"identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n        \"scanner\": \"picklescan\",\n        \"scanner_version\": \"1.0.5\",\n        \"location\": \"a.pkl\",\n        \"format\": \"pickle\",\n        \"dangerous\": [\n          \"os.system\"\n        ],\n        \"suspicious\": [],\n        \"complete\": true,\n        \"position\": 48,\n        \"excepted\": [\n          {\n            \"global\": \"os.system\",\n            \"exception_id\": 1,\n            \"accepted_by\": \"Owner\",\n            \"recorded_at\": \"2026-11-19T09:00:00Z\",\n            \"expires_on\": null\n          }\n        ]\n      },\n      \"opened_in_version\": 1,\n      \"current_version\": 2,\n      \"opened_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_at\": null,\n      \"closed_by_version\": null,\n      \"dismissal_reason\": null,\n      \"dismissed_by\": null,\n      \"note\": null,\n      \"evidence\": [\n        {\n          \"source\": \"picklescan\",\n          \"url\": \"<work>/model/a.pkl\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n          \"original_sha256\": \"f0c71c43175ca476e5aa9f586be610aad1fa2d22d7e5b5f9593be5806a043aeb\",\n          \"body_sha256\": \"f0c71c43175ca476e5aa9f586be610aad1fa2d22d7e5b5f9593be5806a043aeb\",\n          \"canonical_sha256\": \"f0c71c43175ca476e5aa9f586be610aad1fa2d22d7e5b5f9593be5806a043aeb\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"scanner\": \"picklescan\",\n            \"scanner_version\": \"1.0.5\",\n            \"location\": \"a.pkl\",\n            \"format\": \"pickle\",\n            \"dangerous\": [\n              \"os.system\"\n            ],\n            \"suspicious\": [],\n            \"complete\": true,\n            \"position\": 48\n          }\n        },\n        {\n          \"source\": \"exception\",\n          \"url\": \"exception:1\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n          \"original_sha256\": \"36baefe8ab027559873988aa4c8a101a65dbe91f2ba2e0dc370ae7d0dc2ed6b8\",\n          \"body_sha256\": \"36baefe8ab027559873988aa4c8a101a65dbe91f2ba2e0dc370ae7d0dc2ed6b8\",\n          \"canonical_sha256\": \"36baefe8ab027559873988aa4c8a101a65dbe91f2ba2e0dc370ae7d0dc2ed6b8\",\n          \"redacted_fields\": [],\n          \"detail\": null\n        }\n      ]\n    }\n  ],\n  \"watch_events\": [\n    {\n      \"kind\": \"pickle_format\",\n      \"version\": 2,\n      \"identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n      \"detail\": {\n        \"format\": \"pickle\",\n        \"reason\": \"the format can run code when loaded\",\n        \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\",\n        \"location\": \"a.pkl\"\n      },\n      \"first_seen\": \"2026-11-19T09:00:00Z\",\n      \"last_seen\": \"2026-11-19T09:00:00Z\",\n      \"evidence\": [\n        {\n          \"source\": \"format-rule\",\n          \"url\": \"\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n          \"original_sha256\": \"f31e8a923eedf71537c7fce53f4a0dc05bd68e03f2c99796e557eee5edf05c94\",\n          \"body_sha256\": \"f31e8a923eedf71537c7fce53f4a0dc05bd68e03f2c99796e557eee5edf05c94\",\n          \"canonical_sha256\": \"f31e8a923eedf71537c7fce53f4a0dc05bd68e03f2c99796e557eee5edf05c94\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"format\": \"pickle\",\n            \"reason\": \"the format can run code when loaded\",\n            \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\",\n            \"location\": \"a.pkl\"\n          }\n        }\n      ]\n    },\n    {\n      \"kind\": \"pickle_format\",\n      \"version\": 2,\n      \"identifier\": \"sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\",\n      \"detail\": {\n        \"format\": \"pickle\",\n        \"reason\": \"the format can run code when loaded\",\n        \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\",\n        \"location\": \"b.pkl\"\n      },\n      \"first_seen\": \"2026-11-19T09:00:00Z\",\n      \"last_seen\": \"2026-11-19T09:00:00Z\",\n      \"evidence\": [\n        {\n          \"source\": \"format-rule\",\n          \"url\": \"\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\",\n          \"original_sha256\": \"52878f5640a7fea4408d4f342e5525f62d16e172302e9aa96bab0b55567ba42b\",\n          \"body_sha256\": \"52878f5640a7fea4408d4f342e5525f62d16e172302e9aa96bab0b55567ba42b\",\n          \"canonical_sha256\": \"52878f5640a7fea4408d4f342e5525f62d16e172302e9aa96bab0b55567ba42b\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"format\": \"pickle\",\n            \"reason\": \"the format can run code when loaded\",\n            \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\",\n            \"location\": \"b.pkl\"\n          }\n        }\n      ]\n    }\n  ],\n  \"last_check\": {\n    \"run_id\": 2,\n    \"trigger\": \"on_demand\",\n    \"sources\": {\n      \"picklescan\": \"ok\"\n    }\n  }\n}\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alerts weights-model --state closed",
+   "argv": [
+    "alerts",
+    "weights-model",
+    "--state",
+    "closed"
+   ],
+   "db": "md",
+   "stdout": "weights-model v2\nAlerts (1):\n  #3 MDB101 HIGH     fixed     weight_file_scan c.pkl (sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e)\n      evidence: inventory  at 2026-11-19T09:00:00Z for sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e (sha256 0809be4a6ac7a4a5b7d97efab75eb29c56a7e0e8150e331f183473810c9b2dad)\nWatch events (2):\n  pickle_format sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\n      evidence: format-rule  at 2026-11-19T09:00:00Z for sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546 (sha256 f31e8a923eedf71537c7fce53f4a0dc05bd68e03f2c99796e557eee5edf05c94)\n  pickle_format sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\n      evidence: format-rule  at 2026-11-19T09:00:00Z for sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669 (sha256 52878f5640a7fea4408d4f342e5525f62d16e172302e9aa96bab0b55567ba42b)\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alerts weights-model --state closed --json",
+   "argv": [
+    "alerts",
+    "weights-model",
+    "--state",
+    "closed",
+    "--json"
+   ],
+   "db": "md",
+   "stdout": "{\n  \"model_id\": \"weights-model\",\n  \"current_version\": 2,\n  \"alerts\": [\n    {\n      \"alert_id\": 3,\n      \"rule_id\": \"MDB101\",\n      \"rule_doc\": \"docs/rules/MDB101.md\",\n      \"kind\": \"weight_file_scan\",\n      \"state\": \"fixed\",\n      \"severity\": \"HIGH\",\n      \"severity_origin\": \"policy\",\n      \"cause\": {\n        \"identifier\": \"sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e\",\n        \"scanner\": \"picklescan\",\n        \"scanner_version\": \"1.0.5\",\n        \"location\": \"c.pkl\",\n        \"format\": \"pickle\",\n        \"dangerous\": [\n          \"os.system\"\n        ],\n        \"suspicious\": [\n          \"model_dependabot_fixture.layers.CustomLayer\"\n        ],\n        \"complete\": true,\n        \"position\": 126\n      },\n      \"opened_in_version\": 1,\n      \"current_version\": 1,\n      \"opened_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_by_version\": 2,\n      \"dismissal_reason\": null,\n      \"dismissed_by\": null,\n      \"note\": null,\n      \"evidence\": [\n        {\n          \"source\": \"picklescan\",\n          \"url\": \"<work>/model/c.pkl\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e\",\n          \"original_sha256\": \"02bec51c114b5862a6a33be8f51fe13157871b2e5e942c7b57ae9851a05e36af\",\n          \"body_sha256\": \"02bec51c114b5862a6a33be8f51fe13157871b2e5e942c7b57ae9851a05e36af\",\n          \"canonical_sha256\": \"02bec51c114b5862a6a33be8f51fe13157871b2e5e942c7b57ae9851a05e36af\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"scanner\": \"picklescan\",\n            \"scanner_version\": \"1.0.5\",\n            \"location\": \"c.pkl\",\n            \"format\": \"pickle\",\n            \"dangerous\": [\n              \"os.system\"\n            ],\n            \"suspicious\": [\n              \"model_dependabot_fixture.layers.CustomLayer\"\n            ],\n            \"complete\": true,\n            \"position\": 126\n          }\n        },\n        {\n          \"source\": \"inventory\",\n          \"url\": \"\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e\",\n          \"original_sha256\": \"0809be4a6ac7a4a5b7d97efab75eb29c56a7e0e8150e331f183473810c9b2dad\",\n          \"body_sha256\": \"0809be4a6ac7a4a5b7d97efab75eb29c56a7e0e8150e331f183473810c9b2dad\",\n          \"canonical_sha256\": \"0809be4a6ac7a4a5b7d97efab75eb29c56a7e0e8150e331f183473810c9b2dad\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"previous_version\": 1,\n            \"version\": 2,\n            \"found\": null\n          }\n        }\n      ]\n    }\n  ],\n  \"excepted\": [],\n  \"watch_events\": [\n    {\n      \"kind\": \"pickle_format\",\n      \"version\": 2,\n      \"identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n      \"detail\": {\n        \"format\": \"pickle\",\n        \"reason\": \"the format can run code when loaded\",\n        \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\",\n        \"location\": \"a.pkl\"\n      },\n      \"first_seen\": \"2026-11-19T09:00:00Z\",\n      \"last_seen\": \"2026-11-19T09:00:00Z\",\n      \"evidence\": [\n        {\n          \"source\": \"format-rule\",\n          \"url\": \"\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n          \"original_sha256\": \"f31e8a923eedf71537c7fce53f4a0dc05bd68e03f2c99796e557eee5edf05c94\",\n          \"body_sha256\": \"f31e8a923eedf71537c7fce53f4a0dc05bd68e03f2c99796e557eee5edf05c94\",\n          \"canonical_sha256\": \"f31e8a923eedf71537c7fce53f4a0dc05bd68e03f2c99796e557eee5edf05c94\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"format\": \"pickle\",\n            \"reason\": \"the format can run code when loaded\",\n            \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\",\n            \"location\": \"a.pkl\"\n          }\n        }\n      ]\n    },\n    {\n      \"kind\": \"pickle_format\",\n      \"version\": 2,\n      \"identifier\": \"sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\",\n      \"detail\": {\n        \"format\": \"pickle\",\n        \"reason\": \"the format can run code when loaded\",\n        \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\",\n        \"location\": \"b.pkl\"\n      },\n      \"first_seen\": \"2026-11-19T09:00:00Z\",\n      \"last_seen\": \"2026-11-19T09:00:00Z\",\n      \"evidence\": [\n        {\n          \"source\": \"format-rule\",\n          \"url\": \"\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\",\n          \"original_sha256\": \"52878f5640a7fea4408d4f342e5525f62d16e172302e9aa96bab0b55567ba42b\",\n          \"body_sha256\": \"52878f5640a7fea4408d4f342e5525f62d16e172302e9aa96bab0b55567ba42b\",\n          \"canonical_sha256\": \"52878f5640a7fea4408d4f342e5525f62d16e172302e9aa96bab0b55567ba42b\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"format\": \"pickle\",\n            \"reason\": \"the format can run code when loaded\",\n            \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\",\n            \"location\": \"b.pkl\"\n          }\n        }\n      ]\n    }\n  ],\n  \"last_check\": {\n    \"run_id\": 2,\n    \"trigger\": \"on_demand\",\n    \"sources\": {\n      \"picklescan\": \"ok\"\n    }\n  }\n}\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alerts weights-model --state all",
+   "argv": [
+    "alerts",
+    "weights-model",
+    "--state",
+    "all"
+   ],
+   "db": "md",
+   "stdout": "weights-model v2\nAlerts (2):\n  #2 MDB101 HIGH     open      weight_file_scan b.pkl (sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669)\n      evidence: picklescan <work>/model/b.pkl at 2026-11-19T09:00:00Z for sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669 (sha256 04a9908776809d0ff938611ce5ee266f6c3f518a21519f26f4c382652cdcfb04)\n  #3 MDB101 HIGH     fixed     weight_file_scan c.pkl (sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e)\n      evidence: inventory  at 2026-11-19T09:00:00Z for sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e (sha256 0809be4a6ac7a4a5b7d97efab75eb29c56a7e0e8150e331f183473810c9b2dad)\nExcepted (1):\n  #1 MDB101 HIGH     excepted  weight_file_scan a.pkl (sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546)\n      excepted: os.system by exception 1 (Owner, 2026-11-19T09:00:00Z)\nWatch events (2):\n  pickle_format sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\n      evidence: format-rule  at 2026-11-19T09:00:00Z for sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546 (sha256 f31e8a923eedf71537c7fce53f4a0dc05bd68e03f2c99796e557eee5edf05c94)\n  pickle_format sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\n      evidence: format-rule  at 2026-11-19T09:00:00Z for sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669 (sha256 52878f5640a7fea4408d4f342e5525f62d16e172302e9aa96bab0b55567ba42b)\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alerts weights-model --state all --json",
+   "argv": [
+    "alerts",
+    "weights-model",
+    "--state",
+    "all",
+    "--json"
+   ],
+   "db": "md",
+   "stdout": "{\n  \"model_id\": \"weights-model\",\n  \"current_version\": 2,\n  \"alerts\": [\n    {\n      \"alert_id\": 2,\n      \"rule_id\": \"MDB101\",\n      \"rule_doc\": \"docs/rules/MDB101.md\",\n      \"kind\": \"weight_file_scan\",\n      \"state\": \"open\",\n      \"severity\": \"HIGH\",\n      \"severity_origin\": \"policy\",\n      \"cause\": {\n        \"identifier\": \"sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\",\n        \"scanner\": \"picklescan\",\n        \"scanner_version\": \"1.0.5\",\n        \"location\": \"b.pkl\",\n        \"format\": \"pickle\",\n        \"dangerous\": [\n          \"builtins.eval\",\n          \"os.system\"\n        ],\n        \"suspicious\": [],\n        \"complete\": true,\n        \"position\": 31\n      },\n      \"opened_in_version\": 1,\n      \"current_version\": 2,\n      \"opened_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_at\": null,\n      \"closed_by_version\": null,\n      \"dismissal_reason\": null,\n      \"dismissed_by\": null,\n      \"note\": null,\n      \"evidence\": [\n        {\n          \"source\": \"picklescan\",\n          \"url\": \"<work>/model/b.pkl\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\",\n          \"original_sha256\": \"04a9908776809d0ff938611ce5ee266f6c3f518a21519f26f4c382652cdcfb04\",\n          \"body_sha256\": \"04a9908776809d0ff938611ce5ee266f6c3f518a21519f26f4c382652cdcfb04\",\n          \"canonical_sha256\": \"04a9908776809d0ff938611ce5ee266f6c3f518a21519f26f4c382652cdcfb04\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"scanner\": \"picklescan\",\n            \"scanner_version\": \"1.0.5\",\n            \"location\": \"b.pkl\",\n            \"format\": \"pickle\",\n            \"dangerous\": [\n              \"builtins.eval\",\n              \"os.system\"\n            ],\n            \"suspicious\": [],\n            \"complete\": true,\n            \"position\": 31\n          }\n        }\n      ]\n    },\n    {\n      \"alert_id\": 3,\n      \"rule_id\": \"MDB101\",\n      \"rule_doc\": \"docs/rules/MDB101.md\",\n      \"kind\": \"weight_file_scan\",\n      \"state\": \"fixed\",\n      \"severity\": \"HIGH\",\n      \"severity_origin\": \"policy\",\n      \"cause\": {\n        \"identifier\": \"sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e\",\n        \"scanner\": \"picklescan\",\n        \"scanner_version\": \"1.0.5\",\n        \"location\": \"c.pkl\",\n        \"format\": \"pickle\",\n        \"dangerous\": [\n          \"os.system\"\n        ],\n        \"suspicious\": [\n          \"model_dependabot_fixture.layers.CustomLayer\"\n        ],\n        \"complete\": true,\n        \"position\": 126\n      },\n      \"opened_in_version\": 1,\n      \"current_version\": 1,\n      \"opened_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_by_version\": 2,\n      \"dismissal_reason\": null,\n      \"dismissed_by\": null,\n      \"note\": null,\n      \"evidence\": [\n        {\n          \"source\": \"picklescan\",\n          \"url\": \"<work>/model/c.pkl\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e\",\n          \"original_sha256\": \"02bec51c114b5862a6a33be8f51fe13157871b2e5e942c7b57ae9851a05e36af\",\n          \"body_sha256\": \"02bec51c114b5862a6a33be8f51fe13157871b2e5e942c7b57ae9851a05e36af\",\n          \"canonical_sha256\": \"02bec51c114b5862a6a33be8f51fe13157871b2e5e942c7b57ae9851a05e36af\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"scanner\": \"picklescan\",\n            \"scanner_version\": \"1.0.5\",\n            \"location\": \"c.pkl\",\n            \"format\": \"pickle\",\n            \"dangerous\": [\n              \"os.system\"\n            ],\n            \"suspicious\": [\n              \"model_dependabot_fixture.layers.CustomLayer\"\n            ],\n            \"complete\": true,\n            \"position\": 126\n          }\n        },\n        {\n          \"source\": \"inventory\",\n          \"url\": \"\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e\",\n          \"original_sha256\": \"0809be4a6ac7a4a5b7d97efab75eb29c56a7e0e8150e331f183473810c9b2dad\",\n          \"body_sha256\": \"0809be4a6ac7a4a5b7d97efab75eb29c56a7e0e8150e331f183473810c9b2dad\",\n          \"canonical_sha256\": \"0809be4a6ac7a4a5b7d97efab75eb29c56a7e0e8150e331f183473810c9b2dad\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"previous_version\": 1,\n            \"version\": 2,\n            \"found\": null\n          }\n        }\n      ]\n    }\n  ],\n  \"excepted\": [\n    {\n      \"alert_id\": 1,\n      \"rule_id\": \"MDB101\",\n      \"rule_doc\": \"docs/rules/MDB101.md\",\n      \"kind\": \"weight_file_scan\",\n      \"state\": \"excepted\",\n      \"severity\": \"HIGH\",\n      \"severity_origin\": \"policy\",\n      \"cause\": {\n        \"identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n        \"scanner\": \"picklescan\",\n        \"scanner_version\": \"1.0.5\",\n        \"location\": \"a.pkl\",\n        \"format\": \"pickle\",\n        \"dangerous\": [\n          \"os.system\"\n        ],\n        \"suspicious\": [],\n        \"complete\": true,\n        \"position\": 48,\n        \"excepted\": [\n          {\n            \"global\": \"os.system\",\n            \"exception_id\": 1,\n            \"accepted_by\": \"Owner\",\n            \"recorded_at\": \"2026-11-19T09:00:00Z\",\n            \"expires_on\": null\n          }\n        ]\n      },\n      \"opened_in_version\": 1,\n      \"current_version\": 2,\n      \"opened_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_at\": null,\n      \"closed_by_version\": null,\n      \"dismissal_reason\": null,\n      \"dismissed_by\": null,\n      \"note\": null,\n      \"evidence\": [\n        {\n          \"source\": \"picklescan\",\n          \"url\": \"<work>/model/a.pkl\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n          \"original_sha256\": \"f0c71c43175ca476e5aa9f586be610aad1fa2d22d7e5b5f9593be5806a043aeb\",\n          \"body_sha256\": \"f0c71c43175ca476e5aa9f586be610aad1fa2d22d7e5b5f9593be5806a043aeb\",\n          \"canonical_sha256\": \"f0c71c43175ca476e5aa9f586be610aad1fa2d22d7e5b5f9593be5806a043aeb\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"scanner\": \"picklescan\",\n            \"scanner_version\": \"1.0.5\",\n            \"location\": \"a.pkl\",\n            \"format\": \"pickle\",\n            \"dangerous\": [\n              \"os.system\"\n            ],\n            \"suspicious\": [],\n            \"complete\": true,\n            \"position\": 48\n          }\n        },\n        {\n          \"source\": \"exception\",\n          \"url\": \"exception:1\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n          \"original_sha256\": \"36baefe8ab027559873988aa4c8a101a65dbe91f2ba2e0dc370ae7d0dc2ed6b8\",\n          \"body_sha256\": \"36baefe8ab027559873988aa4c8a101a65dbe91f2ba2e0dc370ae7d0dc2ed6b8\",\n          \"canonical_sha256\": \"36baefe8ab027559873988aa4c8a101a65dbe91f2ba2e0dc370ae7d0dc2ed6b8\",\n          \"redacted_fields\": [],\n          \"detail\": null\n        }\n      ]\n    }\n  ],\n  \"watch_events\": [\n    {\n      \"kind\": \"pickle_format\",\n      \"version\": 2,\n      \"identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n      \"detail\": {\n        \"format\": \"pickle\",\n        \"reason\": \"the format can run code when loaded\",\n        \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\",\n        \"location\": \"a.pkl\"\n      },\n      \"first_seen\": \"2026-11-19T09:00:00Z\",\n      \"last_seen\": \"2026-11-19T09:00:00Z\",\n      \"evidence\": [\n        {\n          \"source\": \"format-rule\",\n          \"url\": \"\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n          \"original_sha256\": \"f31e8a923eedf71537c7fce53f4a0dc05bd68e03f2c99796e557eee5edf05c94\",\n          \"body_sha256\": \"f31e8a923eedf71537c7fce53f4a0dc05bd68e03f2c99796e557eee5edf05c94\",\n          \"canonical_sha256\": \"f31e8a923eedf71537c7fce53f4a0dc05bd68e03f2c99796e557eee5edf05c94\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"format\": \"pickle\",\n            \"reason\": \"the format can run code when loaded\",\n            \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\",\n            \"location\": \"a.pkl\"\n          }\n        }\n      ]\n    },\n    {\n      \"kind\": \"pickle_format\",\n      \"version\": 2,\n      \"identifier\": \"sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\",\n      \"detail\": {\n        \"format\": \"pickle\",\n        \"reason\": \"the format can run code when loaded\",\n        \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\",\n        \"location\": \"b.pkl\"\n      },\n      \"first_seen\": \"2026-11-19T09:00:00Z\",\n      \"last_seen\": \"2026-11-19T09:00:00Z\",\n      \"evidence\": [\n        {\n          \"source\": \"format-rule\",\n          \"url\": \"\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\",\n          \"original_sha256\": \"52878f5640a7fea4408d4f342e5525f62d16e172302e9aa96bab0b55567ba42b\",\n          \"body_sha256\": \"52878f5640a7fea4408d4f342e5525f62d16e172302e9aa96bab0b55567ba42b\",\n          \"canonical_sha256\": \"52878f5640a7fea4408d4f342e5525f62d16e172302e9aa96bab0b55567ba42b\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"format\": \"pickle\",\n            \"reason\": \"the format can run code when loaded\",\n            \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\",\n            \"location\": \"b.pkl\"\n          }\n        }\n      ]\n    }\n  ],\n  \"last_check\": {\n    \"run_id\": 2,\n    \"trigger\": \"on_demand\",\n    \"sources\": {\n      \"picklescan\": \"ok\"\n    }\n  }\n}\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alerts weights-model",
+   "argv": [
+    "alerts",
+    "weights-model"
+   ],
+   "db": "md",
+   "stdout": "weights-model v2\nAlerts (1):\n  #2 MDB101 HIGH     open      weight_file_scan b.pkl (sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669)\n      evidence: picklescan <work>/model/b.pkl at 2026-11-19T09:00:00Z for sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669 (sha256 04a9908776809d0ff938611ce5ee266f6c3f518a21519f26f4c382652cdcfb04)\nExcepted (1):\n  #1 MDB101 HIGH     excepted  weight_file_scan a.pkl (sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546)\n      excepted: os.system by exception 1 (Owner, 2026-11-19T09:00:00Z)\nWatch events (2):\n  pickle_format sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\n      evidence: format-rule  at 2026-11-19T09:00:00Z for sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546 (sha256 f31e8a923eedf71537c7fce53f4a0dc05bd68e03f2c99796e557eee5edf05c94)\n  pickle_format sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\n      evidence: format-rule  at 2026-11-19T09:00:00Z for sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669 (sha256 52878f5640a7fea4408d4f342e5525f62d16e172302e9aa96bab0b55567ba42b)\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alerts weights-model --json",
+   "argv": [
+    "alerts",
+    "weights-model",
+    "--json"
+   ],
+   "db": "md",
+   "stdout": "{\n  \"model_id\": \"weights-model\",\n  \"current_version\": 2,\n  \"alerts\": [\n    {\n      \"alert_id\": 2,\n      \"rule_id\": \"MDB101\",\n      \"rule_doc\": \"docs/rules/MDB101.md\",\n      \"kind\": \"weight_file_scan\",\n      \"state\": \"open\",\n      \"severity\": \"HIGH\",\n      \"severity_origin\": \"policy\",\n      \"cause\": {\n        \"identifier\": \"sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\",\n        \"scanner\": \"picklescan\",\n        \"scanner_version\": \"1.0.5\",\n        \"location\": \"b.pkl\",\n        \"format\": \"pickle\",\n        \"dangerous\": [\n          \"builtins.eval\",\n          \"os.system\"\n        ],\n        \"suspicious\": [],\n        \"complete\": true,\n        \"position\": 31\n      },\n      \"opened_in_version\": 1,\n      \"current_version\": 2,\n      \"opened_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_at\": null,\n      \"closed_by_version\": null,\n      \"dismissal_reason\": null,\n      \"dismissed_by\": null,\n      \"note\": null,\n      \"evidence\": [\n        {\n          \"source\": \"picklescan\",\n          \"url\": \"<work>/model/b.pkl\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\",\n          \"original_sha256\": \"04a9908776809d0ff938611ce5ee266f6c3f518a21519f26f4c382652cdcfb04\",\n          \"body_sha256\": \"04a9908776809d0ff938611ce5ee266f6c3f518a21519f26f4c382652cdcfb04\",\n          \"canonical_sha256\": \"04a9908776809d0ff938611ce5ee266f6c3f518a21519f26f4c382652cdcfb04\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"scanner\": \"picklescan\",\n            \"scanner_version\": \"1.0.5\",\n            \"location\": \"b.pkl\",\n            \"format\": \"pickle\",\n            \"dangerous\": [\n              \"builtins.eval\",\n              \"os.system\"\n            ],\n            \"suspicious\": [],\n            \"complete\": true,\n            \"position\": 31\n          }\n        }\n      ]\n    }\n  ],\n  \"excepted\": [\n    {\n      \"alert_id\": 1,\n      \"rule_id\": \"MDB101\",\n      \"rule_doc\": \"docs/rules/MDB101.md\",\n      \"kind\": \"weight_file_scan\",\n      \"state\": \"excepted\",\n      \"severity\": \"HIGH\",\n      \"severity_origin\": \"policy\",\n      \"cause\": {\n        \"identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n        \"scanner\": \"picklescan\",\n        \"scanner_version\": \"1.0.5\",\n        \"location\": \"a.pkl\",\n        \"format\": \"pickle\",\n        \"dangerous\": [\n          \"os.system\"\n        ],\n        \"suspicious\": [],\n        \"complete\": true,\n        \"position\": 48,\n        \"excepted\": [\n          {\n            \"global\": \"os.system\",\n            \"exception_id\": 1,\n            \"accepted_by\": \"Owner\",\n            \"recorded_at\": \"2026-11-19T09:00:00Z\",\n            \"expires_on\": null\n          }\n        ]\n      },\n      \"opened_in_version\": 1,\n      \"current_version\": 2,\n      \"opened_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_at\": null,\n      \"closed_by_version\": null,\n      \"dismissal_reason\": null,\n      \"dismissed_by\": null,\n      \"note\": null,\n      \"evidence\": [\n        {\n          \"source\": \"picklescan\",\n          \"url\": \"<work>/model/a.pkl\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n          \"original_sha256\": \"f0c71c43175ca476e5aa9f586be610aad1fa2d22d7e5b5f9593be5806a043aeb\",\n          \"body_sha256\": \"f0c71c43175ca476e5aa9f586be610aad1fa2d22d7e5b5f9593be5806a043aeb\",\n          \"canonical_sha256\": \"f0c71c43175ca476e5aa9f586be610aad1fa2d22d7e5b5f9593be5806a043aeb\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"scanner\": \"picklescan\",\n            \"scanner_version\": \"1.0.5\",\n            \"location\": \"a.pkl\",\n            \"format\": \"pickle\",\n            \"dangerous\": [\n              \"os.system\"\n            ],\n            \"suspicious\": [],\n            \"complete\": true,\n            \"position\": 48\n          }\n        },\n        {\n          \"source\": \"exception\",\n          \"url\": \"exception:1\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n          \"original_sha256\": \"36baefe8ab027559873988aa4c8a101a65dbe91f2ba2e0dc370ae7d0dc2ed6b8\",\n          \"body_sha256\": \"36baefe8ab027559873988aa4c8a101a65dbe91f2ba2e0dc370ae7d0dc2ed6b8\",\n          \"canonical_sha256\": \"36baefe8ab027559873988aa4c8a101a65dbe91f2ba2e0dc370ae7d0dc2ed6b8\",\n          \"redacted_fields\": [],\n          \"detail\": null\n        }\n      ]\n    }\n  ],\n  \"watch_events\": [\n    {\n      \"kind\": \"pickle_format\",\n      \"version\": 2,\n      \"identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n      \"detail\": {\n        \"format\": \"pickle\",\n        \"reason\": \"the format can run code when loaded\",\n        \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\",\n        \"location\": \"a.pkl\"\n      },\n      \"first_seen\": \"2026-11-19T09:00:00Z\",\n      \"last_seen\": \"2026-11-19T09:00:00Z\",\n      \"evidence\": [\n        {\n          \"source\": \"format-rule\",\n          \"url\": \"\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n          \"original_sha256\": \"f31e8a923eedf71537c7fce53f4a0dc05bd68e03f2c99796e557eee5edf05c94\",\n          \"body_sha256\": \"f31e8a923eedf71537c7fce53f4a0dc05bd68e03f2c99796e557eee5edf05c94\",\n          \"canonical_sha256\": \"f31e8a923eedf71537c7fce53f4a0dc05bd68e03f2c99796e557eee5edf05c94\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"format\": \"pickle\",\n            \"reason\": \"the format can run code when loaded\",\n            \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\",\n            \"location\": \"a.pkl\"\n          }\n        }\n      ]\n    },\n    {\n      \"kind\": \"pickle_format\",\n      \"version\": 2,\n      \"identifier\": \"sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\",\n      \"detail\": {\n        \"format\": \"pickle\",\n        \"reason\": \"the format can run code when loaded\",\n        \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\",\n        \"location\": \"b.pkl\"\n      },\n      \"first_seen\": \"2026-11-19T09:00:00Z\",\n      \"last_seen\": \"2026-11-19T09:00:00Z\",\n      \"evidence\": [\n        {\n          \"source\": \"format-rule\",\n          \"url\": \"\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\",\n          \"original_sha256\": \"52878f5640a7fea4408d4f342e5525f62d16e172302e9aa96bab0b55567ba42b\",\n          \"body_sha256\": \"52878f5640a7fea4408d4f342e5525f62d16e172302e9aa96bab0b55567ba42b\",\n          \"canonical_sha256\": \"52878f5640a7fea4408d4f342e5525f62d16e172302e9aa96bab0b55567ba42b\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"format\": \"pickle\",\n            \"reason\": \"the format can run code when loaded\",\n            \"suggestion\": \"use a format that cannot run code when loaded: safetensors, ONNX or GGUF\",\n            \"location\": \"b.pkl\"\n          }\n        }\n      ]\n    }\n  ],\n  \"last_check\": {\n    \"run_id\": 2,\n    \"trigger\": \"on_demand\",\n    \"sources\": {\n      \"picklescan\": \"ok\"\n    }\n  }\n}\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "history weights-model",
+   "argv": [
+    "history",
+    "weights-model"
+   ],
+   "db": "md",
+   "stdout": "weights-model v2\nHistory (1):\n  #3 fixed     at 2026-11-19T09:00:00Z by version 2; HIGH weight_file_scan c.pkl (sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e)\n      evidence: inventory  at 2026-11-19T09:00:00Z for sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e (sha256 0809be4a6ac7a4a5b7d97efab75eb29c56a7e0e8150e331f183473810c9b2dad)\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "history weights-model --json",
+   "argv": [
+    "history",
+    "weights-model",
+    "--json"
+   ],
+   "db": "md",
+   "stdout": "{\n  \"model_id\": \"weights-model\",\n  \"current_version\": 2,\n  \"history\": [\n    {\n      \"alert_id\": 3,\n      \"rule_id\": \"MDB101\",\n      \"rule_doc\": \"docs/rules/MDB101.md\",\n      \"kind\": \"weight_file_scan\",\n      \"outcome\": \"fixed\",\n      \"severity\": \"HIGH\",\n      \"cause\": {\n        \"identifier\": \"sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e\",\n        \"scanner\": \"picklescan\",\n        \"scanner_version\": \"1.0.5\",\n        \"location\": \"c.pkl\",\n        \"format\": \"pickle\",\n        \"dangerous\": [\n          \"os.system\"\n        ],\n        \"suspicious\": [\n          \"model_dependabot_fixture.layers.CustomLayer\"\n        ],\n        \"complete\": true,\n        \"position\": 126\n      },\n      \"opened_in_version\": 1,\n      \"closed_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_by_version\": 2,\n      \"dismissal_reason\": null,\n      \"dismissed_by\": null,\n      \"note\": null,\n      \"evidence\": [\n        {\n          \"source\": \"picklescan\",\n          \"url\": \"<work>/model/c.pkl\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e\",\n          \"original_sha256\": \"02bec51c114b5862a6a33be8f51fe13157871b2e5e942c7b57ae9851a05e36af\",\n          \"body_sha256\": \"02bec51c114b5862a6a33be8f51fe13157871b2e5e942c7b57ae9851a05e36af\",\n          \"canonical_sha256\": \"02bec51c114b5862a6a33be8f51fe13157871b2e5e942c7b57ae9851a05e36af\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"scanner\": \"picklescan\",\n            \"scanner_version\": \"1.0.5\",\n            \"location\": \"c.pkl\",\n            \"format\": \"pickle\",\n            \"dangerous\": [\n              \"os.system\"\n            ],\n            \"suspicious\": [\n              \"model_dependabot_fixture.layers.CustomLayer\"\n            ],\n            \"complete\": true,\n            \"position\": 126\n          }\n        },\n        {\n          \"source\": \"inventory\",\n          \"url\": \"\",\n          \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n          \"matched_identifier\": \"sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e\",\n          \"original_sha256\": \"0809be4a6ac7a4a5b7d97efab75eb29c56a7e0e8150e331f183473810c9b2dad\",\n          \"body_sha256\": \"0809be4a6ac7a4a5b7d97efab75eb29c56a7e0e8150e331f183473810c9b2dad\",\n          \"canonical_sha256\": \"0809be4a6ac7a4a5b7d97efab75eb29c56a7e0e8150e331f183473810c9b2dad\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"previous_version\": 1,\n            \"version\": 2,\n            \"found\": null\n          }\n        }\n      ]\n    }\n  ]\n}\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alerts pillow-model --state open",
+   "argv": [
+    "alerts",
+    "pillow-model",
+    "--state",
+    "open"
+   ],
+   "db": "md",
+   "stdout": "pillow-model v1\nAlerts (0):\nWatch events (0):\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alerts pillow-model --state open --json",
+   "argv": [
+    "alerts",
+    "pillow-model",
+    "--state",
+    "open",
+    "--json"
+   ],
+   "db": "md",
+   "stdout": "{\n  \"model_id\": \"pillow-model\",\n  \"current_version\": 1,\n  \"alerts\": [],\n  \"excepted\": [],\n  \"watch_events\": [],\n  \"last_check\": {\n    \"run_id\": 4,\n    \"trigger\": \"on_demand\",\n    \"sources\": {\n      \"osv\": \"ok\"\n    }\n  }\n}\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alerts pillow-model --state excepted",
+   "argv": [
+    "alerts",
+    "pillow-model",
+    "--state",
+    "excepted"
+   ],
+   "db": "md",
+   "stdout": "pillow-model v1\nAlerts (0):\nWatch events (0):\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alerts pillow-model --state excepted --json",
+   "argv": [
+    "alerts",
+    "pillow-model",
+    "--state",
+    "excepted",
+    "--json"
+   ],
+   "db": "md",
+   "stdout": "{\n  \"model_id\": \"pillow-model\",\n  \"current_version\": 1,\n  \"alerts\": [],\n  \"excepted\": [],\n  \"watch_events\": [],\n  \"last_check\": {\n    \"run_id\": 4,\n    \"trigger\": \"on_demand\",\n    \"sources\": {\n      \"osv\": \"ok\"\n    }\n  }\n}\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alerts pillow-model --state closed",
+   "argv": [
+    "alerts",
+    "pillow-model",
+    "--state",
+    "closed"
+   ],
+   "db": "md",
+   "stdout": "pillow-model v1\nAlerts (2):\n  #5 MDB201 HIGH     withdrawn GHSA-cp9v-662q-vvx9 pillow==12.3.0 (fixed: 13.0.0)\n      evidence: osv.dev https://api.osv.dev/v1/vulns/GHSA-cp9v-662q-vvx9 at 2026-10-24T03:54:34Z for pkg:pypi/pillow@12.3.0 (sha256 1d8bdb7361ae4266493a3ceedcefc1b37e302592d417dfe24470b949d9870dec)\n  #4 MDB201 MODERATE dismissed GHSA-24rc-8hj2-v98c pillow==12.3.0 (fixed: 13.0.0)\n      evidence: osv.dev https://api.osv.dev/v1/vulns/GHSA-24rc-8hj2-v98c at 2026-10-24T03:54:34Z for pkg:pypi/pillow@12.3.0 (sha256 0c55109d0dfa24694acd53c4b084b3d0d92dacfe0bd0bee9c54c8a81e0c99630)\nWatch events (0):\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alerts pillow-model --state closed --json",
+   "argv": [
+    "alerts",
+    "pillow-model",
+    "--state",
+    "closed",
+    "--json"
+   ],
+   "db": "md",
+   "stdout": "{\n  \"model_id\": \"pillow-model\",\n  \"current_version\": 1,\n  \"alerts\": [\n    {\n      \"alert_id\": 5,\n      \"rule_id\": \"MDB201\",\n      \"rule_doc\": \"docs/rules/MDB201.md\",\n      \"kind\": \"package_advisory\",\n      \"state\": \"withdrawn\",\n      \"severity\": \"HIGH\",\n      \"severity_origin\": \"database_specific\",\n      \"cause\": {\n        \"advisory_id\": \"GHSA-cp9v-662q-vvx9\",\n        \"advisory_ids\": [\n          \"GHSA-cp9v-662q-vvx9\"\n        ],\n        \"aliases\": [\n          \"CVE-2026-112405\"\n        ],\n        \"source\": \"osv.dev\",\n        \"package\": \"pillow\",\n        \"version\": \"12.3.0\",\n        \"identifier\": \"pkg:pypi/pillow@12.3.0\",\n        \"affected\": [\n          {\n            \"type\": \"ECOSYSTEM\",\n            \"events\": [\n              {\n                \"introduced\": \"12.0.0\"\n              },\n              {\n                \"fixed\": \"13.0.0\"\n              }\n            ]\n          }\n        ],\n        \"fixed\": [\n          \"13.0.0\"\n        ],\n        \"severity_from\": \"GHSA-cp9v-662q-vvx9\"\n      },\n      \"opened_in_version\": 1,\n      \"current_version\": 1,\n      \"opened_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_by_version\": null,\n      \"dismissal_reason\": null,\n      \"dismissed_by\": null,\n      \"note\": null,\n      \"evidence\": [\n        {\n          \"source\": \"osv.dev\",\n          \"url\": \"https://api.osv.dev/v1/vulns/GHSA-cp9v-662q-vvx9\",\n          \"retrieved_at\": \"2026-10-24T03:54:34Z\",\n          \"matched_identifier\": \"pkg:pypi/pillow@12.3.0\",\n          \"original_sha256\": \"06817cc362a0d7630586e8ecac6a89b29401452d5bf4343c534014662a81a658\",\n          \"body_sha256\": \"06817cc362a0d7630586e8ecac6a89b29401452d5bf4343c534014662a81a658\",\n          \"canonical_sha256\": \"8013b6b9397ef76335ea61b9760d59fdab684c6a9be05f65b0864a98eae354eb\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"osv_match\": true,\n            \"local_match\": true,\n            \"query_url\": \"https://api.osv.dev/v1/querybatch\",\n            \"query_sha256\": \"d219627ec408b3741b205a5632d6d468a87ea4d9e087e28841857552b9396b16\"\n          }\n        },\n        {\n          \"source\": \"osv.dev\",\n          \"url\": \"https://api.osv.dev/v1/vulns/GHSA-cp9v-662q-vvx9\",\n          \"retrieved_at\": \"2026-10-24T03:54:34Z\",\n          \"matched_identifier\": \"pkg:pypi/pillow@12.3.0\",\n          \"original_sha256\": \"1d8bdb7361ae4266493a3ceedcefc1b37e302592d417dfe24470b949d9870dec\",\n          \"body_sha256\": \"1d8bdb7361ae4266493a3ceedcefc1b37e302592d417dfe24470b949d9870dec\",\n          \"canonical_sha256\": \"ccc130ce3c33510041a59a5cb3473fe54153aaebfd70bb94693159f11be2dbe3\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"withdrawn\": \"2026-11-18T00:00:00Z\",\n            \"query_url\": \"https://api.osv.dev/v1/querybatch\",\n            \"query_sha256\": \"d219627ec408b3741b205a5632d6d468a87ea4d9e087e28841857552b9396b16\"\n          }\n        }\n      ]\n    },\n    {\n      \"alert_id\": 4,\n      \"rule_id\": \"MDB201\",\n      \"rule_doc\": \"docs/rules/MDB201.md\",\n      \"kind\": \"package_advisory\",\n      \"state\": \"dismissed\",\n      \"severity\": \"MODERATE\",\n      \"severity_origin\": \"database_specific\",\n      \"cause\": {\n        \"advisory_id\": \"GHSA-24rc-8hj2-v98c\",\n        \"advisory_ids\": [\n          \"GHSA-24rc-8hj2-v98c\"\n        ],\n        \"aliases\": [\n          \"CVE-2026-96638\"\n        ],\n        \"source\": \"osv.dev\",\n        \"package\": \"pillow\",\n        \"version\": \"12.3.0\",\n        \"identifier\": \"pkg:pypi/pillow@12.3.0\",\n        \"affected\": [\n          {\n            \"type\": \"ECOSYSTEM\",\n            \"events\": [\n              {\n                \"introduced\": \"9.1.0\"\n              },\n              {\n                \"fixed\": \"13.0.0\"\n              }\n            ]\n          }\n        ],\n        \"fixed\": [\n          \"13.0.0\"\n        ],\n        \"severity_from\": \"GHSA-24rc-8hj2-v98c\"\n      },\n      \"opened_in_version\": 1,\n      \"current_version\": 1,\n      \"opened_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_by_version\": null,\n      \"dismissal_reason\": \"not_used_at_runtime\",\n      \"dismissed_by\": \"Owner\",\n      \"note\": \"the code path is not loaded\",\n      \"evidence\": [\n        {\n          \"source\": \"osv.dev\",\n          \"url\": \"https://api.osv.dev/v1/vulns/GHSA-24rc-8hj2-v98c\",\n          \"retrieved_at\": \"2026-10-24T03:54:34Z\",\n          \"matched_identifier\": \"pkg:pypi/pillow@12.3.0\",\n          \"original_sha256\": \"0c55109d0dfa24694acd53c4b084b3d0d92dacfe0bd0bee9c54c8a81e0c99630\",\n          \"body_sha256\": \"0c55109d0dfa24694acd53c4b084b3d0d92dacfe0bd0bee9c54c8a81e0c99630\",\n          \"canonical_sha256\": \"75ee94e6099a3201028b9480ffea199ec417338ceb3adf61d8577d9bcd084eeb\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"osv_match\": true,\n            \"local_match\": true,\n            \"query_url\": \"https://api.osv.dev/v1/querybatch\",\n            \"query_sha256\": \"d219627ec408b3741b205a5632d6d468a87ea4d9e087e28841857552b9396b16\"\n          }\n        }\n      ]\n    }\n  ],\n  \"excepted\": [],\n  \"watch_events\": [],\n  \"last_check\": {\n    \"run_id\": 4,\n    \"trigger\": \"on_demand\",\n    \"sources\": {\n      \"osv\": \"ok\"\n    }\n  }\n}\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alerts pillow-model --state all",
+   "argv": [
+    "alerts",
+    "pillow-model",
+    "--state",
+    "all"
+   ],
+   "db": "md",
+   "stdout": "pillow-model v1\nAlerts (2):\n  #5 MDB201 HIGH     withdrawn GHSA-cp9v-662q-vvx9 pillow==12.3.0 (fixed: 13.0.0)\n      evidence: osv.dev https://api.osv.dev/v1/vulns/GHSA-cp9v-662q-vvx9 at 2026-10-24T03:54:34Z for pkg:pypi/pillow@12.3.0 (sha256 1d8bdb7361ae4266493a3ceedcefc1b37e302592d417dfe24470b949d9870dec)\n  #4 MDB201 MODERATE dismissed GHSA-24rc-8hj2-v98c pillow==12.3.0 (fixed: 13.0.0)\n      evidence: osv.dev https://api.osv.dev/v1/vulns/GHSA-24rc-8hj2-v98c at 2026-10-24T03:54:34Z for pkg:pypi/pillow@12.3.0 (sha256 0c55109d0dfa24694acd53c4b084b3d0d92dacfe0bd0bee9c54c8a81e0c99630)\nWatch events (0):\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alerts pillow-model --state all --json",
+   "argv": [
+    "alerts",
+    "pillow-model",
+    "--state",
+    "all",
+    "--json"
+   ],
+   "db": "md",
+   "stdout": "{\n  \"model_id\": \"pillow-model\",\n  \"current_version\": 1,\n  \"alerts\": [\n    {\n      \"alert_id\": 5,\n      \"rule_id\": \"MDB201\",\n      \"rule_doc\": \"docs/rules/MDB201.md\",\n      \"kind\": \"package_advisory\",\n      \"state\": \"withdrawn\",\n      \"severity\": \"HIGH\",\n      \"severity_origin\": \"database_specific\",\n      \"cause\": {\n        \"advisory_id\": \"GHSA-cp9v-662q-vvx9\",\n        \"advisory_ids\": [\n          \"GHSA-cp9v-662q-vvx9\"\n        ],\n        \"aliases\": [\n          \"CVE-2026-112405\"\n        ],\n        \"source\": \"osv.dev\",\n        \"package\": \"pillow\",\n        \"version\": \"12.3.0\",\n        \"identifier\": \"pkg:pypi/pillow@12.3.0\",\n        \"affected\": [\n          {\n            \"type\": \"ECOSYSTEM\",\n            \"events\": [\n              {\n                \"introduced\": \"12.0.0\"\n              },\n              {\n                \"fixed\": \"13.0.0\"\n              }\n            ]\n          }\n        ],\n        \"fixed\": [\n          \"13.0.0\"\n        ],\n        \"severity_from\": \"GHSA-cp9v-662q-vvx9\"\n      },\n      \"opened_in_version\": 1,\n      \"current_version\": 1,\n      \"opened_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_by_version\": null,\n      \"dismissal_reason\": null,\n      \"dismissed_by\": null,\n      \"note\": null,\n      \"evidence\": [\n        {\n          \"source\": \"osv.dev\",\n          \"url\": \"https://api.osv.dev/v1/vulns/GHSA-cp9v-662q-vvx9\",\n          \"retrieved_at\": \"2026-10-24T03:54:34Z\",\n          \"matched_identifier\": \"pkg:pypi/pillow@12.3.0\",\n          \"original_sha256\": \"06817cc362a0d7630586e8ecac6a89b29401452d5bf4343c534014662a81a658\",\n          \"body_sha256\": \"06817cc362a0d7630586e8ecac6a89b29401452d5bf4343c534014662a81a658\",\n          \"canonical_sha256\": \"8013b6b9397ef76335ea61b9760d59fdab684c6a9be05f65b0864a98eae354eb\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"osv_match\": true,\n            \"local_match\": true,\n            \"query_url\": \"https://api.osv.dev/v1/querybatch\",\n            \"query_sha256\": \"d219627ec408b3741b205a5632d6d468a87ea4d9e087e28841857552b9396b16\"\n          }\n        },\n        {\n          \"source\": \"osv.dev\",\n          \"url\": \"https://api.osv.dev/v1/vulns/GHSA-cp9v-662q-vvx9\",\n          \"retrieved_at\": \"2026-10-24T03:54:34Z\",\n          \"matched_identifier\": \"pkg:pypi/pillow@12.3.0\",\n          \"original_sha256\": \"1d8bdb7361ae4266493a3ceedcefc1b37e302592d417dfe24470b949d9870dec\",\n          \"body_sha256\": \"1d8bdb7361ae4266493a3ceedcefc1b37e302592d417dfe24470b949d9870dec\",\n          \"canonical_sha256\": \"ccc130ce3c33510041a59a5cb3473fe54153aaebfd70bb94693159f11be2dbe3\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"withdrawn\": \"2026-11-18T00:00:00Z\",\n            \"query_url\": \"https://api.osv.dev/v1/querybatch\",\n            \"query_sha256\": \"d219627ec408b3741b205a5632d6d468a87ea4d9e087e28841857552b9396b16\"\n          }\n        }\n      ]\n    },\n    {\n      \"alert_id\": 4,\n      \"rule_id\": \"MDB201\",\n      \"rule_doc\": \"docs/rules/MDB201.md\",\n      \"kind\": \"package_advisory\",\n      \"state\": \"dismissed\",\n      \"severity\": \"MODERATE\",\n      \"severity_origin\": \"database_specific\",\n      \"cause\": {\n        \"advisory_id\": \"GHSA-24rc-8hj2-v98c\",\n        \"advisory_ids\": [\n          \"GHSA-24rc-8hj2-v98c\"\n        ],\n        \"aliases\": [\n          \"CVE-2026-96638\"\n        ],\n        \"source\": \"osv.dev\",\n        \"package\": \"pillow\",\n        \"version\": \"12.3.0\",\n        \"identifier\": \"pkg:pypi/pillow@12.3.0\",\n        \"affected\": [\n          {\n            \"type\": \"ECOSYSTEM\",\n            \"events\": [\n              {\n                \"introduced\": \"9.1.0\"\n              },\n              {\n                \"fixed\": \"13.0.0\"\n              }\n            ]\n          }\n        ],\n        \"fixed\": [\n          \"13.0.0\"\n        ],\n        \"severity_from\": \"GHSA-24rc-8hj2-v98c\"\n      },\n      \"opened_in_version\": 1,\n      \"current_version\": 1,\n      \"opened_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_by_version\": null,\n      \"dismissal_reason\": \"not_used_at_runtime\",\n      \"dismissed_by\": \"Owner\",\n      \"note\": \"the code path is not loaded\",\n      \"evidence\": [\n        {\n          \"source\": \"osv.dev\",\n          \"url\": \"https://api.osv.dev/v1/vulns/GHSA-24rc-8hj2-v98c\",\n          \"retrieved_at\": \"2026-10-24T03:54:34Z\",\n          \"matched_identifier\": \"pkg:pypi/pillow@12.3.0\",\n          \"original_sha256\": \"0c55109d0dfa24694acd53c4b084b3d0d92dacfe0bd0bee9c54c8a81e0c99630\",\n          \"body_sha256\": \"0c55109d0dfa24694acd53c4b084b3d0d92dacfe0bd0bee9c54c8a81e0c99630\",\n          \"canonical_sha256\": \"75ee94e6099a3201028b9480ffea199ec417338ceb3adf61d8577d9bcd084eeb\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"osv_match\": true,\n            \"local_match\": true,\n            \"query_url\": \"https://api.osv.dev/v1/querybatch\",\n            \"query_sha256\": \"d219627ec408b3741b205a5632d6d468a87ea4d9e087e28841857552b9396b16\"\n          }\n        }\n      ]\n    }\n  ],\n  \"excepted\": [],\n  \"watch_events\": [],\n  \"last_check\": {\n    \"run_id\": 4,\n    \"trigger\": \"on_demand\",\n    \"sources\": {\n      \"osv\": \"ok\"\n    }\n  }\n}\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alerts pillow-model",
+   "argv": [
+    "alerts",
+    "pillow-model"
+   ],
+   "db": "md",
+   "stdout": "pillow-model v1\nAlerts (0):\nWatch events (0):\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alerts pillow-model --json",
+   "argv": [
+    "alerts",
+    "pillow-model",
+    "--json"
+   ],
+   "db": "md",
+   "stdout": "{\n  \"model_id\": \"pillow-model\",\n  \"current_version\": 1,\n  \"alerts\": [],\n  \"excepted\": [],\n  \"watch_events\": [],\n  \"last_check\": {\n    \"run_id\": 4,\n    \"trigger\": \"on_demand\",\n    \"sources\": {\n      \"osv\": \"ok\"\n    }\n  }\n}\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "history pillow-model",
+   "argv": [
+    "history",
+    "pillow-model"
+   ],
+   "db": "md",
+   "stdout": "pillow-model v1\nHistory (2):\n  #4 dismissed at 2026-11-19T09:00:00Z not_used_at_runtime by Owner: the code path is not loaded; MODERATE GHSA-24rc-8hj2-v98c pillow==12.3.0 (fixed: 13.0.0)\n      evidence: osv.dev https://api.osv.dev/v1/vulns/GHSA-24rc-8hj2-v98c at 2026-10-24T03:54:34Z for pkg:pypi/pillow@12.3.0 (sha256 0c55109d0dfa24694acd53c4b084b3d0d92dacfe0bd0bee9c54c8a81e0c99630)\n  #5 withdrawn at 2026-11-19T09:00:00Z by its source; HIGH GHSA-cp9v-662q-vvx9 pillow==12.3.0 (fixed: 13.0.0)\n      evidence: osv.dev https://api.osv.dev/v1/vulns/GHSA-cp9v-662q-vvx9 at 2026-10-24T03:54:34Z for pkg:pypi/pillow@12.3.0 (sha256 1d8bdb7361ae4266493a3ceedcefc1b37e302592d417dfe24470b949d9870dec)\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "history pillow-model --json",
+   "argv": [
+    "history",
+    "pillow-model",
+    "--json"
+   ],
+   "db": "md",
+   "stdout": "{\n  \"model_id\": \"pillow-model\",\n  \"current_version\": 1,\n  \"history\": [\n    {\n      \"alert_id\": 4,\n      \"rule_id\": \"MDB201\",\n      \"rule_doc\": \"docs/rules/MDB201.md\",\n      \"kind\": \"package_advisory\",\n      \"outcome\": \"dismissed\",\n      \"severity\": \"MODERATE\",\n      \"cause\": {\n        \"advisory_id\": \"GHSA-24rc-8hj2-v98c\",\n        \"advisory_ids\": [\n          \"GHSA-24rc-8hj2-v98c\"\n        ],\n        \"aliases\": [\n          \"CVE-2026-96638\"\n        ],\n        \"source\": \"osv.dev\",\n        \"package\": \"pillow\",\n        \"version\": \"12.3.0\",\n        \"identifier\": \"pkg:pypi/pillow@12.3.0\",\n        \"affected\": [\n          {\n            \"type\": \"ECOSYSTEM\",\n            \"events\": [\n              {\n                \"introduced\": \"9.1.0\"\n              },\n              {\n                \"fixed\": \"13.0.0\"\n              }\n            ]\n          }\n        ],\n        \"fixed\": [\n          \"13.0.0\"\n        ],\n        \"severity_from\": \"GHSA-24rc-8hj2-v98c\"\n      },\n      \"opened_in_version\": 1,\n      \"closed_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_by_version\": null,\n      \"dismissal_reason\": \"not_used_at_runtime\",\n      \"dismissed_by\": \"Owner\",\n      \"note\": \"the code path is not loaded\",\n      \"evidence\": [\n        {\n          \"source\": \"osv.dev\",\n          \"url\": \"https://api.osv.dev/v1/vulns/GHSA-24rc-8hj2-v98c\",\n          \"retrieved_at\": \"2026-10-24T03:54:34Z\",\n          \"matched_identifier\": \"pkg:pypi/pillow@12.3.0\",\n          \"original_sha256\": \"0c55109d0dfa24694acd53c4b084b3d0d92dacfe0bd0bee9c54c8a81e0c99630\",\n          \"body_sha256\": \"0c55109d0dfa24694acd53c4b084b3d0d92dacfe0bd0bee9c54c8a81e0c99630\",\n          \"canonical_sha256\": \"75ee94e6099a3201028b9480ffea199ec417338ceb3adf61d8577d9bcd084eeb\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"osv_match\": true,\n            \"local_match\": true,\n            \"query_url\": \"https://api.osv.dev/v1/querybatch\",\n            \"query_sha256\": \"d219627ec408b3741b205a5632d6d468a87ea4d9e087e28841857552b9396b16\"\n          }\n        }\n      ]\n    },\n    {\n      \"alert_id\": 5,\n      \"rule_id\": \"MDB201\",\n      \"rule_doc\": \"docs/rules/MDB201.md\",\n      \"kind\": \"package_advisory\",\n      \"outcome\": \"withdrawn\",\n      \"severity\": \"HIGH\",\n      \"cause\": {\n        \"advisory_id\": \"GHSA-cp9v-662q-vvx9\",\n        \"advisory_ids\": [\n          \"GHSA-cp9v-662q-vvx9\"\n        ],\n        \"aliases\": [\n          \"CVE-2026-112405\"\n        ],\n        \"source\": \"osv.dev\",\n        \"package\": \"pillow\",\n        \"version\": \"12.3.0\",\n        \"identifier\": \"pkg:pypi/pillow@12.3.0\",\n        \"affected\": [\n          {\n            \"type\": \"ECOSYSTEM\",\n            \"events\": [\n              {\n                \"introduced\": \"12.0.0\"\n              },\n              {\n                \"fixed\": \"13.0.0\"\n              }\n            ]\n          }\n        ],\n        \"fixed\": [\n          \"13.0.0\"\n        ],\n        \"severity_from\": \"GHSA-cp9v-662q-vvx9\"\n      },\n      \"opened_in_version\": 1,\n      \"closed_at\": \"2026-11-19T09:00:00Z\",\n      \"closed_by_version\": null,\n      \"dismissal_reason\": null,\n      \"dismissed_by\": null,\n      \"note\": null,\n      \"evidence\": [\n        {\n          \"source\": \"osv.dev\",\n          \"url\": \"https://api.osv.dev/v1/vulns/GHSA-cp9v-662q-vvx9\",\n          \"retrieved_at\": \"2026-10-24T03:54:34Z\",\n          \"matched_identifier\": \"pkg:pypi/pillow@12.3.0\",\n          \"original_sha256\": \"06817cc362a0d7630586e8ecac6a89b29401452d5bf4343c534014662a81a658\",\n          \"body_sha256\": \"06817cc362a0d7630586e8ecac6a89b29401452d5bf4343c534014662a81a658\",\n          \"canonical_sha256\": \"8013b6b9397ef76335ea61b9760d59fdab684c6a9be05f65b0864a98eae354eb\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"osv_match\": true,\n            \"local_match\": true,\n            \"query_url\": \"https://api.osv.dev/v1/querybatch\",\n            \"query_sha256\": \"d219627ec408b3741b205a5632d6d468a87ea4d9e087e28841857552b9396b16\"\n          }\n        },\n        {\n          \"source\": \"osv.dev\",\n          \"url\": \"https://api.osv.dev/v1/vulns/GHSA-cp9v-662q-vvx9\",\n          \"retrieved_at\": \"2026-10-24T03:54:34Z\",\n          \"matched_identifier\": \"pkg:pypi/pillow@12.3.0\",\n          \"original_sha256\": \"1d8bdb7361ae4266493a3ceedcefc1b37e302592d417dfe24470b949d9870dec\",\n          \"body_sha256\": \"1d8bdb7361ae4266493a3ceedcefc1b37e302592d417dfe24470b949d9870dec\",\n          \"canonical_sha256\": \"ccc130ce3c33510041a59a5cb3473fe54153aaebfd70bb94693159f11be2dbe3\",\n          \"redacted_fields\": [],\n          \"detail\": {\n            \"withdrawn\": \"2026-11-18T00:00:00Z\",\n            \"query_url\": \"https://api.osv.dev/v1/querybatch\",\n            \"query_sha256\": \"d219627ec408b3741b205a5632d6d468a87ea4d9e087e28841857552b9396b16\"\n          }\n        }\n      ]\n    }\n  ]\n}\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alert show open",
+   "argv": [
+    "alert",
+    "show",
+    "2"
+   ],
+   "db": "md",
+   "stdout": "#2 MDB101 HIGH     open      weight_file_scan b.pkl (sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669)\nModel: weights-model\n  picklescan <work>/model/b.pkl at 2026-11-19T09:00:00Z for sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669 (sha256 04a9908776809d0ff938611ce5ee266f6c3f518a21519f26f4c382652cdcfb04)\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alert show open --json",
+   "argv": [
+    "alert",
+    "show",
+    "2",
+    "--json"
+   ],
+   "db": "md",
+   "stdout": "{\n  \"model_id\": \"weights-model\",\n  \"alert_id\": 2,\n  \"rule_id\": \"MDB101\",\n  \"rule_doc\": \"docs/rules/MDB101.md\",\n  \"kind\": \"weight_file_scan\",\n  \"state\": \"open\",\n  \"severity\": \"HIGH\",\n  \"severity_origin\": \"policy\",\n  \"cause\": {\n    \"identifier\": \"sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\",\n    \"scanner\": \"picklescan\",\n    \"scanner_version\": \"1.0.5\",\n    \"location\": \"b.pkl\",\n    \"format\": \"pickle\",\n    \"dangerous\": [\n      \"builtins.eval\",\n      \"os.system\"\n    ],\n    \"suspicious\": [],\n    \"complete\": true,\n    \"position\": 31\n  },\n  \"opened_in_version\": 1,\n  \"current_version\": 2,\n  \"opened_at\": \"2026-11-19T09:00:00Z\",\n  \"closed_at\": null,\n  \"closed_by_version\": null,\n  \"dismissal_reason\": null,\n  \"dismissed_by\": null,\n  \"note\": null,\n  \"evidence\": [\n    {\n      \"source\": \"picklescan\",\n      \"url\": \"<work>/model/b.pkl\",\n      \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n      \"matched_identifier\": \"sha256:394ff1368bb03f636f7ce1c78dc2f6b937d1f26eb30b11e7fa5cd6276a721669\",\n      \"original_sha256\": \"04a9908776809d0ff938611ce5ee266f6c3f518a21519f26f4c382652cdcfb04\",\n      \"body_sha256\": \"04a9908776809d0ff938611ce5ee266f6c3f518a21519f26f4c382652cdcfb04\",\n      \"canonical_sha256\": \"04a9908776809d0ff938611ce5ee266f6c3f518a21519f26f4c382652cdcfb04\",\n      \"redacted_fields\": [],\n      \"detail\": {\n        \"scanner\": \"picklescan\",\n        \"scanner_version\": \"1.0.5\",\n        \"location\": \"b.pkl\",\n        \"format\": \"pickle\",\n        \"dangerous\": [\n          \"builtins.eval\",\n          \"os.system\"\n        ],\n        \"suspicious\": [],\n        \"complete\": true,\n        \"position\": 31\n      }\n    }\n  ]\n}\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alert show excepted",
+   "argv": [
+    "alert",
+    "show",
+    "1"
+   ],
+   "db": "md",
+   "stdout": "#1 MDB101 HIGH     excepted  weight_file_scan a.pkl (sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546)\nModel: weights-model\n  picklescan <work>/model/a.pkl at 2026-11-19T09:00:00Z for sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546 (sha256 f0c71c43175ca476e5aa9f586be610aad1fa2d22d7e5b5f9593be5806a043aeb)\n  exception exception:1 at 2026-11-19T09:00:00Z for sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546 (sha256 36baefe8ab027559873988aa4c8a101a65dbe91f2ba2e0dc370ae7d0dc2ed6b8)\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alert show excepted --json",
+   "argv": [
+    "alert",
+    "show",
+    "1",
+    "--json"
+   ],
+   "db": "md",
+   "stdout": "{\n  \"model_id\": \"weights-model\",\n  \"alert_id\": 1,\n  \"rule_id\": \"MDB101\",\n  \"rule_doc\": \"docs/rules/MDB101.md\",\n  \"kind\": \"weight_file_scan\",\n  \"state\": \"excepted\",\n  \"severity\": \"HIGH\",\n  \"severity_origin\": \"policy\",\n  \"cause\": {\n    \"identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n    \"scanner\": \"picklescan\",\n    \"scanner_version\": \"1.0.5\",\n    \"location\": \"a.pkl\",\n    \"format\": \"pickle\",\n    \"dangerous\": [\n      \"os.system\"\n    ],\n    \"suspicious\": [],\n    \"complete\": true,\n    \"position\": 48,\n    \"excepted\": [\n      {\n        \"global\": \"os.system\",\n        \"exception_id\": 1,\n        \"accepted_by\": \"Owner\",\n        \"recorded_at\": \"2026-11-19T09:00:00Z\",\n        \"expires_on\": null\n      }\n    ]\n  },\n  \"opened_in_version\": 1,\n  \"current_version\": 2,\n  \"opened_at\": \"2026-11-19T09:00:00Z\",\n  \"closed_at\": null,\n  \"closed_by_version\": null,\n  \"dismissal_reason\": null,\n  \"dismissed_by\": null,\n  \"note\": null,\n  \"evidence\": [\n    {\n      \"source\": \"picklescan\",\n      \"url\": \"<work>/model/a.pkl\",\n      \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n      \"matched_identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n      \"original_sha256\": \"f0c71c43175ca476e5aa9f586be610aad1fa2d22d7e5b5f9593be5806a043aeb\",\n      \"body_sha256\": \"f0c71c43175ca476e5aa9f586be610aad1fa2d22d7e5b5f9593be5806a043aeb\",\n      \"canonical_sha256\": \"f0c71c43175ca476e5aa9f586be610aad1fa2d22d7e5b5f9593be5806a043aeb\",\n      \"redacted_fields\": [],\n      \"detail\": {\n        \"scanner\": \"picklescan\",\n        \"scanner_version\": \"1.0.5\",\n        \"location\": \"a.pkl\",\n        \"format\": \"pickle\",\n        \"dangerous\": [\n          \"os.system\"\n        ],\n        \"suspicious\": [],\n        \"complete\": true,\n        \"position\": 48\n      }\n    },\n    {\n      \"source\": \"exception\",\n      \"url\": \"exception:1\",\n      \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n      \"matched_identifier\": \"sha256:4115b2c3190084844dcee90598d077783e1d67e771759e2b7127dc7c26e7f546\",\n      \"original_sha256\": \"36baefe8ab027559873988aa4c8a101a65dbe91f2ba2e0dc370ae7d0dc2ed6b8\",\n      \"body_sha256\": \"36baefe8ab027559873988aa4c8a101a65dbe91f2ba2e0dc370ae7d0dc2ed6b8\",\n      \"canonical_sha256\": \"36baefe8ab027559873988aa4c8a101a65dbe91f2ba2e0dc370ae7d0dc2ed6b8\",\n      \"redacted_fields\": [],\n      \"detail\": null\n    }\n  ]\n}\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alert show dismissed",
+   "argv": [
+    "alert",
+    "show",
+    "4"
+   ],
+   "db": "md",
+   "stdout": "#4 MDB201 MODERATE dismissed GHSA-24rc-8hj2-v98c pillow==12.3.0 (fixed: 13.0.0)\nModel: pillow-model\n  osv.dev https://api.osv.dev/v1/vulns/GHSA-24rc-8hj2-v98c at 2026-10-24T03:54:34Z for pkg:pypi/pillow@12.3.0 (sha256 0c55109d0dfa24694acd53c4b084b3d0d92dacfe0bd0bee9c54c8a81e0c99630)\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alert show dismissed --json",
+   "argv": [
+    "alert",
+    "show",
+    "4",
+    "--json"
+   ],
+   "db": "md",
+   "stdout": "{\n  \"model_id\": \"pillow-model\",\n  \"alert_id\": 4,\n  \"rule_id\": \"MDB201\",\n  \"rule_doc\": \"docs/rules/MDB201.md\",\n  \"kind\": \"package_advisory\",\n  \"state\": \"dismissed\",\n  \"severity\": \"MODERATE\",\n  \"severity_origin\": \"database_specific\",\n  \"cause\": {\n    \"advisory_id\": \"GHSA-24rc-8hj2-v98c\",\n    \"advisory_ids\": [\n      \"GHSA-24rc-8hj2-v98c\"\n    ],\n    \"aliases\": [\n      \"CVE-2026-96638\"\n    ],\n    \"source\": \"osv.dev\",\n    \"package\": \"pillow\",\n    \"version\": \"12.3.0\",\n    \"identifier\": \"pkg:pypi/pillow@12.3.0\",\n    \"affected\": [\n      {\n        \"type\": \"ECOSYSTEM\",\n        \"events\": [\n          {\n            \"introduced\": \"9.1.0\"\n          },\n          {\n            \"fixed\": \"13.0.0\"\n          }\n        ]\n      }\n    ],\n    \"fixed\": [\n      \"13.0.0\"\n    ],\n    \"severity_from\": \"GHSA-24rc-8hj2-v98c\"\n  },\n  \"opened_in_version\": 1,\n  \"current_version\": 1,\n  \"opened_at\": \"2026-11-19T09:00:00Z\",\n  \"closed_at\": \"2026-11-19T09:00:00Z\",\n  \"closed_by_version\": null,\n  \"dismissal_reason\": \"not_used_at_runtime\",\n  \"dismissed_by\": \"Owner\",\n  \"note\": \"the code path is not loaded\",\n  \"evidence\": [\n    {\n      \"source\": \"osv.dev\",\n      \"url\": \"https://api.osv.dev/v1/vulns/GHSA-24rc-8hj2-v98c\",\n      \"retrieved_at\": \"2026-10-24T03:54:34Z\",\n      \"matched_identifier\": \"pkg:pypi/pillow@12.3.0\",\n      \"original_sha256\": \"0c55109d0dfa24694acd53c4b084b3d0d92dacfe0bd0bee9c54c8a81e0c99630\",\n      \"body_sha256\": \"0c55109d0dfa24694acd53c4b084b3d0d92dacfe0bd0bee9c54c8a81e0c99630\",\n      \"canonical_sha256\": \"75ee94e6099a3201028b9480ffea199ec417338ceb3adf61d8577d9bcd084eeb\",\n      \"redacted_fields\": [],\n      \"detail\": {\n        \"osv_match\": true,\n        \"local_match\": true,\n        \"query_url\": \"https://api.osv.dev/v1/querybatch\",\n        \"query_sha256\": \"d219627ec408b3741b205a5632d6d468a87ea4d9e087e28841857552b9396b16\"\n      }\n    }\n  ]\n}\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alert show fixed",
+   "argv": [
+    "alert",
+    "show",
+    "3"
+   ],
+   "db": "md",
+   "stdout": "#3 MDB101 HIGH     fixed     weight_file_scan c.pkl (sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e)\nModel: weights-model\n  picklescan <work>/model/c.pkl at 2026-11-19T09:00:00Z for sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e (sha256 02bec51c114b5862a6a33be8f51fe13157871b2e5e942c7b57ae9851a05e36af)\n  inventory  at 2026-11-19T09:00:00Z for sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e (sha256 0809be4a6ac7a4a5b7d97efab75eb29c56a7e0e8150e331f183473810c9b2dad)\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alert show fixed --json",
+   "argv": [
+    "alert",
+    "show",
+    "3",
+    "--json"
+   ],
+   "db": "md",
+   "stdout": "{\n  \"model_id\": \"weights-model\",\n  \"alert_id\": 3,\n  \"rule_id\": \"MDB101\",\n  \"rule_doc\": \"docs/rules/MDB101.md\",\n  \"kind\": \"weight_file_scan\",\n  \"state\": \"fixed\",\n  \"severity\": \"HIGH\",\n  \"severity_origin\": \"policy\",\n  \"cause\": {\n    \"identifier\": \"sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e\",\n    \"scanner\": \"picklescan\",\n    \"scanner_version\": \"1.0.5\",\n    \"location\": \"c.pkl\",\n    \"format\": \"pickle\",\n    \"dangerous\": [\n      \"os.system\"\n    ],\n    \"suspicious\": [\n      \"model_dependabot_fixture.layers.CustomLayer\"\n    ],\n    \"complete\": true,\n    \"position\": 126\n  },\n  \"opened_in_version\": 1,\n  \"current_version\": 1,\n  \"opened_at\": \"2026-11-19T09:00:00Z\",\n  \"closed_at\": \"2026-11-19T09:00:00Z\",\n  \"closed_by_version\": 2,\n  \"dismissal_reason\": null,\n  \"dismissed_by\": null,\n  \"note\": null,\n  \"evidence\": [\n    {\n      \"source\": \"picklescan\",\n      \"url\": \"<work>/model/c.pkl\",\n      \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n      \"matched_identifier\": \"sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e\",\n      \"original_sha256\": \"02bec51c114b5862a6a33be8f51fe13157871b2e5e942c7b57ae9851a05e36af\",\n      \"body_sha256\": \"02bec51c114b5862a6a33be8f51fe13157871b2e5e942c7b57ae9851a05e36af\",\n      \"canonical_sha256\": \"02bec51c114b5862a6a33be8f51fe13157871b2e5e942c7b57ae9851a05e36af\",\n      \"redacted_fields\": [],\n      \"detail\": {\n        \"scanner\": \"picklescan\",\n        \"scanner_version\": \"1.0.5\",\n        \"location\": \"c.pkl\",\n        \"format\": \"pickle\",\n        \"dangerous\": [\n          \"os.system\"\n        ],\n        \"suspicious\": [\n          \"model_dependabot_fixture.layers.CustomLayer\"\n        ],\n        \"complete\": true,\n        \"position\": 126\n      }\n    },\n    {\n      \"source\": \"inventory\",\n      \"url\": \"\",\n      \"retrieved_at\": \"2026-11-19T09:00:00Z\",\n      \"matched_identifier\": \"sha256:ce98b7dc34e3832309e8a68f3f0d0be5e1b57aa3d02825519dd88328d7e1e27e\",\n      \"original_sha256\": \"0809be4a6ac7a4a5b7d97efab75eb29c56a7e0e8150e331f183473810c9b2dad\",\n      \"body_sha256\": \"0809be4a6ac7a4a5b7d97efab75eb29c56a7e0e8150e331f183473810c9b2dad\",\n      \"canonical_sha256\": \"0809be4a6ac7a4a5b7d97efab75eb29c56a7e0e8150e331f183473810c9b2dad\",\n      \"redacted_fields\": [],\n      \"detail\": {\n        \"previous_version\": 1,\n        \"version\": 2,\n        \"found\": null\n      }\n    }\n  ]\n}\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alert show withdrawn",
+   "argv": [
+    "alert",
+    "show",
+    "5"
+   ],
+   "db": "md",
+   "stdout": "#5 MDB201 HIGH     withdrawn GHSA-cp9v-662q-vvx9 pillow==12.3.0 (fixed: 13.0.0)\nModel: pillow-model\n  osv.dev https://api.osv.dev/v1/vulns/GHSA-cp9v-662q-vvx9 at 2026-10-24T03:54:34Z for pkg:pypi/pillow@12.3.0 (sha256 06817cc362a0d7630586e8ecac6a89b29401452d5bf4343c534014662a81a658)\n  osv.dev https://api.osv.dev/v1/vulns/GHSA-cp9v-662q-vvx9 at 2026-10-24T03:54:34Z for pkg:pypi/pillow@12.3.0 (sha256 1d8bdb7361ae4266493a3ceedcefc1b37e302592d417dfe24470b949d9870dec)\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alert show withdrawn --json",
+   "argv": [
+    "alert",
+    "show",
+    "5",
+    "--json"
+   ],
+   "db": "md",
+   "stdout": "{\n  \"model_id\": \"pillow-model\",\n  \"alert_id\": 5,\n  \"rule_id\": \"MDB201\",\n  \"rule_doc\": \"docs/rules/MDB201.md\",\n  \"kind\": \"package_advisory\",\n  \"state\": \"withdrawn\",\n  \"severity\": \"HIGH\",\n  \"severity_origin\": \"database_specific\",\n  \"cause\": {\n    \"advisory_id\": \"GHSA-cp9v-662q-vvx9\",\n    \"advisory_ids\": [\n      \"GHSA-cp9v-662q-vvx9\"\n    ],\n    \"aliases\": [\n      \"CVE-2026-112405\"\n    ],\n    \"source\": \"osv.dev\",\n    \"package\": \"pillow\",\n    \"version\": \"12.3.0\",\n    \"identifier\": \"pkg:pypi/pillow@12.3.0\",\n    \"affected\": [\n      {\n        \"type\": \"ECOSYSTEM\",\n        \"events\": [\n          {\n            \"introduced\": \"12.0.0\"\n          },\n          {\n            \"fixed\": \"13.0.0\"\n          }\n        ]\n      }\n    ],\n    \"fixed\": [\n      \"13.0.0\"\n    ],\n    \"severity_from\": \"GHSA-cp9v-662q-vvx9\"\n  },\n  \"opened_in_version\": 1,\n  \"current_version\": 1,\n  \"opened_at\": \"2026-11-19T09:00:00Z\",\n  \"closed_at\": \"2026-11-19T09:00:00Z\",\n  \"closed_by_version\": null,\n  \"dismissal_reason\": null,\n  \"dismissed_by\": null,\n  \"note\": null,\n  \"evidence\": [\n    {\n      \"source\": \"osv.dev\",\n      \"url\": \"https://api.osv.dev/v1/vulns/GHSA-cp9v-662q-vvx9\",\n      \"retrieved_at\": \"2026-10-24T03:54:34Z\",\n      \"matched_identifier\": \"pkg:pypi/pillow@12.3.0\",\n      \"original_sha256\": \"06817cc362a0d7630586e8ecac6a89b29401452d5bf4343c534014662a81a658\",\n      \"body_sha256\": \"06817cc362a0d7630586e8ecac6a89b29401452d5bf4343c534014662a81a658\",\n      \"canonical_sha256\": \"8013b6b9397ef76335ea61b9760d59fdab684c6a9be05f65b0864a98eae354eb\",\n      \"redacted_fields\": [],\n      \"detail\": {\n        \"osv_match\": true,\n        \"local_match\": true,\n        \"query_url\": \"https://api.osv.dev/v1/querybatch\",\n        \"query_sha256\": \"d219627ec408b3741b205a5632d6d468a87ea4d9e087e28841857552b9396b16\"\n      }\n    },\n    {\n      \"source\": \"osv.dev\",\n      \"url\": \"https://api.osv.dev/v1/vulns/GHSA-cp9v-662q-vvx9\",\n      \"retrieved_at\": \"2026-10-24T03:54:34Z\",\n      \"matched_identifier\": \"pkg:pypi/pillow@12.3.0\",\n      \"original_sha256\": \"1d8bdb7361ae4266493a3ceedcefc1b37e302592d417dfe24470b949d9870dec\",\n      \"body_sha256\": \"1d8bdb7361ae4266493a3ceedcefc1b37e302592d417dfe24470b949d9870dec\",\n      \"canonical_sha256\": \"ccc130ce3c33510041a59a5cb3473fe54153aaebfd70bb94693159f11be2dbe3\",\n      \"redacted_fields\": [],\n      \"detail\": {\n        \"withdrawn\": \"2026-11-18T00:00:00Z\",\n        \"query_url\": \"https://api.osv.dev/v1/querybatch\",\n        \"query_sha256\": \"d219627ec408b3741b205a5632d6d468a87ea4d9e087e28841857552b9396b16\"\n      }\n    }\n  ]\n}\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "alert show unknown",
+   "argv": [
+    "alert",
+    "show",
+    "999"
+   ],
+   "db": "md",
+   "stdout": "",
+   "stderr": "error: no alert 999\n",
+   "exit_code": 1
+  },
+  {
+   "name": "alert show unknown --json",
+   "argv": [
+    "alert",
+    "show",
+    "999",
+    "--json"
+   ],
+   "db": "md",
+   "stdout": "{\"error\": {\"exit_code\": 1, \"message\": \"no alert 999\"}}\n",
+   "stderr": "error: no alert 999\n",
+   "exit_code": 1
+  },
+  {
+   "name": "alerts unknown",
+   "argv": [
+    "alerts",
+    "no-such-model"
+   ],
+   "db": "md",
+   "stdout": "",
+   "stderr": "error: no model 'no-such-model' is registered\n",
+   "exit_code": 1
+  },
+  {
+   "name": "alerts unknown --json",
+   "argv": [
+    "alerts",
+    "no-such-model",
+    "--json"
+   ],
+   "db": "md",
+   "stdout": "{\"error\": {\"exit_code\": 1, \"message\": \"no model 'no-such-model' is registered\"}}\n",
+   "stderr": "error: no model 'no-such-model' is registered\n",
+   "exit_code": 1
+  },
+  {
+   "name": "run show",
+   "argv": [
+    "run",
+    "show",
+    "4"
+   ],
+   "db": "md",
+   "stdout": "Check run 4 (pillow-model, on_demand)\n  osv: ok\nOverview of run 4 (pillow-model)\n  source        state       entries  incomplete  alerts  excepted  held  watch events\n  osv           passed            2           0       0         0     1             0\npillow-model v1: checked\n  osv           passed            2           0       0         0     1             0\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "run show --json",
+   "argv": [
+    "run",
+    "show",
+    "4",
+    "--json"
+   ],
+   "db": "md",
+   "stdout": "{\n  \"run_id\": 4,\n  \"scope\": \"pillow-model\",\n  \"trigger\": \"on_demand\",\n  \"started_at\": \"2026-11-19T09:00:00Z\",\n  \"finished_at\": \"2026-11-19T09:00:00Z\",\n  \"sources\": {\n    \"osv\": \"ok\"\n  },\n  \"overview\": {\n    \"sources\": [\n      {\n        \"source\": \"osv\",\n        \"state\": \"passed\",\n        \"reason\": null,\n        \"entries\": 2,\n        \"incomplete\": 0,\n        \"alerts_open\": 0,\n        \"alerts_excepted\": 0,\n        \"watch_events\": 0,\n        \"dismissals_held\": 1\n      }\n    ],\n    \"models\": [\n      {\n        \"model_id\": \"pillow-model\",\n        \"version\": 1,\n        \"checked\": true,\n        \"reason\": null,\n        \"sources\": [\n          {\n            \"source\": \"osv\",\n            \"state\": \"passed\",\n            \"reason\": null,\n            \"entries\": 2,\n            \"incomplete\": 0,\n            \"alerts_open\": 0,\n            \"alerts_excepted\": 0,\n            \"watch_events\": 0,\n            \"dismissals_held\": 1\n          }\n        ],\n        \"uncheckable\": []\n      }\n    ]\n  }\n}\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "check",
+   "argv": [
+    "check",
+    "weights-model",
+    "--source",
+    "picklescan"
+   ],
+   "db": "check",
+   "stdout": "Check run 5 (weights-model)\n  picklescan: ok\nweights-model v2: 0 opened, 2 carried forward, 0 closed, 2 watch events\nOverview of run 5 (weights-model)\n  source        state       entries  incomplete  alerts  excepted  held  watch events\n  picklescan    alerted           2           0       1         1     0             0\n  policy        passed            2           0       0         0     0             2\nweights-model v2: checked\n  picklescan    alerted           2           0       1         1     0             0\n  policy        passed            2           0       0         0     0             2\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "check --json",
+   "argv": [
+    "check",
+    "weights-model",
+    "--source",
+    "picklescan",
+    "--json"
+   ],
+   "db": "check",
+   "stdout": "{\n  \"run_id\": 5,\n  \"scope\": \"weights-model\",\n  \"trigger\": \"on_demand\",\n  \"sources\": {\n    \"picklescan\": \"ok\"\n  },\n  \"models\": [\n    {\n      \"model_id\": \"weights-model\",\n      \"version\": 2,\n      \"opened\": [],\n      \"carried_forward\": [\n        1,\n        2\n      ],\n      \"closed\": [],\n      \"watch_events\": [\n        5,\n        6\n      ],\n      \"dismissals_held\": []\n    }\n  ],\n  \"overview\": {\n    \"sources\": [\n      {\n        \"source\": \"picklescan\",\n        \"state\": \"alerted\",\n        \"reason\": null,\n        \"entries\": 2,\n        \"incomplete\": 0,\n        \"alerts_open\": 1,\n        \"alerts_excepted\": 1,\n        \"watch_events\": 0,\n        \"dismissals_held\": 0\n      },\n      {\n        \"source\": \"policy\",\n        \"state\": \"passed\",\n        \"reason\": null,\n        \"entries\": 2,\n        \"incomplete\": 0,\n        \"alerts_open\": 0,\n        \"alerts_excepted\": 0,\n        \"watch_events\": 2,\n        \"dismissals_held\": 0\n      }\n    ],\n    \"models\": [\n      {\n        \"model_id\": \"weights-model\",\n        \"version\": 2,\n        \"checked\": true,\n        \"reason\": null,\n        \"sources\": [\n          {\n            \"source\": \"picklescan\",\n            \"state\": \"alerted\",\n            \"reason\": null,\n            \"entries\": 2,\n            \"incomplete\": 0,\n            \"alerts_open\": 1,\n            \"alerts_excepted\": 1,\n            \"watch_events\": 0,\n            \"dismissals_held\": 0\n          },\n          {\n            \"source\": \"policy\",\n            \"state\": \"passed\",\n            \"reason\": null,\n            \"entries\": 2,\n            \"incomplete\": 0,\n            \"alerts_open\": 0,\n            \"alerts_excepted\": 0,\n            \"watch_events\": 2,\n            \"dismissals_held\": 0\n          }\n        ],\n        \"uncheckable\": []\n      }\n    ]\n  }\n}\n",
+   "stderr": "",
+   "exit_code": 0
+  },
+  {
+   "name": "check --fail-on HIGH",
+   "argv": [
+    "check",
+    "weights-model",
+    "--source",
+    "picklescan",
+    "--fail-on",
+    "HIGH"
+   ],
+   "db": "gate",
+   "stdout": "Check run 5 (weights-model)\n  picklescan: ok\nweights-model v2: 0 opened, 2 carried forward, 0 closed, 2 watch events\nOverview of run 5 (weights-model)\n  source        state       entries  incomplete  alerts  excepted  held  watch events\n  picklescan    alerted           2           0       1         1     0             0\n  policy        passed            2           0       0         0     0             2\nweights-model v2: checked\n  picklescan    alerted           2           0       1         1     0             0\n  policy        passed            2           0       0         0     0             2\nGate --fail-on HIGH: tripped\n  alert #2 MDB101 HIGH weight_file_scan (weights-model)\n",
+   "stderr": "",
+   "exit_code": 4
+  },
+  {
+   "name": "check --fail-on HIGH --json",
+   "argv": [
+    "check",
+    "weights-model",
+    "--source",
+    "picklescan",
+    "--fail-on",
+    "HIGH",
+    "--json"
+   ],
+   "db": "gate",
+   "stdout": "{\n  \"run_id\": 5,\n  \"scope\": \"weights-model\",\n  \"trigger\": \"on_demand\",\n  \"sources\": {\n    \"picklescan\": \"ok\"\n  },\n  \"models\": [\n    {\n      \"model_id\": \"weights-model\",\n      \"version\": 2,\n      \"opened\": [],\n      \"carried_forward\": [\n        1,\n        2\n      ],\n      \"closed\": [],\n      \"watch_events\": [\n        5,\n        6\n      ],\n      \"dismissals_held\": []\n    }\n  ],\n  \"overview\": {\n    \"sources\": [\n      {\n        \"source\": \"picklescan\",\n        \"state\": \"alerted\",\n        \"reason\": null,\n        \"entries\": 2,\n        \"incomplete\": 0,\n        \"alerts_open\": 1,\n        \"alerts_excepted\": 1,\n        \"watch_events\": 0,\n        \"dismissals_held\": 0\n      },\n      {\n        \"source\": \"policy\",\n        \"state\": \"passed\",\n        \"reason\": null,\n        \"entries\": 2,\n        \"incomplete\": 0,\n        \"alerts_open\": 0,\n        \"alerts_excepted\": 0,\n        \"watch_events\": 2,\n        \"dismissals_held\": 0\n      }\n    ],\n    \"models\": [\n      {\n        \"model_id\": \"weights-model\",\n        \"version\": 2,\n        \"checked\": true,\n        \"reason\": null,\n        \"sources\": [\n          {\n            \"source\": \"picklescan\",\n            \"state\": \"alerted\",\n            \"reason\": null,\n            \"entries\": 2,\n            \"incomplete\": 0,\n            \"alerts_open\": 1,\n            \"alerts_excepted\": 1,\n            \"watch_events\": 0,\n            \"dismissals_held\": 0\n          },\n          {\n            \"source\": \"policy\",\n            \"state\": \"passed\",\n            \"reason\": null,\n            \"entries\": 2,\n            \"incomplete\": 0,\n            \"alerts_open\": 0,\n            \"alerts_excepted\": 0,\n            \"watch_events\": 2,\n            \"dismissals_held\": 0\n          }\n        ],\n        \"uncheckable\": []\n      }\n    ]\n  },\n  \"gate\": {\n    \"fail_on\": \"HIGH\",\n    \"tripped\": true,\n    \"decided_exit\": true,\n    \"alerts\": [\n      {\n        \"alert_id\": 2,\n        \"model_id\": \"weights-model\",\n        \"rule_id\": \"MDB101\",\n        \"kind\": \"weight_file_scan\",\n        \"severity\": \"HIGH\"\n      }\n    ],\n    \"incomplete\": [],\n    \"unchecked\": [],\n    \"empty_scope\": false\n  }\n}\n",
+   "stderr": "",
+   "exit_code": 4
+  }
+ ]
+}

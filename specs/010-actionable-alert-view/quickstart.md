@@ -54,7 +54,7 @@ Expect for the `paper_retracted` alert: every `established` item has `evidence_i
 alert's own evidence; `not_established` starts with the impact question and lists whether the
 retraction affects the data this model was trained or evaluated on; `impact` is `impact undetermined`;
 no string contains a phrase of `tests/fixtures/advice/verdicts.json`. Test:
-`tests/integration/test_advice_statements.py`.
+`tests/integration/test_advice_statements_by_rule.py`.
 
 ## 5. Review steps (US3, SC-001)
 

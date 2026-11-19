@@ -72,3 +72,34 @@ def test_the_index_links_every_page() -> None:
         assert f"]({rule.rule_id}.md)" in index
         assert f"`{rule.kind}`" in index
     assert "lead nowhere" not in index
+
+
+# --- feature 010: rule texts and relationships (T009) -------------------------------------------
+
+
+def _renderer():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "render_rule_pages", ROOT / "tools" / "render_rule_pages.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_every_page_is_in_step_with_the_rule_texts() -> None:
+    renderer = _renderer()
+    for rule in rules.RULES:
+        page = ROOT / rule.page
+        rendered = renderer.render(page.read_text("utf-8"), rules.texts_for(rule.rule_id))
+        assert rendered.encode("utf-8") == page.read_bytes(), f"{rule.page}: run the renderer"
+
+
+def test_every_alert_kind_has_a_relationship() -> None:
+    kinds = {alert_kind for _, alert_kind in rules.RELATIONSHIPS}
+    assert kinds == set(ALERT_KINDS)
+    assert ("base_model", "licence_changed") in rules.RELATIONSHIPS
+    assert ("dataset", "licence_changed") in rules.RELATIONSHIPS
+    assert rules.RELATIONSHIPS[("dataset", "paper_retracted")].steps_from_model == 2

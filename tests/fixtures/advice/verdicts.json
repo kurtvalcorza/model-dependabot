@@ -1,0 +1,28 @@
+{
+ "about": "Impact verdicts no advisory view may state (FR-011, research R10), matched case-insensitively as substrings in the text view and in every string of the JSON view. Each `allowed` sentence is removed by exact content, wherever it appears, before the match; adding one is a reviewed change to this file.",
+ "phrases": [
+  {"phrase": "is compromised", "guards": "the dataset or the model is compromised"},
+  {"phrase": "rights are lost", "guards": "the model's rights are lost"},
+  {"phrase": "rights are kept", "guards": "the model's rights are kept"},
+  {"phrase": "is safe", "guards": "the model or the file is safe"},
+  {"phrase": "safe to load", "guards": "the file is safe to load"},
+  {"phrase": "was never affected", "guards": "the model was never affected"},
+  {"phrase": "not affected", "guards": "the model is not affected"},
+  {"phrase": "no impact", "guards": "the alert has no impact"},
+  {"phrase": "inventory is complete", "guards": "the inventory is complete"},
+  {"phrase": "model is clean", "guards": "the model is clean"},
+  {"phrase": "clean result", "guards": "a clean result settles the alert"}
+ ],
+ "allowed": [
+  {
+   "rule_id": "MDB101",
+   "field": "limitations",
+   "sentence": "It does not prove that the file is safe when absent either: a scan that could not finish is a `scan_incomplete` watch event, and an import the scanner could not resolve is reported as `unknown`."
+  },
+  {
+   "rule_id": "MDB102",
+   "field": "limitations",
+   "sentence": "A verdict the hub does not give is a `hub_scan_unknown` watch event, not a clean result."
+  }
+ ]
+}
