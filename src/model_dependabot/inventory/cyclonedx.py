@@ -255,12 +255,19 @@ def _package_component(index: int, entry: dict[str, Any]) -> dict[str, Any]:
 
 
 def _marker_value(entry: dict[str, Any]) -> str | None:
-    """The ``marker`` property's value: the stored marker, ``none`` for ``""``, or ``None`` (no
-    property) when the marker is not recorded."""
+    """The ``marker`` property's value: ``none`` for ``""``, or the stored marker normalised when
+    ``packaging`` reads it. A marker that is not recorded, or one stored as written because it does
+    not parse (the literal ``none`` included), writes no property, so a re-import reads it as not
+    recorded rather than as something else (review R34-2)."""
     stored = entry.get("marker")
     if stored is None:
         return None
-    return stored or NO_MARKER
+    if stored == "":
+        return NO_MARKER
+    try:
+        return str(Marker(stored))
+    except (InvalidMarker, RecursionError):
+        return None
 
 
 def _base_model_component(index: int, entry: dict[str, Any]) -> dict[str, Any]:
@@ -534,13 +541,19 @@ def _split_purl(purl: str) -> tuple[str, str, str | None]:
     return kind.lower(), unquote(path), unquote(version) or None
 
 
-def _read_marker(props: Mapping[str, str]) -> str | None:
+def _read_marker(item: dict[str, Any]) -> str | None:
     """The marker an imported package records (issue #34): ``""`` for ``none``, the marker
-    normalised with ``packaging``, or ``None`` (not recorded) for an absent property or a value
-    that is neither. The value is a third party's: an unreadable one is never no marker."""
-    value = props.get(P_MARKER)
-    if value is None:
+    normalised with ``packaging``, or ``None`` (not recorded) for an absent property, a value
+    that is neither, or several ``marker`` properties that disagree (review R34-4; identical ones
+    count once). The value is a third party's: an unreadable one is never no marker."""
+    values = {
+        str(prop.get("value", ""))
+        for prop in item.get("properties") or []
+        if isinstance(prop, dict) and prop.get("name") == P_MARKER
+    }
+    if len(values) != 1:
         return None
+    (value,) = values
     if value == NO_MARKER:
         return ""
     try:
@@ -551,7 +564,7 @@ def _read_marker(props: Mapping[str, str]) -> str | None:
 
 def _import_package(item: dict[str, Any]) -> dict[str, Any]:
     props = _props(item)
-    marker = _read_marker(props)
+    marker = _read_marker(item)
     hashes = _read_hashes(item) or None
     purl = item.get("purl")
     kind = item.get("type")

@@ -145,3 +145,9 @@ def test_an_exported_and_imported_copy_keeps_the_marker(
         "expression": MARKER if state == "set" else None,
     }
     assert not {item["text"] for item in view["limitations"]} & set(UNKNOWN)
+    # Review R34-5: the place line says the marker is the import's declaration; the JSON field is
+    # unchanged, and the imported-declaration item stays.
+    text = cli("alert", "show", str(alert), "--advice", json_out=False)
+    said = f"marker {MARKER}" if state == "set" else "no marker"
+    assert f", 12.3.0, {said}, declared by the import\n" in text
+    assert any("imported declaration" in item["text"] for item in view["not_established"])

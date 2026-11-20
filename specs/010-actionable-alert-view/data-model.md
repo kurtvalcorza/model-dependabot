@@ -180,7 +180,8 @@ the text changes without a new version (as `tests/unit/test_safe_globals.py` doe
   package, else `{state, expression}` with `state` `set` (and the normalised `expression`), `none` (the
   lock line has no marker) or `not_recorded` (stored as null: written before #28, or imported without
   a readable `model-dependabot:marker` property, issue #34). Text
-  appends `, marker <expression>`, `, no marker` or `, marker not recorded` to the place line. When
+  appends `, marker <expression>`, `, no marker` or `, marker not recorded` to the place line (an
+  `import` place adds `, declared by the import` after the first two, issue #34). When
   `places[0]`'s marker is `set`, the package's not-established item reads `whether <package> is
   installed where the model runs: the lock installs it only where `<expression>` holds, and this view
   does not evaluate the marker`. The marker limitation is listed only when `places[0]`'s marker is

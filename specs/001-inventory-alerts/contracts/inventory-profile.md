@@ -29,7 +29,7 @@ Custom properties (the complete list; constitution II):
 | `model-dependabot:claimed-origin` | ancestor of an imported edge | The `edge-origin` the imported document stated, if any |
 | `model-dependabot:parent-model` | ancestor naming a registered model | The parent's model id (the ancestor has no purl) |
 | `model-dependabot:parent-version` | ancestor naming a registered model | The parent's version, a decimal string |
-| `model-dependabot:marker` | package whose lock marker is recorded (issue #34) | The environment marker as stored (normalised by `packaging`), or `none` for a lock line with no marker. Absent when the marker is not recorded |
+| `model-dependabot:marker` | package whose lock marker is recorded and readable (issue #34) | The environment marker normalised by `packaging`, or `none` for a lock line with no marker. Absent when the marker is not recorded or does not parse |
 
 Hub location is split this way because CycloneDX has no fields for a repository and revision on a
 `file` component; the `distribution` external reference carries the same location as a URL for other
@@ -42,14 +42,16 @@ Rules:
   other custom fields (constitution II).
 - Round trip: `export` then `import` yields the same entries and identifiers (SC-005).
   A package's lock marker (issue #28) round-trips in each of its three states (issue #34): a
-  marker is written as stored, a lock line with none as `none`, and a marker that is not recorded
-  (null) writes no property. On import the value is a third party's: `none` reads as no marker
+  marker is written normalised, a lock line with none as `none`, and a marker that is not recorded
+  (null) writes no property. A marker the lock gave but `packaging` cannot read (stored as
+  written, the literal `none` included) writes no property either, so a re-import reads it as not
+  recorded (review R34-2). On import the value is a third party's: `none` reads as no marker
   (`""`), a value `packaging` reads as a marker is stored normalised, and anything else (an empty or
-  missing value, `None`, text that is not a marker, a marker too deeply nested to parse) is not
-  recorded (null), never no marker, and never fails the import. A marker the lock gave but
-  `packaging` cannot read is stored as written; it is exported so, and a re-import reads it as not
-  recorded. An imported entry with no readable marker property keeps the advisory view's
-  limitation.
+  missing value, `None`, text that is not a marker, a marker too deeply nested to parse, or
+  several `marker` properties on one component that disagree, review R34-4) is not recorded
+  (null), never no marker, and never fails the import. Identical duplicates count once. An
+  imported entry with no readable marker property keeps the advisory view's limitation, and the
+  advisory view's place line says an imported marker is the import's declaration.
 - Imported documents may be CycloneDX 1.5, 1.6 or 1.7; entries the mapping cannot read become gaps
   rather than errors.
 - Two dataset components sharing one `bom-ref` are imported as one dataset entry, their hashes and

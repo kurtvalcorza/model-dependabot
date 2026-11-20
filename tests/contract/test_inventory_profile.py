@@ -18,6 +18,7 @@ from model_dependabot.inventory.cyclonedx import (
     import_bom,
     validate,
 )
+from model_dependabot.lockfile import parse_lock
 from model_dependabot.manifest import load_manifest
 from model_dependabot.sources.fetcher import RecordedFetcher
 
@@ -263,15 +264,74 @@ def test_an_imported_marker_is_normalised_or_not_recorded(value: Any, marker: st
     assert _imported_marker(value) == marker
 
 
-def test_an_imported_gap_package_keeps_its_marker() -> None:
+GATED = 'platform_machine == "x86_64"'
+
+
+@pytest.mark.parametrize(
+    ("extra", "reason"),
+    [
+        ({}, "no purl"),
+        ({"type": "application"}, "unrecognised component type 'application'"),  # R34-3
+        ({"purl": "pkg:npm/left-pad@1.3.0"}, "not a PyPI package"),  # R34-3
+    ],
+)
+def test_an_imported_gap_package_keeps_its_marker(extra: dict[str, Any], reason: str) -> None:
     component = {
         "type": "library",
         "name": "numpy",
-        "properties": [{"name": MARKER, "value": 'platform_machine == "x86_64"'}],
+        "properties": [{"name": MARKER, "value": GATED}],
+        **extra,
     }
     document = {"bomFormat": "CycloneDX", "specVersion": "1.7", "components": [component]}
     (entry,) = import_bom(document)
-    assert (entry["gap_reason"], entry["marker"]) == ("no purl", 'platform_machine == "x86_64"')
+    assert (entry["kind"], entry["gap_reason"], entry["marker"]) == ("package", reason, GATED)
+
+
+@pytest.mark.parametrize(
+    ("values", "marker"),
+    [
+        ([GATED, "none"], None),  # conflicting: not recorded (R34-4)
+        ([GATED, 'os_name == "nt"'], None),
+        (["none", "none"], ""),  # identical duplicates count once
+        ([GATED, GATED], GATED),
+    ],
+)
+def test_duplicate_marker_properties_must_agree(values: list[str], marker: str | None) -> None:
+    component = {
+        "type": "library",
+        "name": "pillow",
+        "purl": "pkg:pypi/pillow@9.0.0",
+        "hashes": [{"alg": "SHA-256", "content": "ab" * 32}],
+        "properties": [{"name": MARKER, "value": value} for value in values],
+    }
+    document = {"bomFormat": "CycloneDX", "specVersion": "1.7", "components": [component]}
+    (entry,) = import_bom(document)
+    assert (entry["pinned"], entry["marker"]) == (True, marker)
+
+
+@pytest.mark.parametrize("stored", ["none", "not a marker", "x#egg=pkg"])
+def test_an_unparseable_stored_marker_writes_no_property(stored: str) -> None:
+    """Review R34-2: a marker stored as written because it does not parse (the literal ``none``
+    included) is not exported, so a re-import reads it as not recorded, never as no marker."""
+    entry = new_entry(
+        "package", pinned=False, gap_reason="no exact version", name="pkg", marker=stored
+    )
+    (component,) = export_bom("m", 1, [entry])["components"]
+    assert MARKER not in _props(component)
+    (again,) = import_bom(export_bom("m", 1, [entry]))
+    assert again["marker"] is None
+
+
+def test_a_lock_line_whose_marker_is_none_round_trips_as_not_recorded() -> None:
+    [lock] = parse_lock("pkg>=1;none")
+    assert (lock.gap_reason, lock.marker) == ("no exact version", "none")
+    entry = new_entry(
+        "package", pinned=False, gap_reason=lock.gap_reason, name=lock.name, marker=lock.marker
+    )
+    bom = export_bom("m", 1, [entry])
+    validate(bom)
+    (again,) = import_bom(bom)
+    assert again["marker"] is None
 
 
 def test_export_then_import_yields_the_same_entries(

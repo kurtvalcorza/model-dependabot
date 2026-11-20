@@ -418,15 +418,21 @@ def _entry_lines(entry: Mapping[str, Any]) -> list[str]:
         parts.append(place["section"] or "no manifest section")
         parts += [value for value in (place["location"], place["revision"]) if value]
         if place.get("marker") is not None:
-            parts.append(_marker_part(place["marker"]))
+            parts.append(_marker_part(place["marker"], place["origin"]))
         lines.append("    " + ", ".join(parts))
     return lines
 
 
-def _marker_part(found: Mapping[str, Any]) -> str:
+def _marker_part(found: Mapping[str, Any], origin: str | None) -> str:
+    """The place line's marker text; a marker (or none) an import stated is said to be the
+    import's declaration, not the owner's lock (review R34-5). The JSON is unchanged."""
     if found["state"] == MARKER_SET:
-        return f"marker {found['expression']}"
-    return "no marker" if found["state"] == MARKER_NONE else "marker not recorded"
+        text = f"marker {found['expression']}"
+    elif found["state"] == MARKER_NONE:
+        text = "no marker"
+    else:
+        return "marker not recorded"
+    return f"{text}, declared by the import" if origin == "import" else text
 
 
 def _relationship_line(view: Mapping[str, Any]) -> str:
