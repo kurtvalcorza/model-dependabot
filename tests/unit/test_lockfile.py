@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from model_dependabot.lockfile import LockEntry, parse_lock, read_lock
+from model_dependabot.lockfile import LockEntry, _loose_marker, parse_lock, read_lock
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "locks"
 UV_LOCK = FIXTURES / "uv-export-trimmed.txt"
@@ -161,3 +161,30 @@ def test_a_marker_does_not_change_pinning_or_hashes() -> None:
         plain.pinned,
         plain.gap_reason,
     )
+
+
+# --- review R28-1/R28-4: the marker of a line packaging cannot read -----------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "marker"),
+    [
+        ('pillow==9.0.0 ; python_version<"3.12"', 'python_version < "3.12"'),
+        ('pillow==9.0.0 ; sys_platform == "linux"  # pinned', 'sys_platform == "linux"'),
+        ("pillow==9.0.0 # via a; b", None),
+        ("pillow==9.0.0 ; not a marker", "not a marker"),
+        ("pillow==9.0.0 ;", None),
+        ("pillow==9.0.0", None),
+    ],
+)
+def test_the_loose_marker_reads_after_the_semicolon_outside_a_comment(
+    text: str, marker: str | None
+) -> None:
+    assert _loose_marker(text) == marker
+
+
+def test_an_inline_comment_is_never_read_as_a_marker() -> None:
+    [commented] = parse_lock("pillow==9.0.0" + HASH + " # via a; b")
+    assert commented.marker is None
+    [pinned] = parse_lock('pillow==9.0.0 ; sys_platform == "linux"' + HASH + "  # pinned")
+    assert pinned.marker == 'sys_platform == "linux"'

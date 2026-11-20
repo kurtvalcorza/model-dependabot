@@ -28,6 +28,8 @@ NO_HASH = "no hash"
 
 _HASH = re.compile(r"--hash[=\s]+([A-Za-z0-9]+):([0-9a-fA-F]+)")
 _EDITABLE = re.compile(r"^(?:-e|--editable)[=\s]+(\S+)")
+# pip's comment rule: ``#`` at the start of a line or after whitespace starts a comment.
+_COMMENT = re.compile(r"(?:^|\s+)#.*$")
 
 
 @dataclass(frozen=True)
@@ -91,7 +93,9 @@ def _exact_version(requirement: Requirement) -> str | None:
 
 def _loose_marker(text: str) -> str | None:
     """The marker after ``;`` of a line ``packaging`` cannot read as a whole, normalised when it
-    parses and as written otherwise."""
+    parses and as written otherwise. An inline comment is dropped first (pip's rule), so a ``;``
+    inside it is never read as a marker (review R28-1)."""
+    text = _COMMENT.sub("", text)
     if ";" not in text:
         return None
     raw = text.split(";", 1)[1].strip()
