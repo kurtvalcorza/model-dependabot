@@ -140,6 +140,9 @@ as the source, parsed at run time (the CLI would read `docs/`, which is not pack
 `inventory_entries` has no marker column (`store.py:153-177`; `ENTRY_FIELDS`, `store.py:446-465`).
 The spec's edge case (`lockfile.py:4` mentions markers in the lock syntax only) assumed otherwise.
 
+**Superseded (issue #28)**: `LockEntry.marker` and a nullable `inventory_entries.marker` column now
+record each lock entry's marker (the empty string for none); see data-model.md, Issue #28.
+
 **Decision**: Q1. Under the recommendation, every `package_advisory` view lists, among its limitations,
 "this inventory does not record environment markers, so it cannot say whether the package is installed
 where the model runs", and among not-established statements "whether `{package}` is installed where

@@ -174,6 +174,16 @@ the text changes without a new version (as `tests/unit/test_safe_globals.py` doe
   the source` (hub weight file); `whether the file's bytes match their record: the bytes were not
   read in this place` (`weight_file_absent`); `whether <package> is installed where the model runs`
   (every package alert, ruling Q1). The package marker limitation is a second `limitations` item.
+- Issue #28 (lock markers): each item of `places` also has `marker`: null for an entry that is not a
+  package, else `{state, expression}` with `state` `set` (and the normalised `expression`), `none` (the
+  lock line has no marker) or `not_recorded` (stored as null: written before #28, or imported). Text
+  appends `, marker <expression>`, `, no marker` or `, marker not recorded` to the place line. When
+  `places[0]`'s marker is `set`, the package's not-established item reads `whether <package> is
+  installed where the model runs: the lock installs it only where `<expression>` holds, and this view
+  does not evaluate the marker`. The marker limitation is listed only when `places[0]`'s marker is
+  `not_recorded` ("This entry was recorded before environment markers were stored, …", or for an
+  `import` version "This entry was imported from an inventory that records no environment markers,
+  …") or no entry resolved ("No inventory entry was resolved for this alert, …").
 - Review round 1 (M10-R2): the closing rows of a withdrawn alert are its rows whose detail records
   `withdrawn` (one per advisory of an alias group); of a cleared alert, the rows of the latest check
   run among its rows (the last row when none has a run). They are not also listed as
