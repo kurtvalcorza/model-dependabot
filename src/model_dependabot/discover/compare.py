@@ -18,7 +18,7 @@ from packaging.version import InvalidVersion, Version
 
 from model_dependabot.discover.candidate import CONFLICTING, NO_REVISION
 from model_dependabot.discover.walk import OUTSIDE
-from model_dependabot.manifest import Manifest
+from model_dependabot.manifest import Manifest, parents_of
 
 MATCHES = "matches"
 MISSING = "missing_from_manifest"
@@ -146,27 +146,27 @@ def compare(
         else:
             _mark(item, CONFLICTS, {"name": name, "version": locked[name]})
 
-    # The base model.
-    base = manifest.base_model
+    # The parents (feature 011, FR-029): each candidate against every hub parent of the manifest.
+    parents = [parent for parent in parents_of(manifest) if parent.repo is not None]
     base_models = by_kind["base_model"]
-    if base is None:
-        for item in base_models:
+    wanted = {str(parent.repo).lower(): parent for parent in reversed(parents)}
+    named = {str(item["identity"]["hub_repo"]).lower() for item in base_models}
+    unmatched = [parent for parent in parents if str(parent.repo).lower() not in named]
+    for item in base_models:
+        parent = wanted.get(str(item["identity"]["hub_repo"]).lower())
+        if parent is not None:
+            _mark(item, MATCHES, {"hub_repo": parent.repo, "revision": parent.revision})
+            if parent.revision is not None and NO_REVISION in item["gaps"]:
+                item["gaps"].remove(NO_REVISION)  # the manifest supplies it (research A6)
+        elif unmatched:
+            _mark(item, CONFLICTS, {"hub_repo": unmatched[0].repo})
+        else:
             _mark(item, MISSING)
-    else:
-        wanted = base.repo.lower()
-        matched = [item for item in base_models if item["identity"]["hub_repo"].lower() == wanted]
-        for item in base_models:
-            if item in matched:
-                _mark(item, MATCHES, {"hub_repo": base.repo, "revision": base.revision})
-                if base.revision is not None and NO_REVISION in item["gaps"]:
-                    item["gaps"].remove(NO_REVISION)  # the manifest supplies it (research A6)
-            elif matched:
-                _mark(item, MISSING)
-            else:
-                _mark(item, CONFLICTS, {"hub_repo": base.repo})
-        if not base_models:
-            identity = {"hub_repo": base.repo, "revision": base.revision}
-            not_seen.append(_not_seen("base_model", identity, "base_model"))
+    if not base_models or len(parents) > 1:
+        for parent in unmatched:
+            where = "base_model" if parent.form == "base_model" else f"parents[{parent.index}]"
+            identity = {"hub_repo": parent.repo, "revision": parent.revision}
+            not_seen.append(_not_seen("base_model", identity, where))
 
     # Datasets: hub datasets by name; a DOI dataset is never seen by discovery.
     hub = {spec.hub.lower(): index for index, spec in enumerate(manifest.datasets) if spec.hub}

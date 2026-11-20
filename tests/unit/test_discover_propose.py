@@ -375,3 +375,52 @@ def test_a_lock_that_pins_a_conflicting_package_is_only_a_comment(
     assert f"# {LOCK_CONFLICTS}" in comments
     assert any("environment:" in line and "requirements.lock.txt" in line for line in comments)
     assert any("numpy==2.1.0" in line for line in comments)
+
+
+# --- feature 011: commented [[parents]] blocks (T047, research L9) -----------------------------
+
+
+def test_one_commented_parents_block_per_candidate(project: Path, tmp_path: Path) -> None:
+    mapped = candidate(
+        "base_model",
+        {
+            "hub_repo": "org/one",
+            "revision": None,
+            "relationship": "merged-from",
+            "relation": "merge",
+            "relationship_origin": {
+                "file": "README.md",
+                "key": "base_model_relation",
+                "value": "merge",
+            },
+        },
+        {"file": "README.md", "key": "base_model"},
+        DECLARED,
+        NOW,
+        ["no revision"],
+    )
+    unmapped = candidate(
+        "base_model",
+        {"hub_repo": "org/two", "revision": None, "relationship": "unspecified"},
+        {"file": "README.md", "key": "base_model"},
+        DECLARED,
+        NOW,
+        ["no revision"],
+    )
+    out = tmp_path / "proposed.toml"
+    text = written(project, out, result(mapped, unmapped))
+    lines = text.splitlines()
+    assert lines.count("# [[parents]]") == 2
+    assert "# [base_model]" not in lines
+    assert '# relationship = "merged-from"' in lines
+    placeholder = '# relationship = "<fine-tuned-from|adapter-for|merged-from|quantized-from>"'
+    assert placeholder in lines
+    uncommented = [
+        line[2:] if (line.startswith("# ") and "=" in line) or line == "# [[parents]]" else line
+        for line in lines
+    ]
+    second = tmp_path / "uncommented.toml"
+    body = "\n".join(line for line in uncommented if not line.startswith("#"))
+    second.write_text(body + "\n", encoding="utf-8")
+    with pytest.raises(ManifestError, match=r"parents\[1\]\.relationship must be one of"):
+        load_manifest(second)

@@ -20,7 +20,7 @@ from urllib.parse import quote
 
 from model_dependabot.doi import normalise_doi
 from model_dependabot.lockfile import read_lock
-from model_dependabot.manifest import BaseModelSpec, DatasetSpec, Manifest, WeightSpec
+from model_dependabot.manifest import BaseModelSpec, DatasetSpec, Manifest, WeightSpec, parents_of
 from model_dependabot.sources import datacite, figshare, zenodo
 from model_dependabot.sources.fetcher import Fetcher, NoRecordingError, SourceFailedError
 from model_dependabot.sources.hf import (
@@ -562,8 +562,11 @@ def build_entries(
         entries.append(local_weight(spec) if spec.path is not None else _hub_weight(spec, hub))
     if manifest.lock is not None:
         entries += _packages(manifest.lock)
-    if manifest.base_model is not None:
-        entries.append(_base_model(manifest.base_model))
+    # Feature 011: one base model entry per distinct hub (repository, revision) of the parents;
+    # a legacy [base_model] gives exactly the entry it gave before (FR-003, research L2).
+    hub_parents = [(p.repo, p.revision) for p in parents_of(manifest) if p.repo is not None]
+    for repo, revision in dict.fromkeys(hub_parents):
+        entries.append(_base_model(BaseModelSpec(repo=repo, revision=revision)))
     entries += [_dataset(spec) for spec in manifest.datasets]
     entries = merge_datasets(entries)
     for entry in entries:

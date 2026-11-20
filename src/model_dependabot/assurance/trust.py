@@ -23,6 +23,10 @@ from typing import Any
 
 OWNER_TRUSTED = ("bytes", "name", "record")
 OWNER_VERSIONS = ("manifest", "record")
+# Feature 011 (FR-007, FR-008): a lineage edge is ``owner`` when the owner's manifest or
+# registration record declared it and ``unverified`` otherwise. ``verified`` is not a state an edge
+# can have: nothing here reads lineage from bytes, and the store's CHECK refuses it.
+EDGE_STATES = ("owner", "unverified")
 CODE_FREE = "code_free"
 IDENTITY = "identity"
 NO_CHECK_CONFIRMS = "no check confirms this claim"
@@ -172,3 +176,8 @@ def measured_entries(entries: Sequence[Entry], checks: Sequence[Check]) -> list[
         else:
             result.append(entry)
     return result
+
+
+def edge_state(version_origin: str | None) -> str:
+    """The verification state of a lineage edge of this origin (FR-007, FR-008)."""
+    return "owner" if version_origin in OWNER_VERSIONS else "unverified"

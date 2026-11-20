@@ -19,6 +19,13 @@ prove, how it closes and how to fix or accept it.
 | [`MDB501`](MDB501.md) | `base_model_disabled` | base model |
 | [`MDB502`](MDB502.md) | `base_model_unavailable` | base model |
 
+One watch kind has a page of its own because it can carry a finding of any travelling kind
+(feature 011): it is a watch event, never an alert.
+
+| Rule ID | Watch kind | Family |
+| :-- | :-- | :-- |
+| [`MDB601`](MDB601.md) | `lineage_inherited` | lineage |
+
 The registry is `src/model_dependabot/rules.py`; every alert in every view carries its `rule_id` and
 `rule_doc`, and text output shows the ID after the alert id.
 

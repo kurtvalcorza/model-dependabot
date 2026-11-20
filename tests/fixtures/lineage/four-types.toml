@@ -1,0 +1,24 @@
+[model]
+id = "example-four"
+name = "Lineage fixture"
+owner = "Owner"
+
+[[parents]]
+hub = "hf:example-org/base-a"
+revision = "0123456789abcdef0123456789abcdef01234567"
+relationship = "fine-tuned-from"
+
+[[parents]]
+hub = "hf:example-org/base-b"
+revision = "89abcdef0123456789abcdef0123456789abcdef"
+relationship = "merged-from"
+
+[[parents]]
+hub = "hf:example-org/base-c"
+revision = "fedcba9876543210fedcba9876543210fedcba98"
+relationship = "quantized-from"
+
+[[parents]]
+model = "example-adapter-base"
+version = 1
+relationship = "adapter-for"

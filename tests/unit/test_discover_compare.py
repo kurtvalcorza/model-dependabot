@@ -190,3 +190,32 @@ def test_a_linked_weight_file_matches_the_manifest_path_of_its_target(tmp_path: 
     assert item["manifest"] == "matches"
     assert item["identity"]["path"] == "best.pt"
     assert not_seen == []
+
+
+# --- feature 011: every candidate against every parent (T046, FR-029) ---------------------------
+
+
+def test_each_candidate_is_matched_against_every_hub_parent(tmp_path: Path) -> None:
+    text = (
+        '[[parents]]\nhub = "hf:org/one"\nrelationship = "merged-from"\n'
+        '[[parents]]\nhub = "hf:org/two"\nrevision = "' + "c" * 40 + '"\n'
+        'relationship = "merged-from"\n'
+    )
+    one, two, three = base("org/one"), base("org/two"), base("org/three")
+    not_seen = compare([one, two, three], manifest(tmp_path, text), tmp_path)
+    assert one["manifest"] == "matches"
+    assert two["manifest"] == "matches"
+    assert "no revision" not in two["gaps"]  # the manifest supplies it
+    assert three["manifest"] == "missing_from_manifest"
+    assert not_seen == []
+
+
+def test_a_manifest_parent_no_candidate_names_is_not_seen(tmp_path: Path) -> None:
+    text = (
+        '[[parents]]\nhub = "hf:org/one"\nrelationship = "merged-from"\n'
+        '[[parents]]\nhub = "hf:org/two"\nrelationship = "merged-from"\n'
+    )
+    one = base("org/one")
+    not_seen = compare([one], manifest(tmp_path, text), tmp_path)
+    assert one["manifest"] == "matches"
+    assert [item["identity"]["hub_repo"] for item in not_seen] == ["org/two"]

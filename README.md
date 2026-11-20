@@ -2,8 +2,9 @@
 
 Dependency alerts for AI models. You describe a model in a small manifest; the tool records a pinned
 inventory of what the model depends on (its weight files, the packages locked in its environment, the
-base model it was fine-tuned from and its training data) and then checks that inventory against
-published advisories and weight-file scans. It also watches what happens upstream: a training dataset or
+models it was derived from by fine-tuning, adaptation, merging or quantisation, and its training data)
+and then checks that inventory against published advisories and weight-file scans. It also watches
+what happens upstream: a training dataset or
 a paper tied to it being retracted or removed, a licence changing and the base model being disabled or
 no longer publicly available. When something it depends on becomes vulnerable, unsafe or unavailable it
 raises an alert, and it closes the alert when a new version of the model fixes the cause or the source
@@ -67,6 +68,31 @@ paper_doi = ["10.5555/example-paper"]   # optional: papers you tie to this datas
 hub = "hf:datasets/owner/name"     # a dataset on the Hugging Face Hub, without a DOI
 revision = "0123abcd..."           # the exact commit; without it the dataset is a gap
 ```
+
+A model with several parents, or a parent whose relationship you want recorded, lists them as
+`[[parents]]` instead of `[base_model]` (feature 011); a manifest has one form or the other, never
+both:
+
+```toml
+[[parents]]
+hub = "hf:owner/base-a"             # a model on the Hugging Face Hub
+revision = "0123abcd..."            # the exact commit; without it the parent is a gap
+relationship = "merged-from"        # fine-tuned-from, adapter-for, merged-from or quantized-from
+
+[[parents]]
+model = "my-adapter-base"           # a model registered in the same store
+version = 2                         # without it the parent is the gap "no version"
+relationship = "adapter-for"
+```
+
+Each parent becomes a lineage edge with its type, its origin (`manifest`, `record` or `import`) and a
+state: `owner` for what your manifest or registration record declares, `unverified` for what an
+imported inventory claims. No edge is ever `verified`: nothing reads lineage from the bytes. A
+`[base_model]` table is one parent of type `unspecified`. The same parent listed twice, one parent
+under two types, a reference to a model version not registered, and a cycle of registered models are
+lineage problems that `register`, `import`, `check` and `inventory audit` report; none stops a
+registration or changes an exit code. The rules are in
+[`specs/011-typed-model-lineage/contracts/manifest-parents.md`](specs/011-typed-model-lineage/contracts/manifest-parents.md).
 
 A dataset has either `doi` or `hub`, not both. `paper_doi` lists the papers you say the dataset comes
 with; they are checked for retractions too and are never guessed. Licences are not written in the
@@ -173,6 +199,17 @@ item. A disabled or unavailable base model and a disabled hub dataset are states
 a base model's or hub dataset's licence and a paper tied to a hub dataset are read for the repository, so
 pinning another revision of the same repository keeps the alert open; an entry missing its pin (a gap)
 never counts as a fix.
+
+With `[[parents]]`, every hub parent is watched as `[base_model]` is, whatever its type: one alert per
+repository and cause, naming every edge that carries it (its type, origin, state and revision). Moving a
+parent from `[base_model]` to `[[parents]]`, or changing only its type, carries its open alerts forward;
+a version without the parent closes them as `fixed`. A registered parent's own alerts reach its child
+only as `lineage_inherited` watch events, never as alerts, and only by a closed table: weight-file, hub
+scan, format and globals findings travel along `adapter-for` only; dataset, paper, licence and base
+model findings along every type; package advisories and watch events never. An `unspecified` edge
+passes only what travels on every type, and an imported edge passes nothing. Which of the parent's
+alerts count is decided by the inventory of the parent version the child names, so a child pinned to
+version 1 still sees a finding version 2 fixed. An inherited finding never counts for `--fail-on`.
 
 Licences are normalised against the SPDX licence list and exceptions list, version 3.29.0, vendored in
 [`src/model_dependabot/licences/`](src/model_dependabot/licences/README.md) with their SHA-256 and a short

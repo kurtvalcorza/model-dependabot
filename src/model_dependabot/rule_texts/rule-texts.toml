@@ -1,7 +1,7 @@
 # Rule texts: one source of the fixed text of each rule ID (feature 010, FR-014).
 # Read README.md beside this file before changing it; bump `version` with any change.
 
-version = 1
+version = 3
 
 [MDB101]
 limitations = "It does not prove the file is malicious: a dangerous global is one that can run code when the file is loaded, and many legitimate checkpoints import one. It does not prove that the file is safe when absent either: a scan that could not finish is a `scan_incomplete` watch event, and an import the scanner could not resolve is reported as `unknown`."
@@ -196,4 +196,18 @@ steps = [
   "Check whether the pinned revision is still held locally.",
   "Find where the base model now lives and pin it, or register a version with another base model: `model-dependabot register MANIFEST.toml --model-id {model_id}`.",
   "Or dismiss the alert with a reason: `model-dependabot alert dismiss {alert_id} --reason risk_accepted --by NAME`.",
+]
+
+[MDB601]
+limitations = "It says the parent's alert applies to an item the parent version you named holds, and that the edge types let it travel. It does not say that this model loads that item: the travel table is a rule of thumb per edge type, not a reading of your bytes."
+closes = "A watch event has no state to close. Each check records it again while the parent alert still travels to this model, and stops once it does not: the parent's alert is dismissed, cleared, withdrawn or fixed by the version you name or an earlier one, or the edge is removed or its type no longer lets the kind travel. Events already recorded stay in the model's history. The parent's owner acts on the parent's alert."
+fix = "Read the parent's alert and decide with the parent's owner. To stop it here, register a version of this model that names another parent version or another parent, or no longer names that parent. Nothing on this model needs dismissing: the event never counts for `--fail-on`."
+not_established = [
+  "whether this alert affects model {model_id}",
+  "whether model {model_id} loads the parent's item the alert names",
+]
+steps = [
+  "Read the inherited event, its path and the parent alert it cites: `model-dependabot alerts {model_id}`.",
+  "Read the parent's alert with its evidence, using the parent alert id the event names: `model-dependabot alert show {alert_id}`.",
+  "If this model should no longer name that parent version, register a version that names another: `model-dependabot register MANIFEST.toml --model-id {model_id}`.",
 ]

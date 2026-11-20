@@ -198,3 +198,44 @@ def test_the_real_fetcher_sends_no_authorization_header() -> None:
         names = {name.lower() for name in request.header_items() for name in [name[0]]}
         assert "authorization" not in names
         assert names <= {"user-agent", "if-none-match"}
+
+
+# --- feature 011: the audit stays read-only with lineage (T055, FR-030) -------------------------
+
+
+def test_the_audit_writes_nothing_with_edges_problems_and_unresolved_references(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from lineage_support import Cli, manifest
+
+    cli = Cli(tmp_path, capsys)
+    for name in ("cycle-a", "cycle-b", "duplicate", "four-types"):
+        cli.ok("register", manifest(name))
+    before = _state([cli.db])
+    for model_id in ("example-cycle-a", "example-cycle-b", "example-duplicate", "example-four"):
+        report = cli.ok("inventory", "audit", model_id)
+        assert report["lineage"]["edges"]
+    assert _state([cli.db]) == before
+
+
+def test_the_audit_never_upgrades_a_pre_011_database(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import sqlite3
+
+    from lineage_support import Cli
+
+    cli = Cli(tmp_path, capsys)
+    cli.db.parent.mkdir(parents=True)
+    conn = sqlite3.connect(cli.db)
+    conn.executescript((FIXTURES / "db" / "schema-pre-011.sql").read_text(encoding="utf-8"))
+    conn.close()
+    before = _state([cli.db])
+    report = cli.ok("inventory", "audit", "legacy")
+    [edge] = report["lineage"]["edges"]
+    assert (edge["relationship"], edge["state"]) == ("unspecified", "unverified")
+    assert _state([cli.db]) == before
+    conn = sqlite3.connect(cli.db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
+    conn.close()
+    assert "lineage_edges" not in tables

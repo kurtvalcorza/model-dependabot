@@ -1,0 +1,9 @@
+[model]
+id = "example-cycle-a"
+name = "Lineage fixture"
+owner = "Owner"
+
+[[parents]]
+model = "example-cycle-b"
+version = 1
+relationship = "fine-tuned-from"

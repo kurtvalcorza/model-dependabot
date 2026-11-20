@@ -32,6 +32,8 @@ from model_dependabot.assurance.trust import (
     measured_entries,
     needs_confirmation,
 )
+from model_dependabot.lineage import graph as lineage_graph
+from model_dependabot.lineage.edges import edge_view
 from model_dependabot.reports import alert_view, is_excepted, watch_view
 from model_dependabot.sources import crossref, datacite
 from model_dependabot.sources.hf import is_commit
@@ -352,6 +354,15 @@ def audit_report(
         "sources_stale": sum(item["stale"] for item in coverage),
         "sources_not_checked": sum(item["status"] == NOT_CHECKED for item in coverage),
     }
+    # Feature 011 (FR-030): every edge with its type, origin and state, and the lineage problems,
+    # read-only: references are resolved in memory and nothing is written.
+    all_edges = store.all_edges()
+    exists = store.version_exists
+    lineage = {
+        "edges": [edge_view(edge, exists) for edge in all_edges.get((model_id, chosen), [])],
+        "problems": lineage_graph.problems(all_edges, exists, [(model_id, chosen)]),
+        "notes": lineage_graph.notes(all_edges, [(model_id, chosen)]),
+    }
     return {
         "model_id": model_id,
         "version": chosen,
@@ -369,4 +380,5 @@ def audit_report(
         },
         "assurance": {"entries": assured, "undeclared_kinds": _undeclared(entries)},
         "coverage": {"sources": coverage, "uncheckable": uncheckable},
+        "lineage": lineage,
     }

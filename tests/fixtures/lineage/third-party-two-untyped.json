@@ -1,0 +1,33 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.7.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "machine-learning-model",
+      "bom-ref": "model:example-imported@1",
+      "name": "example-imported",
+      "version": "1",
+      "pedigree": {
+        "ancestors": [
+          {
+            "type": "machine-learning-model",
+            "bom-ref": "base-model:0",
+            "name": "example-org/base-a",
+            "version": "0123456789abcdef0123456789abcdef01234567",
+            "purl": "pkg:huggingface/example-org/base-a@0123456789abcdef0123456789abcdef01234567"
+          },
+          {
+            "type": "machine-learning-model",
+            "bom-ref": "base-model:1",
+            "name": "example-org/base-b",
+            "version": "89abcdef0123456789abcdef0123456789abcdef",
+            "purl": "pkg:huggingface/example-org/base-b@89abcdef0123456789abcdef0123456789abcdef"
+          }
+        ]
+      }
+    }
+  },
+  "components": []
+}

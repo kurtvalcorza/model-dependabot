@@ -404,3 +404,49 @@ def test_shows_onnx_refuses_wrong_wire_types_sizes_and_zips(
 ) -> None:
     """PR #15 round 2, G2 and G3."""
     assert shows_onnx(lead, len(lead) if total is None else total, tail) is False
+
+
+# --- feature 011: base model entries from the parent list (T018) ---------------------------------
+
+LINEAGE = FIXTURES / "lineage"
+A = "0123456789abcdef0123456789abcdef01234567"
+B = "89abcdef0123456789abcdef0123456789abcdef"
+A2 = "1111111111111111111111111111111111111111"
+
+
+def _bases(name: str) -> list[tuple[str | None, str | None, str | None]]:
+    built = build_entries(load_manifest(LINEAGE / f"{name}.toml"))
+    return [
+        (e["identifier"], e["name"], e["gap_reason"]) for e in built if e["kind"] == "base_model"
+    ]
+
+
+def test_one_base_model_entry_per_distinct_hub_parent() -> None:
+    assert _bases("merge-two") == [
+        (f"pkg:huggingface/example-org/base-a@{A}", "example-org/base-a", None),
+        (f"pkg:huggingface/example-org/base-b@{B}", "example-org/base-b", None),
+    ]
+    assert _bases("same-repo-two-revisions") == [
+        (f"pkg:huggingface/example-org/base-a@{A}", "example-org/base-a", None),
+        (f"pkg:huggingface/example-org/base-a@{A2}", "example-org/base-a", None),
+    ]
+
+
+def test_parents_sharing_a_repository_and_revision_share_one_entry() -> None:
+    assert len(_bases("ambiguous")) == 1
+    assert len(_bases("duplicate")) == 1
+
+
+def test_a_registered_model_parent_makes_no_entry() -> None:
+    assert [name for _, name, _ in _bases("four-types")] == [
+        "example-org/base-a",
+        "example-org/base-b",
+        "example-org/base-c",
+    ]
+
+
+def test_a_gap_parent_makes_the_gap_entry_and_a_legacy_base_model_is_unchanged() -> None:
+    assert _bases("adapter-no-revision") == [(None, "example-org/base-a", "no revision")]
+    legacy = build_entries(load_manifest(EXAMPLE))
+    [base] = [e for e in legacy if e["kind"] == "base_model"]
+    assert base["identifier"] == f"pkg:huggingface/openai-community/gpt2@{COMMIT}"

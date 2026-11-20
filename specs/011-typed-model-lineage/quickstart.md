@@ -72,11 +72,15 @@ grandparent's finding is transitive with the full path; an `unspecified` edge pa
 ## 6. Graph problems (User Story 4)
 
 ```bash
-$MD register $L/cycle-a.toml            # parent model example-b v1: gap "parent not registered"
-$MD register $L/cycle-b.toml            # parent model example-a v1: resolves; cycle formed
-$MD inventory audit example-a           # problem cycle: example-a v1 -> example-b v1 -> example-a v1
-$MD check example-a --source hf-hub     # exit as before; no repeated event; each version visited once
+$MD register $L/cycle-a.toml                    # parent example-cycle-b v1: gap "parent not registered"
+$MD register $L/cycle-b.toml                    # parent example-cycle-a v1 resolves: cycle formed
+$MD inventory audit example-cycle-a             # problem cycle: example-cycle-a v1 -> example-cycle-b v1 -> example-cycle-a v1
+$MD check example-cycle-a --source picklescan   # exit 0; the cycle listed; no watch event
 ```
+
+`--source picklescan` reads nothing over the network for these models. A check with `--source hf-hub`
+of a model with hub parents asks huggingface.co; run it only where the network is meant to be used,
+or through `cli.main` with a recorded fetcher, as `validation.md` records.
 
 ## 7. Discovery and audit (User Story 5)
 

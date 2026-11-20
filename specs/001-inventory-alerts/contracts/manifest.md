@@ -23,6 +23,8 @@ lock = "requirements.lock.txt"       # hash-locked: name==version with --hash li
 [base_model]
 hub = "hf:example-org/example-base-model"
 revision = "0123456789abcdef0123456789abcdef01234567"
+# Feature 011: or, instead of [base_model], one [[parents]] table per parent with a relationship
+# (specs/011-typed-model-lineage/contracts/manifest-parents.md); never both forms in one manifest.
 
 [[datasets]]
 doi = "10.5281/zenodo.1234567"

@@ -17,7 +17,7 @@ import re
 import sys
 from pathlib import Path
 
-from model_dependabot.rules import CLOSING, RULES, RuleTexts, texts_for
+from model_dependabot.rules import CLOSING, PAGES, RuleTexts, closing_for, texts_for
 
 ROOT = Path(__file__).resolve().parent.parent
 LIMITS = "## What it does not prove"
@@ -30,10 +30,10 @@ def _shown(text: str) -> str:
     return re.sub(r"\{([a-z_]+)\}", r"<\1>", text)
 
 
-def render(page: str, texts: RuleTexts) -> str:
+def render(page: str, texts: RuleTexts, closing: str = CLOSING) -> str:
     """``page`` with its three rendered sections replaced from ``texts``."""
     head = page.split(f"\n{LIMITS}\n", 1)[0].rstrip("\n")
-    steps = [_shown(step) for step in texts.steps] + [CLOSING + texts.closes]
+    steps = [_shown(step) for step in texts.steps] + [closing + texts.closes]
     numbered = "\n".join(f"{number}. {step}" for number, step in enumerate(steps, start=1))
     sections = [
         head,
@@ -58,10 +58,11 @@ def render(page: str, texts: RuleTexts) -> str:
 
 
 def main() -> int:
-    for rule in RULES:
+    for rule in PAGES:
         path = ROOT / rule.page
         page = path.read_text("utf-8")
-        path.write_text(render(page, texts_for(rule.rule_id)), encoding="utf-8", newline="\n")
+        rendered = render(page, texts_for(rule.rule_id), closing_for(rule))
+        path.write_text(rendered, encoding="utf-8", newline="\n")
         print(f"rendered {rule.page}")
     return 0
 

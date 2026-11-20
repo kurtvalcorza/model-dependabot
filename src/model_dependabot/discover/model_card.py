@@ -20,12 +20,12 @@ from model_dependabot.discover.candidate import (
     DECLARED,
     NO_REVISION,
     NOT_A_HUB_NAME,
-    SEVERAL_BASE_MODELS,
     UNAVAILABLE,
     candidate,
 )
 from model_dependabot.discover.walk import OUTSIDE, Limits, Walk, larger_than, skip
 from model_dependabot.discover.walk import UNREADABLE as UNREAD
+from model_dependabot.lineage import UNSPECIFIED
 from model_dependabot.upstream.licences import normalise
 
 CARD = "README.md"
@@ -99,21 +99,44 @@ def _texts(value: Any, key: str) -> list[str]:
     raise ValueError(f"{key} is not text or a list of text")
 
 
+# Feature 011 (FR-028, spec Assumptions): the card's ``base_model_relation`` values that map to a
+# relationship type; any other value, or none, leaves the type ``unspecified``. The hub's own
+# inference of a relation is not read.
+RELATIONS = {
+    "finetune": "fine-tuned-from",
+    "adapter": "adapter-for",
+    "merge": "merged-from",
+    "quantized": "quantized-from",
+}
+
+
 def _base_models(meta: Mapping[str, Any], observed_at: str) -> list[dict[str, Any]]:
+    """One candidate parent per name in ``base_model`` (FR-028); one relation applies to all."""
     names = _texts(meta.get("base_model"), "base_model")
     relation = meta.get("base_model_relation")
+    stated = relation.strip() if isinstance(relation, str) and relation.strip() else None
+    relationship = RELATIONS.get(stated or "", UNSPECIFIED)
     found = []
     for name in names:
         gaps = [NO_REVISION]
-        if len(names) > 1:
-            gaps.append(SEVERAL_BASE_MODELS)
         status = DECLARED
         if not _hub_name(name):
             gaps.append(NOT_A_HUB_NAME)
             status = UNAVAILABLE
-        identity: dict[str, Any] = {"hub_repo": name, "revision": None}
-        if isinstance(relation, str) and relation.strip():
-            identity["relation"] = relation.strip()
+        identity: dict[str, Any] = {
+            "hub_repo": name,
+            "revision": None,
+            "relationship": relationship,
+        }
+        if stated is not None:
+            # Owner's ruling on review R9: the card's value is the origin of the type, kept beside
+            # the candidate's own origin (where the name was read) and as the pre-011 ``relation``.
+            identity["relation"] = stated
+            identity["relationship_origin"] = {
+                "file": CARD,
+                "key": "base_model_relation",
+                "value": stated,
+            }
         origin = {"file": CARD, "key": "base_model"}
         found.append(candidate("base_model", identity, origin, status, observed_at, gaps))
     return found

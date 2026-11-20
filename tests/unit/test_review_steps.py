@@ -11,7 +11,7 @@ import pytest
 
 from model_dependabot.assurance.advice import _values, advice_view, review_steps
 from model_dependabot.cli import build_parser
-from model_dependabot.rules import CLOSING, RULES, rule_for, texts_for
+from model_dependabot.rules import CLOSING, PAGES, RULES, rule_for, texts_for
 from model_dependabot.store import Store
 
 NOW = datetime(2026, 11, 20, 9, 0, tzinfo=UTC)
@@ -92,7 +92,7 @@ def test_the_last_step_says_how_the_alert_closes(rule) -> None:
     assert steps[-1]["text"] == CLOSING + texts_for(rule.rule_id).closes
 
 
-@pytest.mark.parametrize("rule", RULES, ids=lambda rule: rule.rule_id)
+@pytest.mark.parametrize("rule", PAGES, ids=lambda rule: rule.rule_id)
 def test_every_command_in_a_step_parses(rule) -> None:
     parser = build_parser()
     for step in texts_for(rule.rule_id).steps:

@@ -1,0 +1,13 @@
+[model]
+id = "example-both"
+name = "Lineage fixture"
+owner = "Owner"
+
+[base_model]
+hub = "hf:example-org/base-a"
+revision = "0123456789abcdef0123456789abcdef01234567"
+
+[[parents]]
+hub = "hf:example-org/base-b"
+revision = "89abcdef0123456789abcdef0123456789abcdef"
+relationship = "merged-from"

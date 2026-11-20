@@ -24,6 +24,7 @@ from model_dependabot.discover.candidate import (
     VERIFIED,
     origin_text,
 )
+from model_dependabot.lineage import RELATIONSHIPS, UNSPECIFIED
 from model_dependabot.manifest import ManifestError, load_manifest
 
 SEVERAL_LOCKS = "several lock files; choose one"
@@ -164,10 +165,16 @@ def _block(item: Mapping[str, Any]) -> list[str]:
     lines = [_comment(_describe(item))]
     kind = item["kind"]
     if kind == "base_model":
+        # Feature 011 (research L9): a [[parents]] block; an unmapped type stays a placeholder,
+        # so the block uncommented is refused until the owner chooses one (FR-002).
+        relationship = identity.get("relationship") or UNSPECIFIED
+        if relationship == UNSPECIFIED:
+            relationship = f"<{'|'.join(RELATIONSHIPS)}>"
         lines += [
-            "# [base_model]",
+            "# [[parents]]",
             _comment(f"hub = {toml_string('hf:' + str(identity['hub_repo']))}"),
             '# revision = "<commit>"',
+            _comment(f"relationship = {toml_string(relationship)}"),
         ]
     elif kind == "dataset" and identity.get("hub_repo"):
         lines += [

@@ -1,9 +1,9 @@
 # model-dependabot Constitution
 
 model-dependabot raises Dependabot-style alerts for AI models. It watches what a model depends on (the
-code libraries in its runtime environment, its weight files, the base model it was fine-tuned from, its
-training datasets and known weaknesses of its model family) and tells the model's owner when one of
-them becomes vulnerable, changes or is withdrawn.
+code libraries in its runtime environment, its weight files, the models it was derived from by
+fine-tuning, adaptation, merging or quantisation, its training datasets and known weaknesses of its
+model family) and tells the model's owner when one of them becomes vulnerable, changes or is withdrawn.
 
 ## Core Principles
 
@@ -85,4 +85,4 @@ follow semantic versioning: MAJOR when a principle is removed or redefined, MINO
 section is added or materially expanded, PATCH for clarifications. Each feature plan's Constitution
 Check verifies compliance; a justified exception is recorded in that plan's Complexity Tracking.
 
-**Version**: 1.0.3 | **Ratified**: 2026-10-23 | **Last Amended**: 2026-10-25
+**Version**: 1.1.0 | **Ratified**: 2026-10-23 | **Last Amended**: 2026-11-20

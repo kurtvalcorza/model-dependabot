@@ -32,7 +32,13 @@ from model_dependabot.assurance.format_check import measure_imported, record_imp
 from model_dependabot.discover.project import discover, write_proposal
 from model_dependabot.discover.propose import OutputExistsError, OutputLinkError, refuse_link
 from model_dependabot.inventory.build import build_entries, record_licences
-from model_dependabot.inventory.cyclonedx import InventoryError, export_bom, import_bom, validate
+from model_dependabot.inventory.cyclonedx import (
+    InventoryError,
+    export_bom,
+    import_ancestors,
+    import_bom,
+    validate,
+)
 from model_dependabot.inventory.record import (
     CheckedRecord,
     RecordError,
@@ -47,6 +53,8 @@ from model_dependabot.lifecycle import (
     reevaluate_version,
     run_check,
 )
+from model_dependabot.lineage import graph as lineage_graph
+from model_dependabot.lineage.edges import edge_line, edge_view, edges_from_manifest
 from model_dependabot.manifest import ManifestError, load_manifest
 from model_dependabot.matching.severity import SEVERITIES
 from model_dependabot.reports import (
@@ -58,6 +66,7 @@ from model_dependabot.reports import (
     audit_text,
     claim_note,
     discover_text,
+    edge_lines,
     evidence_line,
     history_report,
     history_text,
@@ -439,6 +448,27 @@ def _inventory_text(
     return "\n".join(lines)
 
 
+def _lineage(store: Store, model_id: str, version: int) -> dict[str, Any]:
+    """The version's edges and lineage problems (feature 011, contracts/edge-evidence.md).
+
+    Registered-model references are resolved against the store at the time of the call (FR-021a).
+    """
+    exists = store.version_exists
+    edges = [edge_view(edge, exists) for edge in store.edges(model_id, version)]
+    found = lineage_graph.problems(store.all_edges(), exists, [(model_id, version)])
+    return {"edges": edges, "problems": found}
+
+
+def _lineage_text(lineage: Mapping[str, Any]) -> str:
+    count = len(lineage["edges"])
+    lines = [f"Lineage ({count} edge{'' if count == 1 else 's'}):"]
+    lines += [edge_line(view) for view in lineage["edges"]]
+    if lineage["problems"]:
+        lines.append(f"Lineage problems ({len(lineage['problems'])}):")
+        lines += [f"  {lineage_graph.problem_text(item)}" for item in lineage["problems"]]
+    return "\n".join(lines)
+
+
 def _version_of(store: Store, model_id: str, version: int | None) -> int:
     if store.get_model(model_id) is None:
         raise InvalidInputError(f"no model {model_id!r} is registered")
@@ -459,6 +489,7 @@ def _record(
     base_dir: Path | None = None,
     registration_record_sha256: str | None = None,
     origin: str,
+    edges: Sequence[Mapping[str, Any]] = (),
 ) -> int:
     """Record the next version with its validated CycloneDX 1.7 document (FR-004, FR-005).
 
@@ -467,7 +498,7 @@ def _record(
     if store.get_model(model_id) is None:
         store.add_model(model_id, name=name, owner=owner)
     version = (store.latest_version(model_id) or 0) + 1
-    document = export_bom(model_id, version, entries)
+    document = export_bom(model_id, version, entries, edges)
     try:
         validate(document)
     except ValidationError as error:  # the input made an invalid inventory: exit 1, not 3
@@ -481,6 +512,7 @@ def _record(
         base_dir=base_dir,
         registration_record_sha256=registration_record_sha256,
         origin=origin,
+        edges=edges,
     )
     if recorded != version:
         raise RuntimeError(f"expected to record version {version}, recorded {recorded}")
@@ -499,11 +531,15 @@ def _check_text(payload: Mapping[str, Any]) -> str:
             f" {len(model['carried_forward'])} carried forward, {len(model['closed'])} closed,"
             f" {len(model['watch_events'])} watch events"
         )
+        # Feature 011 (FR-021, review R4): lineage problems of the checked version; no exit code.
+        for problem in (model.get("lineage") or {}).get("problems", []):
+            lines.append(f"  lineage problem {lineage_graph.problem_text(problem)}")
     return "\n".join(lines)
 
 
 def _alert_text(payload: Mapping[str, Any]) -> str:
     lines = [alert_line(payload).strip(), f"Model: {payload['model_id']}"]
+    lines += [line.removeprefix("    ") for line in edge_lines(payload["cause"])]
     lines += [f"  {evidence_line(evidence)}" for evidence in payload["evidence"]]
     return "\n".join(lines)
 
@@ -627,6 +663,14 @@ def make_handlers(
             entries = build_entries(manifest, fetcher_, local=local)
             _route_dois(store, fetcher_, entries)
             record_licences(entries, fetcher_, store.get_routing)
+            # Feature 011: one edge per parent identity, its source the manifest or, from a
+            # registration record, the record (FR-006); the record carries no lineage of its own.
+            edges = edges_from_manifest(
+                manifest,
+                origin="manifest" if checked is None else "record",
+                source_file=Path(args.manifest if checked is None else args.from_record).name,
+                source_sha256=manifest.sha256 if checked is None else checked.record_sha256,
+            )
             version = _record(
                 store,
                 model_id,
@@ -637,8 +681,10 @@ def make_handlers(
                 base_dir=Path(args.manifest).parent,
                 registration_record_sha256=None if checked is None else checked.record_sha256,
                 origin="manifest" if checked is None else "record",
+                edges=edges,
             )
             payload = _inventory_payload(model_id, version, store.entries(model_id, version))
+            payload["lineage"] = _lineage(store, model_id, version)
             payload["alerts"] = reevaluate_version(store, model_id, version)
             heading = f"Registered {model_id} v{version}"
             if checked is not None:
@@ -651,7 +697,8 @@ def make_handlers(
                     **apply_recorded_scans(store, model_id, version, checked.record_sha256, scans),
                 }
                 heading += f" from registration record {checked.record_sha256}"
-        return CommandResult(payload, _inventory_text(payload, heading))
+        text = _inventory_text(payload, heading) + "\n" + _lineage_text(payload["lineage"])
+        return CommandResult(payload, text)
 
     def import_inventory(args: argparse.Namespace) -> CommandResult:
         try:
@@ -663,6 +710,9 @@ def make_handlers(
             entries = import_bom(document)
         except InventoryError as error:
             raise InvalidInputError(str(error)) from None
+        # Feature 011: every imported edge is origin import and unverified (FR-007, FR-011).
+        digest = hashlib.sha256(raw).hexdigest()
+        edges = import_ancestors(document, source_file=Path(args.bom).name, source_sha256=digest)
         model_id = args.model_id
         base_dir = Path(args.bom).parent
         with _open(args.db) as store:
@@ -679,16 +729,18 @@ def make_handlers(
                 store,
                 model_id,
                 entries,
-                hashlib.sha256(raw).hexdigest(),
+                digest,
                 base_dir=base_dir,
                 origin="import",
+                edges=edges,
             )
             record_import_contradictions(store, model_id, version, measures)
             payload = _inventory_payload(model_id, version, store.entries(model_id, version))
+            payload["lineage"] = _lineage(store, model_id, version)
             payload["alerts"] = reevaluate_version(store, model_id, version)
             notes = _claim_notes(store, model_id, version)
         text = _inventory_text(payload, f"Imported {model_id} v{version}", notes)
-        return CommandResult(payload, text)
+        return CommandResult(payload, text + "\n" + _lineage_text(payload["lineage"]))
 
     def show(args: argparse.Namespace) -> CommandResult:
         with _open(args.db) as store:
@@ -696,9 +748,10 @@ def make_handlers(
             payload = _inventory_payload(
                 args.model_id, version, store.entries(args.model_id, version)
             )
+            payload["lineage"] = _lineage(store, args.model_id, version)
             notes = _claim_notes(store, args.model_id, version)
         text = _inventory_text(payload, f"{args.model_id} v{version}", notes)
-        return CommandResult(payload, text)
+        return CommandResult(payload, text + "\n" + _lineage_text(payload["lineage"]))
 
     def export(args: argparse.Namespace) -> CommandResult:
         with _open(args.db) as store:
@@ -775,6 +828,14 @@ def make_handlers(
             )
             # Research U13: keep the ETag cache bounded; bodies evidence refers to stay.
             store.prune_etag_cache()
+            # Feature 011 (FR-021, US4 AS1, review R4): each checked version's lineage problems,
+            # listed only when there are some, with no overview row and no exit code change.
+            all_edges = store.all_edges()
+            for model in outcome.models:
+                checked = [(model["model_id"], model["version"])]
+                found_problems = lineage_graph.problems(all_edges, store.version_exists, checked)
+                if found_problems:
+                    model["lineage"] = {"problems": found_problems}
             covered = overview.payload(store, outcome.run_id)
             found = None
             if args.fail_on is not None:
