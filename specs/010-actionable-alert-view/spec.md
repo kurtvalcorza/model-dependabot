@@ -202,9 +202,11 @@ JSON and exit codes byte for byte.
   evidence, and does not say the model was never affected.
 - A package alert for an alias group (several advisory ids, feature 006, `lifecycle.py:858-880`): one view,
   listing every id; severity is the alert's stored severity, unchanged.
-- A package locked with an environment marker (`src/model_dependabot/lockfile.py:4`): markers are not stored
-  (owner's ruling Q1, 2026-11-19), so every package view states that limitation and lists "whether the package is
-  installed where the model runs" as not established; storing markers is follow-up issue #28.
+- A package locked with an environment marker (`src/model_dependabot/lockfile.py:4`): under the owner's ruling Q1
+  (2026-11-19) this feature stored no markers and every package view stated that limitation. Issue #28 stores the
+  marker of each lock entry: the view names it (or says the entry has none) and still lists "whether the package is
+  installed where the model runs" as not established, since the marker is not evaluated. Only an entry whose marker
+  is not recorded (written before #28, or imported) states the limitation.
 - A hub weight file (no local bytes): the view says no local scan read it and the hub's own scan verdict is the
   source.
 - A weight file registered from a registration record whose bytes are absent (`weight_file_absent`, feature 005):

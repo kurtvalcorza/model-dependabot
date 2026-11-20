@@ -102,8 +102,11 @@ Only `model.id` is required. Anything missing or inexact is recorded as a gap wi
 without a revision, a lock line without `==` or without a hash) and registration still succeeds.
 Unknown keys are an error, so a typo cannot silently drop a dependency. A hash-locked lock file can be
 produced with `uv export --format requirements-txt` or `pip-compile --generate-hashes`. Environment
-markers (`; sys_platform == "win32"` and the like) are not evaluated: every locked package is checked,
-so a platform-only package can raise an alert even where it is never installed.
+markers (`; sys_platform == "win32"` and the like) are recorded with each locked package but not
+evaluated: every locked package is checked, so a platform-only package can raise an alert even where it
+is never installed. The advisory view (`--advice`) names the marker. `inventory show --json` lists a
+package's `marker` only when its lock line has one, so a line without a marker and an entry whose marker
+was not recorded both omit it there; the advisory view tells the two apart.
 
 The full rules are in [`specs/001-inventory-alerts/contracts/manifest.md`](specs/001-inventory-alerts/contracts/manifest.md)
 and, for `paper_doi` and hub datasets, [`specs/002-upstream-watch/contracts/manifest.md`](specs/002-upstream-watch/contracts/manifest.md).
@@ -315,9 +318,10 @@ advisory view per alert (JSON: an `advice` key, last, on each alert; `alerts` al
   the alert closes.
 
 The view reads only: it writes nothing to the store, asks no source and changes no exit code. It
-scores nothing and settles no impact. Package alerts state one limitation of the inventory: it does
-not record environment markers, so whether a package is installed where the model runs is not
-established (issue #28). The fixed texts come from `src/model_dependabot/rule_texts/rule-texts.toml`,
+scores nothing and settles no impact. A package entry's place names its lock line's environment
+marker, or says it has none; the marker is not evaluated, so whether a package is installed where the
+model runs is not established. An entry recorded before markers were stored (issue #28), or imported
+from an inventory, has no recorded marker, and its view states that limitation. The fixed texts come from `src/model_dependabot/rule_texts/rule-texts.toml`,
 which also renders three sections of every rule page.
 
 ### Dismissals hold

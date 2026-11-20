@@ -67,10 +67,17 @@ def test_register_show_export_import(run, tmp_path: Path) -> None:
     # claims are imported, so they are no longer the owner's.
     assert _without_origin(copy_shown["entries"]) == _without_origin(shown["entries"])
     assert _without_origin(copy_shown["gaps"]) == _without_origin(shown["gaps"])
+    # The lock's one marker-gated package shows its marker; the imported copy has none recorded.
+    markers = {e["name"]: e["marker"] for e in shown["entries"] if "marker" in e}
+    assert markers == {"colorama": 'sys_platform == "win32"'}
+    assert not any("marker" in e for e in copy_shown["entries"] + copy_shown["gaps"])
 
 
 def _without_origin(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [{k: v for k, v in entry.items() if k != "format_origin"} for entry in entries]
+    """Without ``format_origin`` (an import never keeps it) and ``marker`` (the export does not
+    carry the lock marker, issue #28)."""
+    dropped = ("format_origin", "marker")
+    return [{k: v for k, v in entry.items() if k not in dropped} for entry in entries]
 
 
 def test_an_inventory_that_fails_validation_is_invalid_input(

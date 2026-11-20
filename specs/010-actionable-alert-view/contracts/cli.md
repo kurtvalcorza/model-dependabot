@@ -32,7 +32,7 @@ advisory on an `import` version, abridged:
 
 ```json
 "advice": {
-  "schema": "advice/1",
+  "schema": "advice/2",
   "alert_id": 7,
   "severity": {"value": "HIGH", "origin": "cvss_v3", "note": "band of the source's CVSS vector"},
   "entry": {
@@ -40,8 +40,10 @@ advisory on an `import` version, abridged:
     "identifier": "pkg:pypi/pillow@9.0.0", "matched_by": "identifier",
     "in_current_version": true, "last_held_in_version": 2, "opened_in_version": 1, "closed_by_version": null,
     "places": [
-      {"version": 2, "origin": "import", "section": null, "location": null, "revision": "9.0.0"},
-      {"version": 1, "origin": "manifest", "section": "[environment] lock", "location": null, "revision": "9.0.0"}
+      {"version": 2, "origin": "import", "section": null, "location": null, "revision": "9.0.0",
+       "marker": {"state": "not_recorded", "expression": null}},
+      {"version": 1, "origin": "manifest", "section": "[environment] lock", "location": null, "revision": "9.0.0",
+       "marker": {"state": "set", "expression": "sys_platform == \"linux\""}}
     ]
   },
   "relationship": {
@@ -90,8 +92,8 @@ of the model or of how complete its inventory is.": `open` "No alert is open for
 Advice for #7 MDB201 (docs/rules/MDB201.md)
   Severity: HIGH (cvss_v3, band of the source's CVSS vector)
   Entry: package pkg:pypi/pillow@9.0.0, in the current version (v2); opened in v1
-    v2 import, no manifest section, 9.0.0
-    v1 manifest, [environment] lock, 9.0.0
+    v2 import, no manifest section, 9.0.0, marker not recorded
+    v1 manifest, [environment] lock, 9.0.0, marker sys_platform == "linux"
   Relationship: package pinned in this model's environment lock (imported declaration, v2)
   Runtime use: unknown: no source observes runtime use and the owner has not declared it for this alert
   Established:
@@ -133,3 +135,6 @@ error. `--advice` adds no code and changes none (FR-017).
   note of `advice_summary`, worded for the `--state` filter.
 - `check`, `history`, `run show` and every other command refuse `--advice` as any unknown option
   (exit 1).
+- Issue #28: `schema` is `advice/2`, which adds `places[].marker` to `advice/1`. A package place carries `marker` (`set`, `none` or `not_recorded`; data-model.md,
+  Issue #28) and its text line ends `, marker <expression>`, `, no marker` or
+  `, marker not recorded`. The marker limitation is listed only for a `not_recorded` marker.

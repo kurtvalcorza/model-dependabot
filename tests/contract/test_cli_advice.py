@@ -73,7 +73,7 @@ def test_the_payload_is_today_s_plus_advice_last(advice_db: tuple[Path, dict[str
         assert after == before and list(after) == list(before)
         assert list(advice) == VIEW_FIELDS
         assert list(advice["entry"]) == ENTRY_FIELDS
-        assert advice["schema"] == "advice/1"
+        assert advice["schema"] == "advice/2"
         assert advice["alert_id"] == alert_id
         assert advice["impact"] == "impact undetermined"
         assert advice["severity"] == {

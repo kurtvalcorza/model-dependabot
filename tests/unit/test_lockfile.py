@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from model_dependabot.lockfile import LockEntry, parse_lock, read_lock
+from model_dependabot.lockfile import LockEntry, _loose_marker, parse_lock, read_lock
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "locks"
 UV_LOCK = FIXTURES / "uv-export-trimmed.txt"
@@ -123,3 +123,68 @@ def test_numbered_lines_give_the_line_each_requirement_starts_on() -> None:
     assert [number for number, _ in numbered_lines(text)] == [3, 6]
     first = numbered_lines(text)[0][1]
     assert first.startswith("numpy==2.1.0") and "--hash=sha256:" in first
+
+
+# --- environment markers (issue #28) -------------------------------------------------------------
+
+HASH = " --hash=sha256:" + "ab" * 32
+
+
+def test_an_environment_marker_is_kept_normalised() -> None:
+    entries = _by_name(read_lock(UV_LOCK))
+    assert entries["colorama"].marker == 'sys_platform == "win32"'
+    assert entries["attrs"].marker is None
+
+
+@pytest.mark.parametrize(
+    ("line", "marker"),
+    [
+        ('pillow==12.3.0 ; sys_platform == "linux"' + HASH, 'sys_platform == "linux"'),
+        ("pillow==12.3.0;python_version<'3.12'" + HASH, 'python_version < "3.12"'),
+        ("pillow==12.3.0" + HASH, None),
+        ('numpy>=2.0 ; platform_machine == "x86_64"', 'platform_machine == "x86_64"'),
+        ("requests==2.32.5", None),
+    ],
+)
+def test_a_marker_is_kept_on_pinned_entries_and_gaps(line: str, marker: str | None) -> None:
+    [entry] = parse_lock(line)
+    assert entry.marker == marker
+
+
+def test_a_marker_does_not_change_pinning_or_hashes() -> None:
+    [gated] = parse_lock('pillow==12.3.0 ; sys_platform == "linux"' + HASH)
+    [plain] = parse_lock("pillow==12.3.0" + HASH)
+    assert (gated.name, gated.version, gated.hashes, gated.pinned, gated.gap_reason) == (
+        plain.name,
+        plain.version,
+        plain.hashes,
+        plain.pinned,
+        plain.gap_reason,
+    )
+
+
+# --- review R28-1/R28-4: the marker of a line packaging cannot read -----------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "marker"),
+    [
+        ('pillow==9.0.0 ; python_version<"3.12"', 'python_version < "3.12"'),
+        ('pillow==9.0.0 ; sys_platform == "linux"  # pinned', 'sys_platform == "linux"'),
+        ("pillow==9.0.0 # via a; b", None),
+        ("pillow==9.0.0 ; not a marker", "not a marker"),
+        ("pillow==9.0.0 ;", None),
+        ("pillow==9.0.0", None),
+    ],
+)
+def test_the_loose_marker_reads_after_the_semicolon_outside_a_comment(
+    text: str, marker: str | None
+) -> None:
+    assert _loose_marker(text) == marker
+
+
+def test_an_inline_comment_is_never_read_as_a_marker() -> None:
+    [commented] = parse_lock("pillow==9.0.0" + HASH + " # via a; b")
+    assert commented.marker is None
+    [pinned] = parse_lock('pillow==9.0.0 ; sys_platform == "linux"' + HASH + "  # pinned")
+    assert pinned.marker == 'sys_platform == "linux"'

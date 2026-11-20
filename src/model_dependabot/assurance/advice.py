@@ -18,6 +18,9 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from model_dependabot.assurance.affected import (
+    MARKER_NONE,
+    MARKER_SET,
+    marker,
     matched_entries,
     model_versions,
     relationship,
@@ -29,7 +32,8 @@ from model_dependabot.reports import view_state
 from model_dependabot.rules import CLOSING, rule_for, texts_for
 from model_dependabot.store import Store
 
-SCHEMA = "advice/1"
+# advice/2 adds places[].marker (issue #28).
+SCHEMA = "advice/2"
 IMPACT = "impact undetermined"
 NOT_RECORDED = "not recorded"
 EXCEPTION_SOURCE = "exception"
@@ -50,9 +54,19 @@ EMPTY_LISTING_NOTES = {
     "all": "This model has no alert. " + NOT_AN_ASSESSMENT,
 }
 EMPTY_MODEL_NOTE = EMPTY_LISTING_NOTES["open"]
+# The limitation of a package entry whose environment marker is not known (issue #28). An entry
+# whose marker is recorded, as a marker or as none, has no marker limitation.
 MARKER_LIMITATION = (
-    "This inventory does not record environment markers, so it cannot say whether the package is"
-    " installed where the model runs."
+    "This entry was recorded before environment markers were stored, so the inventory cannot say"
+    " which environment marker, if any, the lock gave the package."
+)
+MARKER_NOT_IMPORTED = (
+    "This entry was imported from an inventory that records no environment markers, so the"
+    " inventory cannot say which environment marker, if any, the lock gave the package."
+)
+MARKER_UNRESOLVED = (
+    "No inventory entry was resolved for this alert, so no environment marker is known for the"
+    " package."
 )
 DISMISS_COMMAND = "`model-dependabot alert dismiss "
 CLOSED_STEP = (
@@ -223,17 +237,38 @@ def not_established(
                 "whether the file's bytes match their record: the bytes were not read in this place"
             )
     if alert["kind"] == "package_advisory":
-        texts.append(
-            f"whether {values['package'] or NOT_RECORDED} is installed where the model runs"
-        )
+        text = f"whether {values['package'] or NOT_RECORDED} is installed where the model runs"
+        found = None if first is None else marker(first["entry"])
+        if found is not None and found["state"] == MARKER_SET:
+            text += (
+                f": the lock installs it only where `{found['expression']}` holds, and this view"
+                " does not evaluate the marker"
+            )
+        texts.append(text)
     return [{"kind": "not_established", "text": text} for text in texts]
 
 
-def limitations(alert: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """The rule's limitations text, unchanged; a package alert adds the marker limitation (Q1)."""
+def _marker_limitation(first: Mapping[str, Any] | None) -> str | None:
+    """The marker limitation of a package alert whose entry in ``places[0]`` has no known marker
+    (issue #28); ``None`` when the marker is recorded, as an expression or as none."""
+    if first is None:
+        return MARKER_UNRESOLVED
+    found = marker(first["entry"])
+    if found is None or found["state"] in (MARKER_SET, MARKER_NONE):
+        return None
+    return MARKER_NOT_IMPORTED if first["origin"] == "import" else MARKER_LIMITATION
+
+
+def limitations(
+    alert: Mapping[str, Any], first: Mapping[str, Any] | None = None
+) -> list[dict[str, Any]]:
+    """The rule's limitations text, unchanged; a package alert whose entry's marker is not
+    recorded adds the marker limitation (Q1, issue #28)."""
     texts = [texts_for(rule_for(alert["kind"]).rule_id).limitations]
     if alert["kind"] == "package_advisory":
-        texts.append(MARKER_LIMITATION)
+        extra = _marker_limitation(first)
+        if extra is not None:
+            texts.append(extra)
     return [{"kind": "limitation", "text": text} for text in texts]
 
 
@@ -344,7 +379,7 @@ def advice_view(
         "runtime_use": runtime_use(alert, _same_identifier(alert, model_alerts, versions)),
         "established": established(alert, store.alert_evidence(alert["alert_id"])),
         "not_established": not_established(store, alert, entry, first),
-        "limitations": limitations(alert),
+        "limitations": limitations(alert, first),
         "claims": claims(store, alert, first),
         "impact": IMPACT,
         "owner_decision": owner_decision(store, alert),
@@ -380,8 +415,16 @@ def _entry_lines(entry: Mapping[str, Any]) -> list[str]:
         parts = [f"v{place['version']} {place['origin'] or 'legacy'}"]
         parts.append(place["section"] or "no manifest section")
         parts += [value for value in (place["location"], place["revision"]) if value]
+        if place.get("marker") is not None:
+            parts.append(_marker_part(place["marker"]))
         lines.append("    " + ", ".join(parts))
     return lines
+
+
+def _marker_part(found: Mapping[str, Any]) -> str:
+    if found["state"] == MARKER_SET:
+        return f"marker {found['expression']}"
+    return "no marker" if found["state"] == MARKER_NONE else "marker not recorded"
 
 
 def _relationship_line(view: Mapping[str, Any]) -> str:

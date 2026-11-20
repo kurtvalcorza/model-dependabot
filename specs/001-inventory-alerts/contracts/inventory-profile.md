@@ -40,6 +40,8 @@ Rules:
 - Project-specific values use `properties` with the `model-dependabot:` prefix and are listed above; no
   other custom fields (constitution II).
 - Round trip: `export` then `import` yields the same entries and identifiers (SC-005).
+  A package's lock marker (issue #28) is not exported, so an imported entry's marker is not
+  recorded (null); the advisory view says so.
 - Imported documents may be CycloneDX 1.5, 1.6 or 1.7; entries the mapping cannot read become gaps
   rather than errors.
 - Two dataset components sharing one `bom-ref` are imported as one dataset entry, their hashes and

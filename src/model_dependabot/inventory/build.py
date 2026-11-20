@@ -454,6 +454,9 @@ def _packages(lock: Path) -> list[dict[str, Any]]:
                 name=item.name,
                 version=item.version,
                 hashes=list(item.hashes) or None,
+                # Recorded as read (issue #28): the empty string is a lock line with no marker,
+                # which ``store.entries`` tells apart from a null (not recorded) marker.
+                marker=item.marker or "",
             )
         )
     return entries
