@@ -104,7 +104,9 @@ Unknown keys are an error, so a typo cannot silently drop a dependency. A hash-l
 produced with `uv export --format requirements-txt` or `pip-compile --generate-hashes`. Environment
 markers (`; sys_platform == "win32"` and the like) are recorded with each locked package but not
 evaluated: every locked package is checked, so a platform-only package can raise an alert even where it
-is never installed. The advisory view (`--advice`) names the marker.
+is never installed. The advisory view (`--advice`) names the marker. `inventory show --json` lists a
+package's `marker` only when its lock line has one, so a line without a marker and an entry whose marker
+was not recorded both omit it there; the advisory view tells the two apart.
 
 The full rules are in [`specs/001-inventory-alerts/contracts/manifest.md`](specs/001-inventory-alerts/contracts/manifest.md)
 and, for `paper_doi` and hub datasets, [`specs/002-upstream-watch/contracts/manifest.md`](specs/002-upstream-watch/contracts/manifest.md).
