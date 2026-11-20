@@ -210,3 +210,94 @@ def test_two_registered_parents_both_pass_their_findings_down() -> None:
     assert _ids(found) == [11, 12]
     assert {f["parent"] for f in found} == {("left", 1), ("right", 1)}
     assert {f["reach"] for f in found} == {"direct"}
+
+
+# --- review round 2 (owner's rulings on R2-1, R2-3 and R2-4) ------------------------------------
+
+
+def test_two_versions_of_one_parent_each_get_their_own_finding() -> None:
+    """R2-3: one inherited finding per parent version (data-model.md, Inherited finding)."""
+    world = World()
+    world.version("p", 1, identifiers=[FILE])
+    world.version("p", 2, identifiers=[FILE])
+    world.version("q", 1, [ref("p", "fine-tuned-from", version=1)])
+    world.version("child", 1, [ref("p", "fine-tuned-from", version=2), ref("q", "fine-tuned-from")])
+    world.alerts["p"] = [alert(5, "dataset_retracted", FILE)]
+    found = world.run(("child", 1))
+    assert [(f["parent"], f["reach"]) for f in found] == [
+        (("p", 1), "transitive"),
+        (("p", 2), "direct"),
+    ]
+    assert len({propagate.entry_identifier(f) for f in found}) == 2
+
+
+def _typed_or_not(typed: str, untyped: str) -> World:
+    """Two equal-length paths to grand: one fully typed, one with an unspecified hop."""
+    world = World()
+    world.version("grand", 1, identifiers=[FILE])
+    world.version(typed, 1, [ref("grand", "fine-tuned-from")])
+    world.version(untyped, 1, [ref("grand", "unspecified")])
+    world.version("child", 1, [ref(typed, "merged-from"), ref(untyped, "merged-from")])
+    world.alerts["grand"] = [alert(9, "licence_changed", FILE)]
+    return world
+
+
+def test_a_fully_typed_path_is_preferred_whichever_name_sorts_first() -> None:
+    """R2-1: the reported path and its unspecified mark do not depend on id order."""
+    for typed, untyped in (("a", "b"), ("b", "a")):
+        [finding] = _typed_or_not(typed, untyped).run(("child", 1))
+        assert finding["relationship_unspecified"] is False, (typed, untyped)
+        assert [hop["parent"] for hop in finding["paths"][0]] == [f"{typed}@1", "grand@1"]
+        assert [hop["relationship"] for hop in finding["paths"][0]] == [
+            "merged-from",
+            "fine-tuned-from",
+        ]
+
+
+def test_the_shortest_qualifying_path_is_reported() -> None:
+    """R2-4 (N5): a direct edge wins over a longer route to the same parent."""
+    world = World()
+    world.version("grand", 1, identifiers=[FILE])
+    world.version("mid", 1, [ref("grand", "fine-tuned-from")])
+    world.version("child", 1, [ref("mid", "fine-tuned-from"), ref("grand", "merged-from")])
+    world.alerts["grand"] = [alert(3, "dataset_retracted", FILE)]
+    [finding] = [f for f in world.run(("child", 1)) if f["parent"] == ("grand", 1)]
+    assert finding["reach"] == "direct"
+    assert [hop["relationship"] for hop in finding["paths"][0]] == ["merged-from"]
+
+
+def test_a_cycle_back_to_the_child_never_reports_its_own_alert() -> None:
+    """R2-4 (N8): the child is not its own parent."""
+    world = World()
+    world.version("child", 1, [ref("p", "fine-tuned-from")], [FILE])
+    world.version("p", 1, [ref("child", "fine-tuned-from")], [LATER])
+    world.alerts["child"] = [alert(1, "dataset_retracted", FILE)]
+    world.alerts["p"] = [alert(2, "dataset_retracted", LATER)]
+    assert [(f["parent"], f["parent_alert"]["alert_id"]) for f in world.run(("child", 1))] == [
+        (("p", 1), 2)
+    ]
+
+
+def test_an_unspecified_lower_hop_marks_a_transitive_finding() -> None:
+    """R2-4 (N9): the mark covers every hop of the path, not only the last."""
+    world = World()
+    world.version("grand", 1, identifiers=[FILE])
+    world.version("mid", 1, [ref("grand", "fine-tuned-from")])
+    world.version("child", 1, [ref("mid", "unspecified")])
+    world.alerts["grand"] = [alert(4, "dataset_retracted", FILE)]
+    [finding] = world.run(("child", 1))
+    assert (finding["reach"], finding["relationship_unspecified"]) == ("transitive", True)
+
+
+def test_equally_good_paths_are_all_listed_whatever_the_names() -> None:
+    """R2-1: a tie on length, mark and types lists every tied path, so naming cannot pick one."""
+    for left, right in (("a", "b"), ("z", "b")):
+        world = World()
+        world.version("grand", 1, identifiers=[FILE])
+        world.version(left, 1, [ref("grand", "fine-tuned-from")])
+        world.version(right, 1, [ref("grand", "fine-tuned-from")])
+        world.version("child", 1, [ref(left, "merged-from"), ref(right, "merged-from")])
+        world.alerts["grand"] = [alert(6, "licence_changed", FILE)]
+        [finding] = world.run(("child", 1))
+        middles = sorted(path[0]["parent"] for path in finding["paths"])
+        assert middles == sorted([f"{left}@1", f"{right}@1"])

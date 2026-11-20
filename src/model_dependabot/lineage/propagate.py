@@ -11,13 +11,12 @@ L7): those whose item is in that version's own stored inventory, open or fixed b
 
 The walk is breadth first over resolved, owner-stated registered-model edges. A finding reaches the
 child when at least one path passes it on every hop, whatever the order of model ids (owner's
-ruling on review R1); the walk is bounded (FR-022): a version is expanded only for kinds no earlier
-path brought it. An imported (``unverified``) reference carries nothing (FR-010a).
+ruling on review R1); the walk is bounded (FR-022): each version is labelled at most once per
+travelling kind. An imported (``unverified``) reference carries nothing (FR-010a).
 """
 
 from __future__ import annotations
 
-from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -101,6 +100,16 @@ def _owner_parents(edges: Sequence[Edge], exists: Exists) -> dict[Node, list[Edg
     return by_parent
 
 
+def _edge_key(edge: Edge) -> tuple[str, str, str]:
+    return (str(edge["relationship"]), str(edge.get("origin")), str(edge.get("edge_id")))
+
+
+# The most equally good paths one finding lists; beyond it the smallest by model versions are kept.
+MAX_PATHS = 16
+
+Label = tuple[bool, tuple[tuple[str, ...], ...]]
+
+
 def inherited(
     child: Node,
     edges_of: Callable[[Node], Sequence[Edge]],
@@ -108,58 +117,104 @@ def inherited(
     entries_of: Callable[[Node], Sequence[Mapping[str, Any]]],
     exists: Exists,
 ) -> list[dict[str, Any]]:
-    """The inherited findings of ``child``: one per parent alert that reaches it (FR-018).
+    """The inherited findings of ``child``: one per parent alert per parent version (FR-018).
 
-    A parent alert reaches the child when at least one path exists on which every hop passes its
-    kind (owner's ruling, review R1 to R3). The walk is breadth first over states (version, kinds
-    that can still travel down from it): a version is expanded again only when a path brings kinds
-    no earlier path brought, so the result does not depend on the order of model ids, a cycle ends
-    (the kinds on a path only shrink, and the child starts with all of them) and each version is
-    expanded at most once per travelling kind. Each version's edges, alerts and entries are read
-    once.
+    A parent alert reaches the child when at least one path passes its kind on every hop (owner's
+    ruling, review R1 to R3). For each travelling kind the walk is breadth first, layer by layer,
+    over the hops that pass the kind. A parent version's best paths are its shortest qualifying
+    ones, preferring among equal lengths those with no ``unspecified`` hop, then the smallest
+    sequence of hop types (owner's ruling on review R2-1). Every path that ties on all three is
+    listed, so the paths and the ``relationship_unspecified`` mark do not depend on how models
+    are named; past ``MAX_PATHS`` the smallest by model versions are kept. The child is never a
+    parent of itself, so a cycle back to it reports none of its own alerts, and the walk is
+    bounded: each version is labelled at most once per travelling kind, and its edges, alerts and
+    entries are read once.
 
-    Each finding is ``{parent, parent_alert, reach, paths, relationship_unspecified}``, taken from
-    the shortest path that carries it (``reach`` is ``direct`` for one edge); ``paths`` lists that
-    path once per edge of its last hop when the parent is named by several edges.
+    A child that reaches two versions of one parent gets a finding for each (data-model.md,
+    Inherited finding; review R2-3). Each finding is ``{parent, parent_alert, reach, paths,
+    relationship_unspecified}``; ``paths`` lists each best path once per edge of its last hop.
     """
-    every = frozenset(kind for kind, types in TRAVELS.items() if types)
-    reached: dict[Node, set[str]] = {child: set(every)}
     parents_cache: dict[Node, dict[Node, list[Edge]]] = {}
     candidates_cache: dict[Node, list[Mapping[str, Any]]] = {}
-    queue: deque[tuple[Node, frozenset[str], list[list[Edge]], list[Node]]] = deque(
-        [(child, every, [], [child])]
-    )
-    found: dict[int, dict[str, Any]] = {}
-    while queue:
-        node, kinds, hops, nodes = queue.popleft()
+
+    def parents(node: Node) -> dict[Node, list[Edge]]:
         if node not in parents_cache:
-            parents_cache[node] = _owner_parents(edges_of(node), exists)
-        for parent, group in sorted(parents_cache[node].items()):
-            types = {edge["relationship"] for edge in group}
-            passing = frozenset(kind for kind in kinds if travels(kind, types))
-            new = passing - reached.setdefault(parent, set())
-            if not new:
-                continue  # no kind this path carries is new here: a cycle or a known route
-            reached[parent] |= new
-            path_hops, path_nodes = [*hops, group], [*nodes, parent]
-            if parent not in candidates_cache:
-                entries = entries_of(parent)
-                candidates_cache[parent] = candidates(alerts_of(parent[0]), entries, parent[1])
-            for alert in candidates_cache[parent]:
-                if alert["kind"] in new and alert["alert_id"] not in found:
-                    found[alert["alert_id"]] = _finding(parent, alert, path_hops, path_nodes)
-            queue.append((parent, new, path_hops, path_nodes))
-    return [found[alert_id] for alert_id in sorted(found)]
+            grouped = _owner_parents(edges_of(node), exists)
+            parents_cache[node] = {p: sorted(g, key=_edge_key) for p, g in grouped.items()}
+        return parents_cache[node]
+
+    found: dict[tuple[int, Node], dict[str, Any]] = {}
+    for kind in sorted(kind for kind, types in TRAVELS.items() if types):
+        # Per reached version: its best label and every (previous version, edges) achieving it.
+        best: dict[Node, tuple[Label, list[tuple[Node, list[Edge]]]]] = {child: ((False, ()), [])}
+        frontier = [child]
+        while frontier:
+            layer: dict[Node, tuple[Label, list[tuple[Node, list[Edge]]]]] = {}
+            for node in frontier:
+                (unspecified, types), _ = best[node]
+                for parent, group in parents(node).items():
+                    if parent in best:
+                        continue  # reached by a shorter path, or the child itself
+                    relationships = {edge["relationship"] for edge in group}
+                    if not travels(kind, relationships):
+                        continue
+                    label = (
+                        unspecified or UNSPECIFIED in relationships,
+                        (*types, tuple(sorted(relationships))),
+                    )
+                    if parent not in layer or label < layer[parent][0]:
+                        layer[parent] = (label, [(node, group)])
+                    elif label == layer[parent][0]:
+                        layer[parent][1].append((node, group))
+            best.update(layer)
+            frontier = sorted(layer)
+        routes: dict[Node, list[tuple[tuple[Node, ...], tuple[list[Edge], ...]]]] = {
+            child: [((child,), ())]
+        }
+
+        for node in sorted(best):
+            if node == child:
+                continue
+            if node not in candidates_cache:
+                entries = entries_of(node)
+                candidates_cache[node] = candidates(alerts_of(node[0]), entries, node[1])
+            for alert in candidates_cache[node]:
+                if alert["kind"] == kind:
+                    unspecified = best[node][0][0]
+                    routes_to = _paths_to(node, best, routes)
+                    found[(alert["alert_id"], node)] = _finding(node, alert, routes_to, unspecified)
+    return [found[key] for key in sorted(found)]
+
+
+Route = tuple[tuple[Node, ...], tuple[list[Edge], ...]]
+
+
+def _paths_to(
+    node: Node,
+    best: Mapping[Node, tuple[Label, list[tuple[Node, list[Edge]]]]],
+    routes: dict[Node, list[Route]],
+) -> list[Route]:
+    """Every best route from the child to ``node``, smallest first, at most ``MAX_PATHS``."""
+    if node not in routes:
+        listed = [
+            ((*nodes, node), (*groups, group))
+            for previous, group in best[node][1]
+            for nodes, groups in _paths_to(previous, best, routes)
+        ]
+        routes[node] = sorted(listed, key=lambda route: route[0])[:MAX_PATHS]
+    return routes[node]
 
 
 def _finding(
-    parent: Node, alert: Mapping[str, Any], hops: list[list[Edge]], nodes: list[Node]
+    parent: Node,
+    alert: Mapping[str, Any],
+    routes: list[tuple[tuple[Node, ...], tuple[list[Edge], ...]]],
+    unspecified: bool,
 ) -> dict[str, Any]:
-    prefix = [
-        _hop(nodes[index], nodes[index + 1], group[0]) for index, group in enumerate(hops[:-1])
-    ]
-    paths = [[*prefix, _hop(nodes[-2], parent, edge)] for edge in hops[-1]]
-    unspecified = any(edge["relationship"] == UNSPECIFIED for group in hops for edge in group)
+    paths = []
+    for nodes, groups in routes:
+        prefix = [_hop(nodes[i], nodes[i + 1], group[0]) for i, group in enumerate(groups[:-1])]
+        paths += [[*prefix, _hop(nodes[-2], parent, edge)] for edge in groups[-1]]
     return {
         "parent": parent,
         "parent_alert": {
@@ -170,7 +225,7 @@ def _finding(
             "severity": alert["severity"],
             "state": alert["state"],
         },
-        "reach": "direct" if len(hops) == 1 else "transitive",
+        "reach": "direct" if len(routes[0][1]) == 1 else "transitive",
         "paths": paths,
         "relationship_unspecified": unspecified,
     }
