@@ -165,8 +165,16 @@ def test_only_documented_custom_properties_are_written(bom: dict[str, Any]) -> N
 
 def _without_origin(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The entries apart from where each format claim came from, which an import never keeps
-    (feature 003: an imported claim is a third party's, contracts/inventory-profile.md)."""
-    return [{k: v for k, v in entry.items() if k != "format_origin"} for entry in entries]
+    (feature 003: an imported claim is a third party's, contracts/inventory-profile.md), and the
+    lock marker, which the export does not carry (issue #28)."""
+    dropped = ("format_origin", "marker")
+    return [{k: v for k, v in entry.items() if k not in dropped} for entry in entries]
+
+
+def test_an_import_records_no_lock_marker(bom: dict[str, Any]) -> None:
+    """Issue #28: the export carries no marker, so every imported entry's marker is not recorded
+    (null), which the advisory view tells apart from a lock line with no marker (``""``)."""
+    assert {entry["marker"] for entry in import_bom(bom)} == {None}
 
 
 def test_export_then_import_yields_the_same_entries(
