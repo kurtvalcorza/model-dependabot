@@ -30,6 +30,8 @@ _HASH = re.compile(r"--hash[=\s]+([A-Za-z0-9]+):([0-9a-fA-F]+)")
 _EDITABLE = re.compile(r"^(?:-e|--editable)[=\s]+(\S+)")
 # pip's comment rule: ``#`` at the start of a line or after whitespace starts a comment.
 _COMMENT = re.compile(r"(?:^|\s+)#.*$")
+# A URL requirement's marker separator: ``;`` after whitespace (review R28-5).
+_URL_MARKER = re.compile(r"\s;")
 
 
 @dataclass(frozen=True)
@@ -94,11 +96,17 @@ def _exact_version(requirement: Requirement) -> str | None:
 def _loose_marker(text: str) -> str | None:
     """The marker after ``;`` of a line ``packaging`` cannot read as a whole, normalised when it
     parses and as written otherwise. An inline comment is dropped first (pip's rule), so a ``;``
-    inside it is never read as a marker (review R28-1)."""
+    inside it is never read as a marker (review R28-1). On an editable or URL line the ``;`` must
+    follow whitespace, as ``packaging`` requires of a URL requirement, so a ``;`` inside the URL
+    is never read as a marker (review R28-5)."""
     text = _COMMENT.sub("", text)
     if ";" not in text:
         return None
-    raw = text.split(";", 1)[1].strip()
+    url = _EDITABLE.match(text) is not None or "://" in text.split(";", 1)[0]
+    parts = _URL_MARKER.split(text, maxsplit=1) if url else text.split(";", 1)
+    if len(parts) < 2:
+        return None
+    raw = parts[1].strip()
     if not raw:
         return None
     try:

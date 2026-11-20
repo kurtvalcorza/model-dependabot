@@ -188,3 +188,31 @@ def test_an_inline_comment_is_never_read_as_a_marker() -> None:
     assert commented.marker is None
     [pinned] = parse_lock('pillow==9.0.0 ; sys_platform == "linux"' + HASH + "  # pinned")
     assert pinned.marker == 'sys_platform == "linux"'
+
+
+# --- review R28-5: a ``;`` inside an editable or URL requirement --------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "marker"),
+    [
+        ("-e git+https://h/r.git;x#egg=pkg", None),
+        ('-e git+https://h/r.git#egg=pkg ; sys_platform == "linux"', 'sys_platform == "linux"'),
+        ("--editable=git+https://h/r.git;x", None),
+        ("pkg @ https://h/x.whl;x", None),
+        ('pkg @ https://h/x.whl ; os_name == "nt"', 'os_name == "nt"'),
+        ("pkg @ https://h/x.whl\t;os_name=='nt'", 'os_name == "nt"'),
+        ("pillow==9.0.0;python_version<'3.12'", 'python_version < "3.12"'),
+    ],
+)
+def test_a_semicolon_in_a_url_is_a_marker_only_after_whitespace(
+    text: str, marker: str | None
+) -> None:
+    """As ``packaging`` reads a URL requirement, a URL's ``;`` starts a marker only when whitespace
+    precedes it; a name-only line keeps the ``;`` rule it had."""
+    assert _loose_marker(text) == marker
+
+
+def test_an_editable_gap_line_reads_no_marker_from_its_url() -> None:
+    [entry] = parse_lock("-e git+https://h/r.git;x#egg=pkg")
+    assert (entry.gap_reason, entry.marker) == ("no exact version", None)
