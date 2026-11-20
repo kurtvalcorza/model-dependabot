@@ -18,3 +18,9 @@ have written then: one model with version 1 (origin `manifest`) and version 2 (l
 each with one pinned `base_model` entry, one check run with its target, one evidence row, an open
 `base_model_disabled` alert and one watch event. `tests/integration/test_migration_011.py` opens it
 to test the feature 011 upgrade and the read-only synthesis of legacy edges.
+
+`schema-pre-028.sql` is the store's `SCHEMA` as it was on `main` at `0c2a5ee`, before issue #28 (lock
+markers), written out the same way on 2026-11-20 before any #28 code change, followed by rows the tool
+could have written then: one model with an `import` version 1 and a `manifest` version 2, each holding
+`pillow==9.0.0`, one check run with its target, one evidence row and an open `package_advisory` alert.
+`tests/integration/test_migration_028.py` opens it to test the upgrade and a read-only open.

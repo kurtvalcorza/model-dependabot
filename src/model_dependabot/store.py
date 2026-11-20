@@ -176,6 +176,7 @@ CREATE TABLE IF NOT EXISTS inventory_entries (
     licence_form TEXT CHECK (licence_form IS NULL OR licence_form IN {_in(LICENCE_FORMS)}),
     paper_dois TEXT,
     format_origin TEXT CHECK (format_origin IS NULL OR format_origin IN {_in(FORMAT_ORIGINS)}),
+    marker TEXT,
     FOREIGN KEY (model_id, version) REFERENCES model_versions (model_id, version),
     CHECK (pinned = 1 OR gap_reason IS NOT NULL),
     CHECK (pinned = 0 OR identifier IS NOT NULL)
@@ -529,6 +530,7 @@ ENTRY_FIELDS = (
     "licence_form",
     "paper_dois",
     "format_origin",
+    "marker",
 )
 _OBSERVATION_FIELDS = (
     "http_status",
@@ -752,6 +754,7 @@ class Store:
         self._widen_alert_kinds()
         self._add_globals_columns()
         self._rekey_repository_alerts()
+        self._add_markers()
 
     def _mark_first_linked_run(self, had_targets: bool) -> None:
         """Record the first run that records its targets, once (PR #15 round 3, T3).
@@ -852,6 +855,21 @@ class Store:
             )
             if trigger is not None:
                 self.conn.execute(trigger["sql"])
+
+    def _add_markers(self) -> None:
+        """Add ``inventory_entries.marker`` to an older database (issue #28).
+
+        A package entry recorded from a lock file since then holds its environment marker, or the
+        empty string when its lock line has none. Every older row keeps a null marker: not
+        recorded, which the advisory view tells apart from no marker. Nothing is back-filled (the
+        entries are immutable and their lock files are not read again). One transaction, which
+        decides under the write lock (G4).
+        """
+        if "marker" in self.columns("inventory_entries"):
+            return
+        with self._atomic():
+            if "marker" not in self.columns("inventory_entries"):
+                self.conn.execute("ALTER TABLE inventory_entries ADD COLUMN marker TEXT")
 
     def _add_canonical_hashes(self) -> None:
         """Add ``evidence.canonical_sha256`` to an older database and fill it where it can (006).
@@ -1572,8 +1590,8 @@ class Store:
             "INSERT INTO inventory_entries (model_id, version, kind, identifier, pinned,"
             " gap_reason, location, size, format, can_run_code, hub_repo, hub_revision,"
             " hub_file, name, package_version, hashes, recorded_licence, licence_form,"
-            " paper_dois, format_origin)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " paper_dois, format_origin, marker)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 model_id,
                 version,
@@ -1595,6 +1613,7 @@ class Store:
                 entry.get("licence_form"),
                 None if paper_dois is None else json.dumps(list(paper_dois)),
                 entry.get("format_origin"),
+                entry.get("marker"),
             ),
         )
 
@@ -1615,7 +1634,9 @@ class Store:
         )
         result = []
         for row in rows:
-            present = set(row.keys())  # a database read-only from before 003 lacks format_origin
+            # A database opened read-only from before 003 lacks format_origin, and from before
+            # issue #28 marker: each reads as null (not recorded).
+            present = set(row.keys())
             record = {
                 name: row[name] if name in present else None
                 for name in ENTRY_FIELDS

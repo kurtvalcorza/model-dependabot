@@ -399,7 +399,13 @@ def main(
 
 
 def _entry_view(entry: Mapping[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in entry.items() if value is not None or key == "identifier"}
+    """The entry's set fields; ``marker`` only when the lock gave one (issue #28): an empty
+    marker (recorded, none) and a null one (not recorded) are both left out."""
+    return {
+        key: value
+        for key, value in entry.items()
+        if (value is not None or key == "identifier") and (key != "marker" or value)
+    }
 
 
 def _inventory_payload(model_id: str, version: int, entries: list[dict[str, Any]]) -> dict:
