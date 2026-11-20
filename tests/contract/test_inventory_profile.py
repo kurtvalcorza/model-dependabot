@@ -585,3 +585,14 @@ def test_import_stores_every_weight_claim_as_imported(bom: dict[str, Any]) -> No
     imported = import_bom(bom)
     assert {e["format_origin"] for e in imported if e["kind"] == "weight_file"} == {"import"}
     assert {e["format_origin"] for e in imported if e["kind"] != "weight_file"} == {None}
+
+
+def test_a_too_deep_stored_marker_exports_without_raising() -> None:
+    """Review R34-9: a lock line whose marker is too deep for ``packaging`` is kept as written on
+    its gap entry (R34-6); exporting it must write no property rather than crash."""
+    deep = "(" * 1000 + 'os_name == "nt"' + ")" * 1000
+    entry = new_entry(
+        "package", pinned=False, gap_reason="no exact version", name="pkg", marker=deep
+    )
+    (component,) = export_bom("m", 1, [entry])["components"]
+    assert MARKER not in _props(component)

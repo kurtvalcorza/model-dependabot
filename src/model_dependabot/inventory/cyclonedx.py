@@ -16,10 +16,12 @@ licences in ``licenses`` (``license.id``, ``license.name`` or ``expression``), t
 ``citation`` references and hub datasets as ``data`` components with
 ``bom-ref: "hf-dataset:<owner>/<name>@<commit>"`` and a ``distribution`` reference to the hub page.
 
-Issue #34: a package's lock marker is the property ``model-dependabot:marker``, written only when
-the marker is recorded: the marker as stored, or ``none`` for a lock line without one. On import the
-value is untrusted: ``none`` reads as no marker (``""``), a value ``packaging`` reads as a marker is
-kept normalised, and anything else, the property absent included, is not recorded (``None``).
+Issue #34: a package's lock marker is the property ``model-dependabot:marker``. It is written only
+for a recorded marker that ``packaging`` reads (normalised), or as ``none`` for a lock line without
+one; a stored marker that does not parse, and an unrecorded one, write no property (review R34-2).
+On import the value is untrusted: ``none`` reads as no marker (``""``), a value ``packaging`` reads
+as a marker is kept normalised, and anything else, the property absent included, is not recorded
+(``None``). Duplicate marker properties that disagree also read as not recorded (review R34-4).
 """
 
 from __future__ import annotations

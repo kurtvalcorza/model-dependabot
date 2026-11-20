@@ -323,7 +323,9 @@ marker, or says it has none; the marker is not evaluated, so whether a package i
 model runs is not established. An entry recorded before markers were stored (issue #28), or imported
 from an inventory with no readable `model-dependabot:marker` property for it, has no recorded marker,
 and its view states that limitation. `inventory export` writes the marker (or `none`) on each package
-whose marker is recorded, so an exported and re-imported copy keeps it (issue #34). The fixed texts come from `src/model_dependabot/rule_texts/rule-texts.toml`,
+whose recorded marker `packaging` can read, so an exported and re-imported copy keeps it (issue #34);
+a stored marker that does not parse is left out, and a re-import reads it as not recorded, as it does
+duplicate marker properties that disagree. The fixed texts come from `src/model_dependabot/rule_texts/rule-texts.toml`,
 which also renders three sections of every rule page.
 
 ### Dismissals hold
