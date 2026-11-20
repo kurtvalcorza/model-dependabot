@@ -28,11 +28,12 @@ loaded; the weight-file hashes are placeholders.
 
 Because these causes are hand-written, the upstream kinds are also covered by alerts a real check
 raised (review round 1, M10-R4; issue #32): `tests/integration/test_advice_real_lifecycle.py` runs
-real checks on recorded answers and asserts their views resolve, for MDB102 (`hub_scan`), MDB301
-(`dataset_retracted`), MDB302 (`paper_retracted`), MDB303 (`dataset_removed`, a disabled hub dataset
-and a Zenodo 410), MDB304 (`dataset_not_findable`), MDB401 (`licence_changed` of a base model) and
-MDB501 (`base_model_disabled`). If the lifecycle's cause shapes drift from the ones written here,
-those tests fail.
+real checks (after `register` for MDB102 and MDB301-304) on recorded answers, or states derived
+from them, and asserts their views resolve, and by which cause key, for MDB102 (`hub_scan`),
+MDB301 (`dataset_retracted`), MDB302 (`paper_retracted`), MDB303 (`dataset_removed`, a disabled
+hub dataset and a Zenodo 410), MDB304 (`dataset_not_findable`), MDB401 (`licence_changed` of a
+base model) and MDB501 (`base_model_disabled`). If the lifecycle's cause shapes drift from the
+ones written here, those tests fail.
 
 `advice-model` has two versions: version 2 drops validators and pins the hub dataset at a new
 revision. Every alert except `fixed` and `cleared` is carried to version 2.
