@@ -5,6 +5,11 @@ several lines with backslash continuations, and possibly with an environment mar
 only with an exact ``==`` version and at least one hash; anything else is a gap (FR-003). Names are
 normalised with ``packaging.utils.canonicalize_name``. Comment lines and global options (such as
 ``--index-url``) are not entries; an editable install (``-e``) is a gap with no exact version.
+
+An entry's environment marker (``; sys_platform == "linux"``) is kept as ``packaging`` writes it
+(issue #28), or ``None`` when the line has none; it is recorded, never evaluated. This hash-locked
+requirements format is the only lock format read (``discover/python_deps.py`` lists ``uv.lock``,
+``poetry.lock``, ``Pipfile.lock`` and ``pylock.toml`` as not read).
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
+from packaging.markers import InvalidMarker, Marker
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 
@@ -26,13 +32,15 @@ _EDITABLE = re.compile(r"^(?:-e|--editable)[=\s]+(\S+)")
 
 @dataclass(frozen=True)
 class LockEntry:
-    """One requirement from a lock file; ``hashes`` are ``alg:hex`` strings in file order."""
+    """One requirement from a lock file; ``hashes`` are ``alg:hex`` strings in file order and
+    ``marker`` is the environment marker, normalised, or ``None`` when the line has none."""
 
     name: str
     version: str | None
     hashes: tuple[str, ...]
     pinned: bool
     gap_reason: str | None
+    marker: str | None = None
 
     @property
     def purl(self) -> str | None:
@@ -81,6 +89,20 @@ def _exact_version(requirement: Requirement) -> str | None:
     return specifier.version
 
 
+def _loose_marker(text: str) -> str | None:
+    """The marker after ``;`` of a line ``packaging`` cannot read as a whole, normalised when it
+    parses and as written otherwise."""
+    if ";" not in text:
+        return None
+    raw = text.split(";", 1)[1].strip()
+    if not raw:
+        return None
+    try:
+        return str(Marker(raw))
+    except InvalidMarker:
+        return raw
+
+
 def parse_line(line: str) -> LockEntry | None:
     """One logical line's requirement, or ``None`` for a global option such as ``-r``."""
     return _entry(line)
@@ -90,7 +112,8 @@ def _entry(line: str) -> LockEntry | None:
     hashes = tuple(f"{alg.lower()}:{digest.lower()}" for alg, digest in _HASH.findall(line))
     editable = _EDITABLE.match(line)
     if editable:
-        return LockEntry(editable.group(1), None, hashes, False, NO_EXACT_VERSION)
+        marker = _loose_marker(_HASH.sub("", line))
+        return LockEntry(editable.group(1), None, hashes, False, NO_EXACT_VERSION, marker)
     if line.startswith("-"):
         return None
     text = _HASH.sub("", line).strip()
@@ -98,14 +121,16 @@ def _entry(line: str) -> LockEntry | None:
         requirement = Requirement(text)
     except InvalidRequirement:
         name = re.split(r"[\s=<>!~;\[@]", text, maxsplit=1)[0]
-        return LockEntry(canonicalize_name(name), None, hashes, False, NO_EXACT_VERSION)
+        marker = _loose_marker(text)
+        return LockEntry(canonicalize_name(name), None, hashes, False, NO_EXACT_VERSION, marker)
     name = canonicalize_name(requirement.name)
+    marker = None if requirement.marker is None else str(requirement.marker)
     version = _exact_version(requirement)
     if version is None:
-        return LockEntry(name, None, hashes, False, NO_EXACT_VERSION)
+        return LockEntry(name, None, hashes, False, NO_EXACT_VERSION, marker)
     if not hashes:
-        return LockEntry(name, version, hashes, False, NO_HASH)
-    return LockEntry(name, version, hashes, True, None)
+        return LockEntry(name, version, hashes, False, NO_HASH, marker)
+    return LockEntry(name, version, hashes, True, None, marker)
 
 
 def parse_lock(text: str) -> list[LockEntry]:

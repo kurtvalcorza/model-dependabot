@@ -123,3 +123,41 @@ def test_numbered_lines_give_the_line_each_requirement_starts_on() -> None:
     assert [number for number, _ in numbered_lines(text)] == [3, 6]
     first = numbered_lines(text)[0][1]
     assert first.startswith("numpy==2.1.0") and "--hash=sha256:" in first
+
+
+# --- environment markers (issue #28) -------------------------------------------------------------
+
+HASH = " --hash=sha256:" + "ab" * 32
+
+
+def test_an_environment_marker_is_kept_normalised() -> None:
+    entries = _by_name(read_lock(UV_LOCK))
+    assert entries["colorama"].marker == 'sys_platform == "win32"'
+    assert entries["attrs"].marker is None
+
+
+@pytest.mark.parametrize(
+    ("line", "marker"),
+    [
+        ('pillow==12.3.0 ; sys_platform == "linux"' + HASH, 'sys_platform == "linux"'),
+        ("pillow==12.3.0;python_version<'3.12'" + HASH, 'python_version < "3.12"'),
+        ("pillow==12.3.0" + HASH, None),
+        ('numpy>=2.0 ; platform_machine == "x86_64"', 'platform_machine == "x86_64"'),
+        ("requests==2.32.5", None),
+    ],
+)
+def test_a_marker_is_kept_on_pinned_entries_and_gaps(line: str, marker: str | None) -> None:
+    [entry] = parse_lock(line)
+    assert entry.marker == marker
+
+
+def test_a_marker_does_not_change_pinning_or_hashes() -> None:
+    [gated] = parse_lock('pillow==12.3.0 ; sys_platform == "linux"' + HASH)
+    [plain] = parse_lock("pillow==12.3.0" + HASH)
+    assert (gated.name, gated.version, gated.hashes, gated.pinned, gated.gap_reason) == (
+        plain.name,
+        plain.version,
+        plain.hashes,
+        plain.pinned,
+        plain.gap_reason,
+    )
