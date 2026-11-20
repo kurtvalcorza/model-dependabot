@@ -138,3 +138,6 @@ error. `--advice` adds no code and changes none (FR-017).
 - Issue #28: `schema` is `advice/2`, which adds `places[].marker` to `advice/1`. A package place carries `marker` (`set`, `none` or `not_recorded`; data-model.md,
   Issue #28) and its text line ends `, marker <expression>`, `, no marker` or
   `, marker not recorded`. The marker limitation is listed only for a `not_recorded` marker.
+  On an `import` place, `, marker <expression>` and `, no marker` are followed by
+  `, declared by the import` (issue #34, review R34-5): the marker is the imported document's
+  statement, not the owner's lock. The JSON is unchanged.

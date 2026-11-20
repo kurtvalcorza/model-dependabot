@@ -117,3 +117,37 @@ def test_inventory_show_lists_the_marker_only_where_there_is_one(
     assert gated["pillow"]["marker"] == MARKER
     assert "marker" not in gated["validators"]
     assert "marker" not in plain["pillow"]
+
+
+@pytest.mark.parametrize(("model_id", "state"), [("gated", "set"), ("plain", "none")])
+def test_an_exported_and_imported_copy_keeps_the_marker(
+    cli: Callable[..., Any],
+    alerts: dict[str, int],
+    tmp_path: Path,
+    derive_osv: Callable[..., Path],
+    model_id: str,
+    state: str,
+) -> None:
+    """Issue #34: the export carries the marker, so an imported copy's view names it (or says
+    there is none) and lists no marker limitation."""
+    out = tmp_path / f"{model_id}.json"
+    cli("inventory", "export", model_id, "-o", str(out))
+    copy = f"{model_id}-copy"
+    cli("import", str(out), "--model-id", copy)
+    cli("check", copy, "--source", "osv", recordings=derive_osv())
+    listed = cli("alerts", copy)["alerts"]
+    alert = min(a["alert_id"] for a in listed if a["cause"].get("package") == "pillow")
+    view = cli("alert", "show", str(alert), "--advice")["advice"]
+    [place] = view["entry"]["places"]
+    assert place["origin"] == "import"
+    assert place["marker"] == {
+        "state": state,
+        "expression": MARKER if state == "set" else None,
+    }
+    assert not {item["text"] for item in view["limitations"]} & set(UNKNOWN)
+    # Review R34-5: the place line says the marker is the import's declaration; the JSON field is
+    # unchanged, and the imported-declaration item stays.
+    text = cli("alert", "show", str(alert), "--advice", json_out=False)
+    said = f"marker {MARKER}" if state == "set" else "no marker"
+    assert f", 12.3.0, {said}, declared by the import\n" in text
+    assert any("imported declaration" in item["text"] for item in view["not_established"])

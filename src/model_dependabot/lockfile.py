@@ -30,6 +30,9 @@ _HASH = re.compile(r"--hash[=\s]+([A-Za-z0-9]+):([0-9a-fA-F]+)")
 _EDITABLE = re.compile(r"^(?:-e|--editable)[=\s]+(\S+)")
 # pip's comment rule: ``#`` at the start of a line or after whitespace starts a comment.
 _COMMENT = re.compile(r"(?:^|\s+)#.*$")
+# The marker separator of an editable or URL line: ``;`` with whitespace on either side, as pip
+# reads it (review R28-5, R34-1); a bare ``;`` belongs to the URL.
+_URL_MARKER = re.compile(r"\s;|;\s")
 
 
 @dataclass(frozen=True)
@@ -94,16 +97,23 @@ def _exact_version(requirement: Requirement) -> str | None:
 def _loose_marker(text: str) -> str | None:
     """The marker after ``;`` of a line ``packaging`` cannot read as a whole, normalised when it
     parses and as written otherwise. An inline comment is dropped first (pip's rule), so a ``;``
-    inside it is never read as a marker (review R28-1)."""
+    inside it is never read as a marker (review R28-1). On an editable or URL line the ``;`` must
+    have whitespace on at least one side, as pip reads it, so a bare ``;`` inside the URL is never
+    read as a marker (review R28-5, R34-1). A marker too deeply nested to parse is kept as
+    written (review R34-6)."""
     text = _COMMENT.sub("", text)
     if ";" not in text:
         return None
-    raw = text.split(";", 1)[1].strip()
+    url = _EDITABLE.match(text) is not None or "://" in text.split(";", 1)[0]
+    parts = _URL_MARKER.split(text, maxsplit=1) if url else text.split(";", 1)
+    if len(parts) < 2:
+        return None
+    raw = parts[1].strip()
     if not raw:
         return None
     try:
         return str(Marker(raw))
-    except InvalidMarker:
+    except (InvalidMarker, RecursionError):
         return raw
 
 
@@ -123,7 +133,8 @@ def _entry(line: str) -> LockEntry | None:
     text = _HASH.sub("", line).strip()
     try:
         requirement = Requirement(text)
-    except InvalidRequirement:
+    except (InvalidRequirement, RecursionError):
+        # A marker nested too deeply for packaging's parser is an unreadable line: a gap (R34-6).
         name = re.split(r"[\s=<>!~;\[@]", text, maxsplit=1)[0]
         marker = _loose_marker(text)
         return LockEntry(canonicalize_name(name), None, hashes, False, NO_EXACT_VERSION, marker)

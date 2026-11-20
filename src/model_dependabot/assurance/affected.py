@@ -162,7 +162,8 @@ def _revision(entry: Mapping[str, Any]) -> str | None:
 def marker(entry: Mapping[str, Any]) -> dict[str, Any] | None:
     """A package entry's environment marker as stored (issue #28): ``set`` with its expression,
     ``none`` for a lock line without one, or ``not_recorded`` for an entry recorded before markers
-    were stored or imported from an inventory that carries none; ``None`` for other kinds."""
+    were stored or imported with no readable ``model-dependabot:marker`` property (issue #34);
+    ``None`` for other kinds."""
     if entry["kind"] != "package":
         return None
     stored = entry.get("marker")

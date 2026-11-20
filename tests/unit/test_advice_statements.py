@@ -152,3 +152,17 @@ def test_an_open_alert_has_no_closing_statement() -> None:
 
     statements = established({"state": "open"}, [_row(1, 1), _row(2, 2)])
     assert [s["evidence_ids"] for s in statements] == [[1], [2]]
+
+
+def test_only_a_marker_the_import_stated_is_said_to_be_declared_by_it() -> None:
+    """Review R34-5 and R34-9: a set marker or no marker on an import place is the import's
+    declaration; a marker not recorded is not a declaration, so it gets no suffix."""
+    from model_dependabot.assurance.advice import _marker_part
+
+    suffix = ", declared by the import"
+    found = {"state": "set", "expression": 'os_name == "nt"'}
+    assert _marker_part(found, "import") == f'marker os_name == "nt"{suffix}'
+    assert _marker_part({"state": "none", "expression": None}, "import") == f"no marker{suffix}"
+    not_recorded = {"state": "not_recorded", "expression": None}
+    assert _marker_part(not_recorded, "import") == "marker not recorded"
+    assert _marker_part(found, "lock") == 'marker os_name == "nt"'

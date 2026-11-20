@@ -188,3 +188,44 @@ def test_an_inline_comment_is_never_read_as_a_marker() -> None:
     assert commented.marker is None
     [pinned] = parse_lock('pillow==9.0.0 ; sys_platform == "linux"' + HASH + "  # pinned")
     assert pinned.marker == 'sys_platform == "linux"'
+
+
+# --- review R28-5: a ``;`` inside an editable or URL requirement --------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "marker"),
+    [
+        ("-e git+https://h/r.git;x#egg=pkg", None),
+        ('-e git+https://h/r.git#egg=pkg ; sys_platform == "linux"', 'sys_platform == "linux"'),
+        ("--editable=git+https://h/r.git;x", None),
+        ("pkg @ https://h/x.whl;x", None),
+        ('pkg @ https://h/x.whl ; os_name == "nt"', 'os_name == "nt"'),
+        ("pkg @ https://h/x.whl\t;os_name=='nt'", 'os_name == "nt"'),
+        ("pillow==9.0.0;python_version<'3.12'", 'python_version < "3.12"'),
+        ('pkg @ https://h/x.whl; os_name == "nt"', 'os_name == "nt"'),  # R34-1: pip reads it
+        ('-e git+https://h/r.git#egg=pkg; os_name == "nt"', 'os_name == "nt"'),
+        ('-e ./local ; os_name == "nt"', 'os_name == "nt"'),  # an editable line with no URL
+        ("-e ./local;x", None),
+    ],
+)
+def test_a_semicolon_in_a_url_is_a_marker_only_next_to_whitespace(
+    text: str, marker: str | None
+) -> None:
+    """On a URL or editable line a ``;`` starts a marker only with whitespace on at least one side,
+    as pip reads it (R28-5, R34-1); a name-only line keeps the ``;`` rule it had."""
+    assert _loose_marker(text) == marker
+
+
+def test_an_editable_gap_line_reads_no_marker_from_its_url() -> None:
+    [entry] = parse_lock("-e git+https://h/r.git;x#egg=pkg")
+    assert (entry.gap_reason, entry.marker) == ("no exact version", None)
+
+
+def test_a_marker_too_deep_to_parse_makes_the_line_a_gap() -> None:
+    """Review R34-6: packaging's parser recurses; a marker nested about 1000 deep is a gap with
+    its marker kept as written, not a crash."""
+    deep = "(" * 1000 + 'os_name == "nt"' + ")" * 1000
+    [entry] = parse_lock("pillow==9.0.0 ; " + deep + HASH)
+    assert (entry.name, entry.pinned, entry.gap_reason) == ("pillow", False, "no exact version")
+    assert entry.marker == deep

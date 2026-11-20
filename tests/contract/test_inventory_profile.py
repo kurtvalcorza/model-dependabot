@@ -10,7 +10,7 @@ import pytest
 from jsonschema.exceptions import ValidationError
 from referencing.exceptions import Unresolvable
 
-from model_dependabot.inventory.build import build_entries
+from model_dependabot.inventory.build import build_entries, new_entry
 from model_dependabot.inventory.cyclonedx import (
     PROPERTIES,
     InventoryError,
@@ -18,6 +18,7 @@ from model_dependabot.inventory.cyclonedx import (
     import_bom,
     validate,
 )
+from model_dependabot.lockfile import parse_lock
 from model_dependabot.manifest import load_manifest
 from model_dependabot.sources.fetcher import RecordedFetcher
 
@@ -76,6 +77,7 @@ def test_the_property_set_is_exactly_the_documented_one() -> None:
                     "claimed-origin",
                     "parent-model",
                     "parent-version",
+                    "marker",  # issue #34, contracts/inventory-profile.md
                 )
             }
         )
@@ -165,16 +167,171 @@ def test_only_documented_custom_properties_are_written(bom: dict[str, Any]) -> N
 
 def _without_origin(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The entries apart from where each format claim came from, which an import never keeps
-    (feature 003: an imported claim is a third party's, contracts/inventory-profile.md), and the
-    lock marker, which the export does not carry (issue #28)."""
-    dropped = ("format_origin", "marker")
-    return [{k: v for k, v in entry.items() if k not in dropped} for entry in entries]
+    (feature 003: an imported claim is a third party's, contracts/inventory-profile.md)."""
+    return [{k: v for k, v in entry.items() if k != "format_origin"} for entry in entries]
 
 
-def test_an_import_records_no_lock_marker(bom: dict[str, Any]) -> None:
-    """Issue #28: the export carries no marker, so every imported entry's marker is not recorded
-    (null), which the advisory view tells apart from a lock line with no marker (``""``)."""
-    assert {entry["marker"] for entry in import_bom(bom)} == {None}
+MARKER = PREFIX + "marker"
+
+
+def _package(bom: dict[str, Any], name: str) -> dict[str, Any]:
+    (component,) = [c for c in bom["components"] if c["type"] == "library" and c["name"] == name]
+    return component
+
+
+def test_the_lock_marker_is_a_package_property(bom: dict[str, Any]) -> None:
+    """Issue #34: a recorded marker is written as written; a lock line with none as ``none``."""
+    assert _props(_package(bom, "colorama"))[MARKER] == 'sys_platform == "win32"'
+    assert _props(_package(bom, "attrs"))[MARKER] == "none"
+    for component in bom["components"]:
+        if component["type"] != "library":
+            assert MARKER not in _props(component)
+
+
+def test_a_marker_that_was_not_recorded_writes_no_property() -> None:
+    entry = new_entry(
+        "package",
+        identifier="pkg:pypi/pillow@9.0.0",
+        pinned=True,
+        name="pillow",
+        version="9.0.0",
+        hashes=["sha256:" + "ab" * 32],
+    )
+    (component,) = export_bom("m", 1, [entry])["components"]
+    assert MARKER not in _props(component)
+
+
+def test_the_marker_round_trips_in_all_three_states() -> None:
+    """Set, recorded as none (``""``) and not recorded (``None``) are each read back as written."""
+    entries = [
+        new_entry(
+            "package",
+            identifier=f"pkg:pypi/p{i}@1.0",
+            pinned=True,
+            name=f"p{i}",
+            version="1.0",
+            hashes=["sha256:" + "ab" * 32],
+            marker=marker,
+        )
+        for i, marker in enumerate(['python_version < "3.12"', "", None])
+    ]
+    bom = export_bom("m", 1, entries)
+    validate(bom)
+    assert [e["marker"] for e in import_bom(bom)] == ['python_version < "3.12"', "", None]
+
+
+def test_the_lock_markers_round_trip(bom: dict[str, Any], entries: list[dict[str, Any]]) -> None:
+    def markers(found: list[dict[str, Any]]) -> dict[str, Any]:
+        return {e["name"]: e["marker"] for e in found if e["kind"] == "package"}
+
+    assert markers(import_bom(bom)) == markers(entries)
+    assert markers(entries)["colorama"] == 'sys_platform == "win32"'
+    assert markers(entries)["attrs"] == ""
+
+
+def _imported_marker(value: Any, **extra: Any) -> Any:
+    component = {
+        "type": "library",
+        "name": "pillow",
+        "purl": "pkg:pypi/pillow@9.0.0",
+        "hashes": [{"alg": "SHA-256", "content": "ab" * 32}],
+        "properties": [{"name": MARKER, "value": value}] if value is not ... else [],
+        **extra,
+    }
+    document = {"bomFormat": "CycloneDX", "specVersion": "1.7", "components": [component]}
+    (entry,) = import_bom(document)
+    return entry["marker"]
+
+
+@pytest.mark.parametrize(
+    ("value", "marker"),
+    [
+        ("python_version<'3.12'", 'python_version < "3.12"'),  # normalised with packaging
+        ("none", ""),
+        (..., None),  # no property: not recorded
+        ("", None),  # an empty value is not the spelling of no marker
+        ("None", None),
+        ("not a marker", None),
+        ("x#egg=pkg", None),
+        ("(" * 5000 + 'os_name == "nt"' + ")" * 5000, None),  # too deep: not a crash
+        (12, None),
+        (None, None),
+    ],
+)
+def test_an_imported_marker_is_normalised_or_not_recorded(value: Any, marker: str | None) -> None:
+    """An untrusted property value never fails the import and never reads as no marker: a value
+    that is neither ``none`` nor a marker ``packaging`` reads is not recorded (issue #34)."""
+    assert _imported_marker(value) == marker
+
+
+GATED = 'platform_machine == "x86_64"'
+
+
+@pytest.mark.parametrize(
+    ("extra", "reason"),
+    [
+        ({}, "no purl"),
+        ({"type": "application"}, "unrecognised component type 'application'"),  # R34-3
+        ({"purl": "pkg:npm/left-pad@1.3.0"}, "not a PyPI package"),  # R34-3
+    ],
+)
+def test_an_imported_gap_package_keeps_its_marker(extra: dict[str, Any], reason: str) -> None:
+    component = {
+        "type": "library",
+        "name": "numpy",
+        "properties": [{"name": MARKER, "value": GATED}],
+        **extra,
+    }
+    document = {"bomFormat": "CycloneDX", "specVersion": "1.7", "components": [component]}
+    (entry,) = import_bom(document)
+    assert (entry["kind"], entry["gap_reason"], entry["marker"]) == ("package", reason, GATED)
+
+
+@pytest.mark.parametrize(
+    ("values", "marker"),
+    [
+        ([GATED, "none"], None),  # conflicting: not recorded (R34-4)
+        ([GATED, 'os_name == "nt"'], None),
+        (["none", "none"], ""),  # identical duplicates count once
+        ([GATED, GATED], GATED),
+    ],
+)
+def test_duplicate_marker_properties_must_agree(values: list[str], marker: str | None) -> None:
+    component = {
+        "type": "library",
+        "name": "pillow",
+        "purl": "pkg:pypi/pillow@9.0.0",
+        "hashes": [{"alg": "SHA-256", "content": "ab" * 32}],
+        "properties": [{"name": MARKER, "value": value} for value in values],
+    }
+    document = {"bomFormat": "CycloneDX", "specVersion": "1.7", "components": [component]}
+    (entry,) = import_bom(document)
+    assert (entry["pinned"], entry["marker"]) == (True, marker)
+
+
+@pytest.mark.parametrize("stored", ["none", "not a marker", "x#egg=pkg"])
+def test_an_unparseable_stored_marker_writes_no_property(stored: str) -> None:
+    """Review R34-2: a marker stored as written because it does not parse (the literal ``none``
+    included) is not exported, so a re-import reads it as not recorded, never as no marker."""
+    entry = new_entry(
+        "package", pinned=False, gap_reason="no exact version", name="pkg", marker=stored
+    )
+    (component,) = export_bom("m", 1, [entry])["components"]
+    assert MARKER not in _props(component)
+    (again,) = import_bom(export_bom("m", 1, [entry]))
+    assert again["marker"] is None
+
+
+def test_a_lock_line_whose_marker_is_none_round_trips_as_not_recorded() -> None:
+    [lock] = parse_lock("pkg>=1;none")
+    assert (lock.gap_reason, lock.marker) == ("no exact version", "none")
+    entry = new_entry(
+        "package", pinned=False, gap_reason=lock.gap_reason, name=lock.name, marker=lock.marker
+    )
+    bom = export_bom("m", 1, [entry])
+    validate(bom)
+    (again,) = import_bom(bom)
+    assert again["marker"] is None
 
 
 def test_export_then_import_yields_the_same_entries(
@@ -428,3 +585,14 @@ def test_import_stores_every_weight_claim_as_imported(bom: dict[str, Any]) -> No
     imported = import_bom(bom)
     assert {e["format_origin"] for e in imported if e["kind"] == "weight_file"} == {"import"}
     assert {e["format_origin"] for e in imported if e["kind"] != "weight_file"} == {None}
+
+
+def test_a_too_deep_stored_marker_exports_without_raising() -> None:
+    """Review R34-9: a lock line whose marker is too deep for ``packaging`` is kept as written on
+    its gap entry (R34-6); exporting it must write no property rather than crash."""
+    deep = "(" * 1000 + 'os_name == "nt"' + ")" * 1000
+    entry = new_entry(
+        "package", pinned=False, gap_reason="no exact version", name="pkg", marker=deep
+    )
+    (component,) = export_bom("m", 1, [entry])["components"]
+    assert MARKER not in _props(component)
