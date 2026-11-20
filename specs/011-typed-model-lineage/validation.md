@@ -82,3 +82,20 @@ SHA-256 is unchanged. Changed output outside that baseline: `register`, `import`
 gain the lineage section (FR-021, contracts/manifest-parents.md); `alerts` and `alert show` text gain
 `via ... edge` lines and the JSON cause gains `edges` (FR-009, FR-024); `inventory audit` gains
 `lineage` (FR-030). No exit code changed (`test_exit_codes_lineage.py`, SC-007).
+
+## Review round 1 (2026-11-20)
+
+Fixes for review findings R1 to R10, with the owner's rulings on R1 to R3, R8 and R9. On `41f4f1b`
+(`src` tree `92015aa3ed503cd3717ea802efb3cad49732e1ad`), each gate run on its own, no pipe:
+
+| Gate | Exit | Counts |
+| :-- | :-- | :-- |
+| `uv run pytest -q` | 0 | 2132 passed, 6 skipped, 13 deselected (1366 s) |
+| `uv run ruff check` | 0 | All checks passed |
+| `uv run ruff format --check` | 0 | 351 files already formatted |
+
+The reviewer's mutants (`rv011/mutate.py`, `mutate2.py`), re-aimed at the reworked lines, were run
+on a `git archive` of `41f4f1b` against the lineage tests: all 31 were killed, including the former
+survivors R2 (M12), R3 (M16), R4 (M14), R5 (M22) and R10 (E01, E02), and the first-visit rule R1
+replaced (M16b). The equivalent mutant M03 of `mutate2.py` was left out. `rv011/probe_diamond.py`
+now gives `[7]` in both namings. Feature 010's CLI baseline replays unchanged with MDB601 added.
