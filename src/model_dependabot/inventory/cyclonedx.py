@@ -15,6 +15,11 @@ Feature 002 (contracts/inventory-profile.md, research U11) uses standard fields 
 licences in ``licenses`` (``license.id``, ``license.name`` or ``expression``), tied papers as
 ``citation`` references and hub datasets as ``data`` components with
 ``bom-ref: "hf-dataset:<owner>/<name>@<commit>"`` and a ``distribution`` reference to the hub page.
+
+Issue #34: a package's lock marker is the property ``model-dependabot:marker``, written only when
+the marker is recorded: the marker as stored, or ``none`` for a lock line without one. On import the
+value is untrusted: ``none`` reads as no marker (``""``), a value ``packaging`` reads as a marker is
+kept normalised, and anything else, the property absent included, is not recorded (``None``).
 """
 
 from __future__ import annotations
@@ -29,6 +34,7 @@ from typing import Any
 from urllib.parse import quote, unquote
 
 from jsonschema import Draft7Validator
+from packaging.markers import InvalidMarker, Marker
 from packaging.utils import canonicalize_name
 from referencing import Registry, Resource
 from referencing.exceptions import NoSuchResource
@@ -77,6 +83,10 @@ P_EDGE_ORIGIN = PREFIX + "edge-origin"
 P_CLAIMED_ORIGIN = PREFIX + "claimed-origin"
 P_PARENT_MODEL = PREFIX + "parent-model"
 P_PARENT_VERSION = PREFIX + "parent-version"
+# Issue #34 (contracts/inventory-profile.md): a package's lock marker. CycloneDX has no field for
+# it. ``none`` spells "recorded, the lock line has none": no marker parses as ``none``.
+P_MARKER = PREFIX + "marker"
+NO_MARKER = "none"
 # Research P2: at most this many ancestors are read; the rest is one recorded gap.
 MAX_ANCESTORS = 256
 _LIMIT_GAP = re.compile(r"^more than \d+ ancestors; \d+ not read$")
@@ -97,6 +107,7 @@ PROPERTIES = frozenset(
         P_CLAIMED_ORIGIN,
         P_PARENT_MODEL,
         P_PARENT_VERSION,
+        P_MARKER,
     }
 )
 
@@ -239,8 +250,17 @@ def _package_component(index: int, entry: dict[str, Any]) -> dict[str, Any]:
         version=entry["version"],
         purl=entry["identifier"],
         hashes=_hashes(entry["hashes"]),
-        properties=_properties([(P_GAP, entry["gap_reason"])]),
+        properties=_properties([(P_GAP, entry["gap_reason"]), (P_MARKER, _marker_value(entry))]),
     )
+
+
+def _marker_value(entry: dict[str, Any]) -> str | None:
+    """The ``marker`` property's value: the stored marker, ``none`` for ``""``, or ``None`` (no
+    property) when the marker is not recorded."""
+    stored = entry.get("marker")
+    if stored is None:
+        return None
+    return stored or NO_MARKER
 
 
 def _base_model_component(index: int, entry: dict[str, Any]) -> dict[str, Any]:
@@ -514,21 +534,40 @@ def _split_purl(purl: str) -> tuple[str, str, str | None]:
     return kind.lower(), unquote(path), unquote(version) or None
 
 
+def _read_marker(props: Mapping[str, str]) -> str | None:
+    """The marker an imported package records (issue #34): ``""`` for ``none``, the marker
+    normalised with ``packaging``, or ``None`` (not recorded) for an absent property or a value
+    that is neither. The value is a third party's: an unreadable one is never no marker."""
+    value = props.get(P_MARKER)
+    if value is None:
+        return None
+    if value == NO_MARKER:
+        return ""
+    try:
+        return str(Marker(value))
+    except (InvalidMarker, RecursionError):
+        return None
+
+
 def _import_package(item: dict[str, Any]) -> dict[str, Any]:
     props = _props(item)
+    marker = _read_marker(props)
     hashes = _read_hashes(item) or None
     purl = item.get("purl")
     kind = item.get("type")
     name = str(item.get("name") or "") or None
     if kind not in ("library", "framework"):
         reason = props.get(P_GAP) or f"unrecognised component type {kind!r}"
-        return gap("package", reason, name=name, hashes=hashes)
+        return gap("package", reason, name=name, hashes=hashes, marker=marker)
     if not isinstance(purl, str) or not purl.startswith("pkg:"):
         reason = props.get(P_GAP) or "no purl"
-        return gap("package", reason, name=name, version=item.get("version"), hashes=hashes)
+        return gap(
+            "package", reason, name=name, version=item.get("version"), hashes=hashes, marker=marker
+        )
     purl_type, path, version = _split_purl(purl)
     if purl_type != "pypi":
-        return gap("package", props.get(P_GAP) or "not a PyPI package", name=name, hashes=hashes)
+        reason = props.get(P_GAP) or "not a PyPI package"
+        return gap("package", reason, name=name, hashes=hashes, marker=marker)
     name = canonicalize_name(path)
     identifier = None
     if version is not None:
@@ -544,6 +583,7 @@ def _import_package(item: dict[str, Any]) -> dict[str, Any]:
         name=name,
         version=version,
         hashes=hashes,
+        marker=marker,
     )
 
 

@@ -60,9 +60,11 @@ MARKER_LIMITATION = (
     "This entry was recorded before environment markers were stored, so the inventory cannot say"
     " which environment marker, if any, the lock gave the package."
 )
+# An imported entry's marker is not recorded when the document has no readable
+# ``model-dependabot:marker`` property for it (issue #34).
 MARKER_NOT_IMPORTED = (
-    "This entry was imported from an inventory that records no environment markers, so the"
-    " inventory cannot say which environment marker, if any, the lock gave the package."
+    "This entry was imported from an inventory that records no readable environment marker for"
+    " it, so the inventory cannot say which environment marker, if any, the lock gave the package."
 )
 MARKER_UNRESOLVED = (
     "No inventory entry was resolved for this alert, so no environment marker is known for the"

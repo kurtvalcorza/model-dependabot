@@ -7,7 +7,7 @@ Exports are validated against the official `bom-1.7.schema.json`; imports are re
 | :-- | :-- | :-- |
 | The model version | `metadata.component`, `type: "machine-learning-model"`, `version: "<n>"` | `bom-ref: "model:<id>@<n>"` |
 | Weight file | `components[]`, `type: "file"`, `name` (the path relative to the manifest, or the file's path in the hub repository), `hashes: [{alg: "SHA-256", content}]`; properties `model-dependabot:format`, `model-dependabot:can-run-code` and `model-dependabot:size`; a hub-hosted file also has `externalReferences[]` `type: "distribution"` with its download URL at the pinned revision, and properties `model-dependabot:hub-repo`, `model-dependabot:hub-revision` and `model-dependabot:hub-file` | the SHA-256 |
-| Package | `components[]`, `type: "library"`, `purl: "pkg:pypi/<name>@<version>"`, lock hashes in `hashes` | the purl |
+| Package | `components[]`, `type: "library"`, `purl: "pkg:pypi/<name>@<version>"`, lock hashes in `hashes`; property `model-dependabot:marker` when the lock marker is recorded (issue #34) | the purl |
 | Base model | `metadata.component.pedigree.ancestors[]`, `type: "machine-learning-model"`, `purl: "pkg:huggingface/<owner>/<name>@<commit>"` | the purl |
 | Dataset | a `components[]` entry, `type: "data"`, `bom-ref: "doi:<doi>"`, `data: [{"type": "dataset"}]`, the DOI URL `https://doi.org/<doi>` as an `externalReferences` entry of type `distribution`, optional SHA-256 in `hashes`; `metadata.component.modelCard.modelParameters.datasets[]` refers to it with `{"ref": "doi:<doi>"}` (the inline `componentData` form allows neither `hashes` nor `externalReferences` in CycloneDX 1.7; import reads both forms) | the DOI |
 | Gap | the entry is written with what is known plus property `model-dependabot:gap = "<reason>"` | none |
@@ -29,6 +29,7 @@ Custom properties (the complete list; constitution II):
 | `model-dependabot:claimed-origin` | ancestor of an imported edge | The `edge-origin` the imported document stated, if any |
 | `model-dependabot:parent-model` | ancestor naming a registered model | The parent's model id (the ancestor has no purl) |
 | `model-dependabot:parent-version` | ancestor naming a registered model | The parent's version, a decimal string |
+| `model-dependabot:marker` | package whose lock marker is recorded (issue #34) | The environment marker as stored (normalised by `packaging`), or `none` for a lock line with no marker. Absent when the marker is not recorded |
 
 Hub location is split this way because CycloneDX has no fields for a repository and revision on a
 `file` component; the `distribution` external reference carries the same location as a URL for other
@@ -40,8 +41,15 @@ Rules:
 - Project-specific values use `properties` with the `model-dependabot:` prefix and are listed above; no
   other custom fields (constitution II).
 - Round trip: `export` then `import` yields the same entries and identifiers (SC-005).
-  A package's lock marker (issue #28) is not exported, so an imported entry's marker is not
-  recorded (null); the advisory view says so.
+  A package's lock marker (issue #28) round-trips in each of its three states (issue #34): a
+  marker is written as stored, a lock line with none as `none`, and a marker that is not recorded
+  (null) writes no property. On import the value is a third party's: `none` reads as no marker
+  (`""`), a value `packaging` reads as a marker is stored normalised, and anything else (an empty or
+  missing value, `None`, text that is not a marker, a marker too deeply nested to parse) is not
+  recorded (null), never no marker, and never fails the import. A marker the lock gave but
+  `packaging` cannot read is stored as written; it is exported so, and a re-import reads it as not
+  recorded. An imported entry with no readable marker property keeps the advisory view's
+  limitation.
 - Imported documents may be CycloneDX 1.5, 1.6 or 1.7; entries the mapping cannot read become gaps
   rather than errors.
 - Two dataset components sharing one `bom-ref` are imported as one dataset entry, their hashes and

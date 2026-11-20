@@ -67,17 +67,24 @@ def test_register_show_export_import(run, tmp_path: Path) -> None:
     # claims are imported, so they are no longer the owner's.
     assert _without_origin(copy_shown["entries"]) == _without_origin(shown["entries"])
     assert _without_origin(copy_shown["gaps"]) == _without_origin(shown["gaps"])
-    # The lock's one marker-gated package shows its marker; the imported copy has none recorded.
-    markers = {e["name"]: e["marker"] for e in shown["entries"] if "marker" in e}
-    assert markers == {"colorama": 'sys_platform == "win32"'}
-    assert not any("marker" in e for e in copy_shown["entries"] + copy_shown["gaps"])
+    # The lock's one marker-gated package shows its marker, and so does the imported copy: the
+    # export carries it (issue #34).
+    for listed in (shown, copy_shown):
+        markers = {e["name"]: e["marker"] for e in listed["entries"] if "marker" in e}
+        assert markers == {"colorama": 'sys_platform == "win32"'}
+    # Every other lock package was recorded with no marker, and the copy keeps that state.
+    with Store(run.db) as store:
+        stored = [
+            {e["name"]: e["marker"] for e in store.entries(model, 1) if e["kind"] == "package"}
+            for model in ("example-detector", "example-copy")
+        ]
+    assert stored[0] == stored[1]
+    assert {m for name, m in stored[0].items() if name != "colorama"} == {""}
 
 
 def _without_origin(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Without ``format_origin`` (an import never keeps it) and ``marker`` (the export does not
-    carry the lock marker, issue #28)."""
-    dropped = ("format_origin", "marker")
-    return [{k: v for k, v in entry.items() if k not in dropped} for entry in entries]
+    """Without ``format_origin``, which an import never keeps (feature 003)."""
+    return [{k: v for k, v in entry.items() if k != "format_origin"} for entry in entries]
 
 
 def test_an_inventory_that_fails_validation_is_invalid_input(
