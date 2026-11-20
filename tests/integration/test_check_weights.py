@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from conftest import EICAR_COMMIT, EICAR_REPO
+from conftest import EICAR_COMMIT, EICAR_REPO, flag_bin
 from model_dependabot.cli import EXIT_OK, main, make_handlers
 from model_dependabot.sources.fetcher import RecordedFetcher
 
@@ -107,12 +107,6 @@ def test_joblib_file_is_code_capable_and_incompletely_scanned(
     assert events["scan_incomplete"]["detail"]["position"] == 43
 
 
-def _flag_bin(info: Any) -> Any:
-    issues = info["securityRepoStatus"]["filesWithIssues"]
-    issues.append({"path": "pytorch_model.bin", "level": "unsafe"})
-    return info
-
-
 HUB_WEIGHT = f'hub = "hf:{EICAR_REPO}"\nrevision = "{EICAR_COMMIT}"\nfile = "pytorch_model.bin"'
 
 
@@ -126,7 +120,7 @@ def test_hub_verdicts_alert_only_for_unsafe_with_matching_hash(
     assert cli("check", "hub-model", "--source", "hf-scan", recordings=clean)[0] == EXIT_OK
     assert cli("alerts", "hub-model")[1]["alerts"] == []
 
-    unsafe = derive_hf(security=_flag_bin)
+    unsafe = derive_hf(security=flag_bin)
     code, checked = cli("check", "hub-model", "--source", "hf-scan", recordings=unsafe)
     assert (code, checked["sources"]) == (EXIT_OK, {"hf-scan": "ok"})
     [alert] = cli("alerts", "hub-model")[1]["alerts"]
@@ -140,7 +134,7 @@ def test_a_hub_that_fails_at_registration_leaves_the_hub_alert_open(
 ) -> None:
     path = manifest(tmp_path / "hub", "hub-model", [HUB_WEIGHT])
     assert cli("register", str(path), recordings=derive_hf())[0] == EXIT_OK
-    unsafe = derive_hf(security=_flag_bin)
+    unsafe = derive_hf(security=flag_bin)
     assert cli("check", "hub-model", "--source", "hf-scan", recordings=unsafe)[0] == EXIT_OK
     [alert] = cli("alerts", "hub-model")[1]["alerts"]
 

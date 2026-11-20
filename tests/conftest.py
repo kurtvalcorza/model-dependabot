@@ -167,6 +167,14 @@ def derive_hf(tmp_path: Path) -> Callable[..., Path]:
     return derive
 
 
+def flag_bin(info: Any) -> Any:
+    """A ``derive_hf`` security change: the hub flags ``pytorch_model.bin`` of the EICAR
+    repository unsafe."""
+    issues = info["securityRepoStatus"]["filesWithIssues"]
+    issues.append({"path": "pytorch_model.bin", "level": "unsafe"})
+    return info
+
+
 UPSTREAM_DIRS = (
     "crossref",
     "datacite",
