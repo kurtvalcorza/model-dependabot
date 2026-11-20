@@ -170,6 +170,8 @@ PLACEHOLDERS = frozenset(
 )
 IMPACT_QUESTION = "whether this alert affects model {model_id}"
 CLOSING = "How this alert closes: "
+# Feature 011 (review R2-2): a watch event does not close, so its last step is worded for an event.
+WATCH_CLOSING = "When a check stops recording it: "
 _TEXT_FIELDS = ("limitations", "closes", "fix")
 _LIST_FIELDS = ("not_established", "steps")
 _PLACEHOLDER = re.compile(r"\{([^}]*)\}")
@@ -223,7 +225,7 @@ def _rule_texts(rule_id: str, table: Any) -> RuleTexts:
 
 
 def load_rule_texts(path: Path | str = RULE_TEXTS) -> tuple[int, dict[str, RuleTexts]]:
-    """Read and check the rule texts: one table per rule ID of ``RULES``, every field present
+    """Read and check the rule texts: one table per rule ID of ``PAGES``, every field present
     and not empty, only the placeholders of ``PLACEHOLDERS``, the impact question first."""
     with open(path, "rb") as handle:
         data = tomllib.load(handle)
@@ -243,6 +245,11 @@ def load_rule_texts(path: Path | str = RULE_TEXTS) -> tuple[int, dict[str, RuleT
 @functools.cache
 def _loaded() -> tuple[int, dict[str, RuleTexts]]:
     return load_rule_texts()
+
+
+def closing_for(rule: Rule) -> str:
+    """The words that introduce a page's last review step: an alert closes, a watch event stops."""
+    return WATCH_CLOSING if rule in WATCH_RULES else CLOSING
 
 
 def rule_texts_version() -> int:

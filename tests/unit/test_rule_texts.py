@@ -19,6 +19,7 @@ VERDICTS = json.loads((ROOT / "tests" / "fixtures" / "advice" / "verdicts.json")
 RECORDED = {
     1: "0b4abde933dd879d2a6fd1ba0dd9084a97140c0e253f14c6393cd8970e1b0819",
     2: "f25f735c24e68a4da76d32b64fa107d24aa882fbb9aec672cde6257bd59dd1be",  # feature 011: MDB601
+    3: "2f71d0f164f47a16ddac9a728625597bd4a6f3151f5b51d224f82863497f6e97",  # review R2-2
 }
 FIELDS = ("limitations", "closes", "fix", "not_established", "steps")
 
@@ -125,7 +126,7 @@ def test_a_rule_without_steps_is_refused(tmp_path: Path) -> None:
             "impact",
         ),
         ("{alert_id}", "{secret}", "placeholder"),
-        ("version = 2", 'version = "one"', "version"),
+        ("version = 3", 'version = "one"', "version"),
     ],
 )
 def test_a_malformed_file_is_refused(tmp_path: Path, change: str, by: str, message: str) -> None:

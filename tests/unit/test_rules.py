@@ -93,7 +93,8 @@ def test_every_page_is_in_step_with_the_rule_texts() -> None:
     renderer = _renderer()
     for rule in rules.PAGES:
         page = ROOT / rule.page
-        rendered = renderer.render(page.read_text("utf-8"), rules.texts_for(rule.rule_id))
+        texts = rules.texts_for(rule.rule_id)
+        rendered = renderer.render(page.read_text("utf-8"), texts, rules.closing_for(rule))
         assert rendered.encode("utf-8") == page.read_bytes(), f"{rule.page}: run the renderer"
 
 
@@ -115,3 +116,13 @@ def test_the_lineage_page_is_its_own_and_mdb501_is_about_disabled_bases() -> Non
     for kind in ("weight_file_scan", "dataset_retracted", "licence_changed", "base_model_disabled"):
         assert f"`{kind}`" in text
     assert "lineage" not in _page(rules.rule_for("base_model_disabled"))
+
+
+def test_the_lineage_page_never_says_its_event_closes() -> None:
+    """Review R2-2: a watch event's last step is not "How this alert closes"."""
+    [page] = rules.WATCH_RULES
+    text = _page(page)
+    assert "How this alert closes" not in text
+    assert "It is not an alert and does not close" not in text
+    assert rules.closing_for(page) == rules.WATCH_CLOSING
+    assert rules.closing_for(rules.rule_for("base_model_disabled")) == rules.CLOSING
