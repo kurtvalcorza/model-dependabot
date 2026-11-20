@@ -99,3 +99,25 @@ on a `git archive` of `41f4f1b` against the lineage tests: all 31 were killed, i
 survivors R2 (M12), R3 (M16), R4 (M14), R5 (M22) and R10 (E01, E02), and the first-visit rule R1
 replaced (M16b). The equivalent mutant M03 of `mutate2.py` was left out. `rv011/probe_diamond.py`
 now gives `[7]` in both namings. Feature 010's CLI baseline replays unchanged with MDB601 added.
+
+## Review round 2 (2026-11-20)
+
+Fixes for R2-1 to R2-4, following the owner's rulings. Gates on `410d333` (`src` tree
+`fdbb597e7e9d7e044acf0e1926295034bea68044`), each run on its own with no pipe:
+
+| Gate | Exit | Counts |
+| :-- | :-- | :-- |
+| `uv run pytest -q` | 0 | 2139 passed, 6 skipped, 13 deselected (1698 s) |
+| `uv run ruff check` | 0 | All checks passed |
+| `uv run ruff format --check` | 0 | 351 files already formatted |
+
+`rv011b-probes/fuzz_walk.py` (seeds 1 and 3) and an extended copy that also compares the reported
+paths (`md011-fuzz2.py`, seeds 1, 7 and 42) were each run over 6000 runs: 1500 random graphs, each
+under 4 id permutations. They found 0 mismatches against the brute-force oracle and 0 differences
+across permutations in the finding set, reach, `relationship_unspecified` mark, path types and path
+models.
+
+`md011-mutate3.py` and the reviewer's `mutate-mine.py` no longer apply as written, because the
+lines their M04 and N3 mutants target were rewritten. `md011-mutate4.py` re-aims both, adds the two
+round 2 rules, and runs on a `git archive` of `410d333`: 41 of 41 mutants killed, including N4, N5,
+N8, N9 and N12. 010's CLI baseline and the SC-001 baseline replay unchanged.
