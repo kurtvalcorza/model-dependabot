@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from model_dependabot.assurance.advice import MARKER_LIMITATION, advice_view
+from model_dependabot.assurance.advice import MARKER_LIMITATION, MARKER_NOT_IMPORTED, advice_view
 from model_dependabot.rules import rule_for, texts_for
 from model_dependabot.store import Store
 
@@ -89,8 +89,11 @@ def test_limitations_are_the_rule_s_text(advice_db: tuple[Path, dict[str, int]])
         advice = view(db, alert_id)
         rule_id = advice["rule_doc"].rsplit("/", 1)[-1].removesuffix(".md")
         assert advice["limitations"][0]["text"] == texts_for(rule_id).limitations, name
+    # The fixture's package entries are written without a marker: not recorded (issue #28).
     package = view(db, ids["package_advisory"])["limitations"]
     assert [s["text"] for s in package][-1] == MARKER_LIMITATION
+    imported = view(db, ids["imported_package"])["limitations"]
+    assert [s["text"] for s in imported][-1] == MARKER_NOT_IMPORTED
 
 
 def test_an_alias_group_is_one_view_with_every_id_and_its_stored_severity(

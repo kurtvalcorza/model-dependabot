@@ -41,6 +41,9 @@ NO_VERSION = "the alert's model has no stored version"
 UNKNOWN_WHY = "no source observes runtime use and the owner has not declared it for this alert"
 NOT_USED = "not_used_at_runtime"
 OWNER_ORIGINS = ("manifest", "record")
+MARKER_SET = "set"
+MARKER_NONE = "none"
+MARKER_NOT_RECORDED = "not_recorded"
 
 Versions = Mapping[int, Mapping[str, Any]]
 
@@ -156,6 +159,20 @@ def _revision(entry: Mapping[str, Any]) -> str | None:
     return entry.get("hub_revision")
 
 
+def marker(entry: Mapping[str, Any]) -> dict[str, Any] | None:
+    """A package entry's environment marker as stored (issue #28): ``set`` with its expression,
+    ``none`` for a lock line without one, or ``not_recorded`` for an entry recorded before markers
+    were stored or imported from an inventory that carries none; ``None`` for other kinds."""
+    if entry["kind"] != "package":
+        return None
+    stored = entry.get("marker")
+    if stored is None:
+        return {"state": MARKER_NOT_RECORDED, "expression": None}
+    if stored == "":
+        return {"state": MARKER_NONE, "expression": None}
+    return {"state": MARKER_SET, "expression": stored}
+
+
 def _place(match: Mapping[str, Any]) -> dict[str, Any]:
     entry, origin = match["entry"], match["origin"]
     return {
@@ -164,6 +181,7 @@ def _place(match: Mapping[str, Any]) -> dict[str, Any]:
         "section": None if origin == "import" else SECTIONS[entry["kind"]],
         "location": _location(entry),
         "revision": _revision(entry),
+        "marker": marker(entry),
     }
 
 
