@@ -32,7 +32,8 @@ from model_dependabot.reports import view_state
 from model_dependabot.rules import CLOSING, rule_for, texts_for
 from model_dependabot.store import Store
 
-SCHEMA = "advice/1"
+# advice/2 adds places[].marker (issue #28).
+SCHEMA = "advice/2"
 IMPACT = "impact undetermined"
 NOT_RECORDED = "not recorded"
 EXCEPTION_SOURCE = "exception"

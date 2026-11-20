@@ -14,7 +14,7 @@ part of the contract (FR-003).
 
 | Field | Type | Rule |
 | :-- | :-- | :-- |
-| `schema` | text | `advice/1`; bumped when a field is added, renamed or removed |
+| `schema` | text | `advice/2`; bumped when a field is added, renamed or removed (`advice/1` was feature 010 as merged; `advice/2` adds `places[].marker`, issue #28) |
 | `alert_id` | integer | the alert's id, repeated so the object can be read alone |
 | `severity` | object | `{value, origin, note}`: the stored `severity` and `severity_origin` unchanged (FR-004); `note` is one fixed text per origin, matching `matching/severity.py:90-103`: `policy` "fixed by the service for this alert kind"; `database_specific` "as published by the source"; `cvss_v3` and `cvss_v4` "band of the source's CVSS vector"; `unknown` "the source gave no severity". A test refuses any other origin. No score, weight or rank field exists |
 | `entry` | object | Affected entry, below |
@@ -44,11 +44,13 @@ part of the contract (FR-003).
 | `closed_by_version` | integer or null | the alert's stored value (`reports.py:85`): the fixing version of a `fixed` alert (spec, Edge Cases) |
 | `places` | array | one item per (version, entry) that holds it, version descending, then in the order `store.entries` returns (`entry_id` ascending); items carry no `entry_id` |
 
-Each item of `places`: `{version, origin, section, location, revision}` where `origin` is the version's
+Each item of `places`: `{version, origin, section, location, revision, marker}` where `origin` is the version's
 stored origin (`manifest`, `record`, `import` or `null` for a version registered before feature 003,
 shown as `legacy` in text), `section` is the manifest section that declares it (table below) or null for
 an `import` version, `location` is the local path or `hf:<repo>/<file>` (as `_where`,
-`lifecycle.py:1269-1274`) or null, and `revision` the pinned hub revision or package version.
+`lifecycle.py:1269-1274`) or null, `revision` the pinned hub revision or package version, and `marker`
+(added in `advice/2`, issue #28) null for an entry that is not a package, else `{state, expression}`
+with `state` `set`, `none` or `not_recorded` (Issue #28, below).
 
 | Entry kind | `section` |
 | :-- | :-- |

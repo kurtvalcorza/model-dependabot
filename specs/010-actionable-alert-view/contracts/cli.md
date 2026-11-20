@@ -32,7 +32,7 @@ advisory on an `import` version, abridged:
 
 ```json
 "advice": {
-  "schema": "advice/1",
+  "schema": "advice/2",
   "alert_id": 7,
   "severity": {"value": "HIGH", "origin": "cvss_v3", "note": "band of the source's CVSS vector"},
   "entry": {
@@ -135,6 +135,6 @@ error. `--advice` adds no code and changes none (FR-017).
   note of `advice_summary`, worded for the `--state` filter.
 - `check`, `history`, `run show` and every other command refuse `--advice` as any unknown option
   (exit 1).
-- Issue #28: a package place carries `marker` (`set`, `none` or `not_recorded`; data-model.md,
+- Issue #28: `schema` is `advice/2`, which adds `places[].marker` to `advice/1`. A package place carries `marker` (`set`, `none` or `not_recorded`; data-model.md,
   Issue #28) and its text line ends `, marker <expression>`, `, no marker` or
   `, marker not recorded`. The marker limitation is listed only for a `not_recorded` marker.
