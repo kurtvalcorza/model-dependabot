@@ -5,11 +5,11 @@ description = "Dependency alerts for AI models: a pinned inventory checked again
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "packaging==26.3",
+    "packaging==26.4",
     "jsonschema==4.26.0",
     "picklescan==1.0.5",
     "cvss==3.6",
-    "pyyaml==6.0.3",
+    "pyyaml==6.0.4",
 ]
 
 [project.scripts]
@@ -17,7 +17,7 @@ model-dependabot = "model_dependabot.cli:main"
 
 [dependency-groups]
 dev = [
-    "hypothesis==6.168.5",
+    "hypothesis==6.170.17",
     "pytest",
     "ruff",
 ]
