@@ -11,3 +11,5 @@ src/model_dependabot/safe_globals/safe-globals.toml -text
 src/model_dependabot/rule_texts/rule-texts.toml -text
 # The rule pages are compared byte for byte with their rendering (tests/unit/test_rules.py).
 docs/rules/*.md text eol=lf
+# spec-kit shell scripts run under bash; a CRLF checkout breaks them.
+*.sh text eol=lf
