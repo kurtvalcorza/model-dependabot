@@ -717,15 +717,20 @@ class Store:
         store.read_only = True
         uri = store.path.resolve().as_uri() + "?mode=ro"
         store.conn = sqlite3.connect(uri, uri=True)
-        store.conn.row_factory = sqlite3.Row
-        tables = store.tables()
-        if (
-            "upstream_observations" not in tables
-            or "check_runs" not in tables
-            or "trigger" not in store.columns("check_runs")
-        ):
+        # The caller never receives a store that failed to open, so it cannot close the
+        # connection: close it here on any failure (RFC #38 follow-up).
+        try:
+            store.conn.row_factory = sqlite3.Row
+            tables = store.tables()
+            if (
+                "upstream_observations" not in tables
+                or "check_runs" not in tables
+                or "trigger" not in store.columns("check_runs")
+            ):
+                raise OutdatedDatabaseError("run any check once to upgrade this database")
+        except BaseException:
             store.conn.close()
-            raise OutdatedDatabaseError("run any check once to upgrade this database")
+            raise
         return store
 
     def __init__(self, path: Path | str, *, now: Callable[[], datetime] | None = None) -> None:
@@ -734,21 +739,27 @@ class Store:
         self.evidence_dir = self.path.parent / "evidence"
         self._now = now or (lambda: datetime.now(UTC))
         self.conn = sqlite3.connect(self.path)
-        self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA foreign_keys = ON")
-        had_targets = "check_run_targets" in self.tables()
-        self.conn.executescript(SCHEMA)
-        self._mark_first_linked_run(had_targets)
-        self._add_column("etag_cache", "used_at", "TEXT")
-        self._add_column("model_versions", "registration_record_sha256", "TEXT")
-        if "canonical_sha256" not in self.columns("evidence"):
-            self._add_canonical_hashes()
-        self._add_origins()
-        self._widen_watch_kinds()
-        self._widen_alert_kinds()
-        self._add_globals_columns()
-        self._rekey_repository_alerts()
-        self._add_markers()
+        # A failed upgrade raises before the caller holds the store, so it cannot close the
+        # connection: close it here on any failure, interrupts included (RFC #38 follow-up).
+        try:
+            self.conn.row_factory = sqlite3.Row
+            self.conn.execute("PRAGMA foreign_keys = ON")
+            had_targets = "check_run_targets" in self.tables()
+            self.conn.executescript(SCHEMA)
+            self._mark_first_linked_run(had_targets)
+            self._add_column("etag_cache", "used_at", "TEXT")
+            self._add_column("model_versions", "registration_record_sha256", "TEXT")
+            if "canonical_sha256" not in self.columns("evidence"):
+                self._add_canonical_hashes()
+            self._add_origins()
+            self._widen_watch_kinds()
+            self._widen_alert_kinds()
+            self._add_globals_columns()
+            self._rekey_repository_alerts()
+            self._add_markers()
+        except BaseException:
+            self.conn.close()
+            raise
 
     def _mark_first_linked_run(self, had_targets: bool) -> None:
         """Record the first run that records its targets, once (PR #15 round 3, T3).
