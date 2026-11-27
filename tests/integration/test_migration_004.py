@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import closing_opened_connections
 from model_dependabot.store import Store
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
@@ -156,7 +157,9 @@ class _InterruptedRebuild(Store):
                 raise KeyboardInterrupt("interrupted inside the alerts rebuild")
 
 
-def test_an_interrupted_rebuild_leaves_the_old_table_and_index(tmp_path: Path) -> None:
+def test_an_interrupted_rebuild_leaves_the_old_table_and_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     path = pre_004_database(tmp_path / "old.db")
     conn = sqlite3.connect(path)
     old_table, old_index = (
@@ -165,7 +168,7 @@ def test_an_interrupted_rebuild_leaves_the_old_table_and_index(tmp_path: Path) -
     )
     conn.close()
     before = _alerts(path)
-    with pytest.raises(KeyboardInterrupt):
+    with closing_opened_connections(monkeypatch), pytest.raises(KeyboardInterrupt):
         _InterruptedRebuild(path, now=lambda: NOW)
     conn = sqlite3.connect(path)
     try:

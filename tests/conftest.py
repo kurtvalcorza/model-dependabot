@@ -6,12 +6,14 @@ with socket connections and name resolution blocked, so an accidental network ca
 
 from __future__ import annotations
 
+import gc
 import importlib.util
 import json
 import shutil
 import socket
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -56,6 +58,43 @@ def _unsynced_sqlite(monkeypatch: pytest.MonkeyPatch) -> None:
     depends on durability across a power loss.
     """
     monkeypatch.setattr(sqlite3, "connect", _connect_unsynced)
+
+
+@pytest.fixture(autouse=True)
+def _collect_unclosed_connections() -> Iterator[None]:
+    """RFC #38 item 10: a connection a test leaves open fails that test.
+
+    An unclosed ``sqlite3.Connection`` sits in a reference cycle, so only the cyclic collector
+    frees it, and its ``ResourceWarning`` would otherwise surface wherever the collector next
+    runs, often after the session, where it does not fail the run. Collecting at each teardown
+    raises it in the test that leaked, as an error (``filterwarnings`` in ``pyproject.toml``).
+    """
+    yield
+    gc.collect()
+
+
+@contextmanager
+def closing_opened_connections(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Close every SQLite connection opened inside the block when it ends (RFC #38 item 10).
+
+    A ``Store(...)`` that fails during an upgrade raises before it returns, so the test never
+    holds the store and cannot close the connection it opened; wrap such an open in this.
+    """
+    connect = sqlite3.connect
+    opened: list[sqlite3.Connection] = []
+
+    def tracking(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        connection = connect(*args, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", tracking)
+    try:
+        yield
+    finally:
+        monkeypatch.setattr(sqlite3, "connect", connect)
+        for connection in opened:
+            connection.close()
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"

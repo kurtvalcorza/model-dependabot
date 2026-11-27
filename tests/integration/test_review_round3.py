@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 import sqlite3
+from contextlib import closing
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -75,7 +76,7 @@ def test_a_lapse_does_not_apply_an_exception_recorded_since_the_last_weight_chec
 
 
 def _snapshots(tmp_path: Path) -> list[str]:
-    with sqlite3.connect(tmp_path / "db" / "md.db") as conn:
+    with closing(sqlite3.connect(tmp_path / "db" / "md.db")) as conn, conn:
         rows = conn.execute(
             "SELECT detail FROM evidence WHERE source = 'globals-snapshot' ORDER BY evidence_id"
         ).fetchall()
@@ -296,7 +297,7 @@ def test_an_exception_for_other_bytes_is_no_renewal(cli: Any, tmp_path: Path, cl
 
 
 def _scan_urls(tmp_path: Path, alert_id: int) -> list[str]:
-    with sqlite3.connect(tmp_path / "db" / "md.db") as conn:
+    with closing(sqlite3.connect(tmp_path / "db" / "md.db")) as conn, conn:
         rows = conn.execute(
             "SELECT e.url FROM alert_evidence l JOIN evidence e USING (evidence_id)"
             " WHERE l.alert_id = ? AND e.source = 'picklescan' ORDER BY e.evidence_id",

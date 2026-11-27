@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import closing_opened_connections
 from model_dependabot.store import WATCH_KINDS, Store
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
@@ -236,7 +237,9 @@ def _columns(path: Path, table: str) -> set[str]:
         conn.close()
 
 
-def test_a_failed_upgrade_leaves_the_old_database_as_it_was(tmp_path: Path) -> None:
+def test_a_failed_upgrade_leaves_the_old_database_as_it_was(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     path = tmp_path / "old.db"
     pre_003_database(path)
     conn = sqlite3.connect(path)
@@ -246,7 +249,10 @@ def test_a_failed_upgrade_leaves_the_old_database_as_it_was(tmp_path: Path) -> N
             " BEGIN SELECT RAISE(ABORT, 'interrupted'); END"
         )
     conn.close()
-    with pytest.raises(sqlite3.IntegrityError, match="interrupted"):
+    with (
+        closing_opened_connections(monkeypatch),
+        pytest.raises(sqlite3.IntegrityError, match="interrupted"),
+    ):
         _store(path)
     assert "origin" not in _columns(path, "model_versions")
     assert "format_origin" not in _columns(path, "inventory_entries")
