@@ -14,6 +14,7 @@ import shutil
 import sqlite3
 import time
 from collections.abc import Callable
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -199,7 +200,7 @@ def test_a_pre_003_database_is_read_with_defaults_and_never_upgraded(
     [entry] = report["assurance"]["entries"]
     assert entry["status"] == "declared-but-unverified"
     assert {claim["origin"] for claim in entry["claims"]} == {"legacy"}
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(model_versions)")}
     assert "origin" not in columns
 
@@ -208,7 +209,7 @@ def test_a_database_older_than_feature_002_is_refused(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     db = tmp_path / "ancient.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.executescript(
             "CREATE TABLE models (model_id TEXT PRIMARY KEY, created_at TEXT);"
             "CREATE TABLE model_versions (model_id TEXT, version INTEGER, registered_at TEXT,"

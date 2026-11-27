@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import closing_opened_connections
 from model_dependabot.store import Store, canonical_sha256
 
 NOW = datetime(2026, 11, 27, 9, 0, tzinfo=UTC)
@@ -57,7 +58,9 @@ def pre_006_database(path: Path) -> None:
     _execute(path, "ALTER TABLE evidence DROP COLUMN canonical_sha256")
 
 
-def test_an_interrupted_canonical_back_fill_leaves_no_column(tmp_path: Path) -> None:
+def test_an_interrupted_canonical_back_fill_leaves_no_column(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     path = tmp_path / "old.db"
     pre_006_database(path)
     _execute(  # makes the back-fill fail after the column would have been added
@@ -65,12 +68,17 @@ def test_an_interrupted_canonical_back_fill_leaves_no_column(tmp_path: Path) -> 
         "CREATE TRIGGER fail_back_fill BEFORE UPDATE ON evidence"
         " BEGIN SELECT RAISE(ABORT, 'interrupted'); END",
     )
-    with pytest.raises(sqlite3.IntegrityError, match="interrupted"):
+    with (
+        closing_opened_connections(monkeypatch),
+        pytest.raises(sqlite3.IntegrityError, match="interrupted"),
+    ):
         _store(path)
     assert "canonical_sha256" not in _columns(path, "evidence")
 
 
-def test_the_next_open_completes_the_interrupted_upgrade(tmp_path: Path) -> None:
+def test_the_next_open_completes_the_interrupted_upgrade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     path = tmp_path / "old.db"
     pre_006_database(path)
     _execute(
@@ -78,7 +86,7 @@ def test_the_next_open_completes_the_interrupted_upgrade(tmp_path: Path) -> None
         "CREATE TRIGGER fail_back_fill BEFORE UPDATE ON evidence"
         " BEGIN SELECT RAISE(ABORT, 'interrupted'); END",
     )
-    with pytest.raises(sqlite3.IntegrityError):
+    with closing_opened_connections(monkeypatch), pytest.raises(sqlite3.IntegrityError):
         _store(path)
     _execute(path, "DROP TRIGGER fail_back_fill")
     with _store(path) as store:

@@ -32,6 +32,13 @@ addopts = "-m 'not live'"
 markers = [
     "live: needs the real source over the network; excluded from the default run",
 ]
+# RFC #38 item 10: an unclosed SQLite connection fails the suite. Python reports it as a
+# ResourceWarning from the connection's finalizer, which pytest re-raises as an unraisable
+# exception warning, so both must be errors for a leak to fail the test it happens in.
+filterwarnings = [
+    "error::ResourceWarning",
+    "error::pytest.PytestUnraisableExceptionWarning",
+]
 
 [tool.ruff]
 line-length = 100
