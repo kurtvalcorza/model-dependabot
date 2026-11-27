@@ -739,14 +739,8 @@ class Store:
         had_targets = "check_run_targets" in self.tables()
         self.conn.executescript(SCHEMA)
         self._mark_first_linked_run(had_targets)
-        if "used_at" not in self.columns("etag_cache"):
-            with self.conn:
-                self.conn.execute("ALTER TABLE etag_cache ADD COLUMN used_at TEXT")
-        if "registration_record_sha256" not in self.columns("model_versions"):
-            with self.conn:
-                self.conn.execute(
-                    "ALTER TABLE model_versions ADD COLUMN registration_record_sha256 TEXT"
-                )
+        self._add_column("etag_cache", "used_at", "TEXT")
+        self._add_column("model_versions", "registration_record_sha256", "TEXT")
         if "canonical_sha256" not in self.columns("evidence"):
             self._add_canonical_hashes()
         self._add_origins()
@@ -871,13 +865,30 @@ class Store:
             if "marker" not in self.columns("inventory_entries"):
                 self.conn.execute("ALTER TABLE inventory_entries ADD COLUMN marker TEXT")
 
+    def _add_column(self, table: str, column: str, declaration: str) -> None:
+        """Add one nullable column that needs no back-fill, in one transaction (RFC #38 item 1).
+
+        The column is looked for again under the write lock, because another process may have
+        added it while this one waited (G4).
+        """
+        if column in self.columns(table):
+            return
+        with self._atomic():
+            if column not in self.columns(table):
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+
     def _add_canonical_hashes(self) -> None:
         """Add ``evidence.canonical_sha256`` to an older database and fill it where it can (006).
 
         A row whose body is no longer in the evidence store, or is not JSON, keeps an empty value
-        and is compared by its raw hash, as before.
+        and is compared by its raw hash, as before. The column and its back-fill are one
+        transaction (RFC #38 item 1): ``sqlite3`` would otherwise commit the ``ALTER`` on its own,
+        and an open interrupted after it would leave the column without the back-fill, which no
+        later open would notice because it only checks that the column exists.
         """
-        with self.conn:
+        with self._atomic():
+            if "canonical_sha256" in self.columns("evidence"):  # G4: added while this one waited
+                return
             self.conn.execute(
                 "ALTER TABLE evidence ADD COLUMN canonical_sha256 TEXT"
                 " CHECK (canonical_sha256 IS NULL OR length(canonical_sha256) = 64)"
