@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import closing_opened_connections
+from conftest import asserting_connections_closed
 from model_dependabot.store import Store, canonical_sha256
 
 NOW = datetime(2026, 11, 27, 9, 0, tzinfo=UTC)
@@ -69,7 +69,7 @@ def test_an_interrupted_canonical_back_fill_leaves_no_column(
         " BEGIN SELECT RAISE(ABORT, 'interrupted'); END",
     )
     with (
-        closing_opened_connections(monkeypatch),
+        asserting_connections_closed(monkeypatch),
         pytest.raises(sqlite3.IntegrityError, match="interrupted"),
     ):
         _store(path)
@@ -86,7 +86,7 @@ def test_the_next_open_completes_the_interrupted_upgrade(
         "CREATE TRIGGER fail_back_fill BEFORE UPDATE ON evidence"
         " BEGIN SELECT RAISE(ABORT, 'interrupted'); END",
     )
-    with closing_opened_connections(monkeypatch), pytest.raises(sqlite3.IntegrityError):
+    with asserting_connections_closed(monkeypatch), pytest.raises(sqlite3.IntegrityError):
         _store(path)
     _execute(path, "DROP TRIGGER fail_back_fill")
     with _store(path) as store:

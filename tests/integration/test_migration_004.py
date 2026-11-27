@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import closing_opened_connections
+from conftest import asserting_connections_closed
 from model_dependabot.store import Store
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
@@ -168,7 +168,7 @@ def test_an_interrupted_rebuild_leaves_the_old_table_and_index(
     )
     conn.close()
     before = _alerts(path)
-    with closing_opened_connections(monkeypatch), pytest.raises(KeyboardInterrupt):
+    with asserting_connections_closed(monkeypatch), pytest.raises(KeyboardInterrupt):
         _InterruptedRebuild(path, now=lambda: NOW)
     conn = sqlite3.connect(path)
     try:

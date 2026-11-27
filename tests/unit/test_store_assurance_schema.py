@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import closing_opened_connections
+from conftest import asserting_connections_closed
 from model_dependabot.store import WATCH_KINDS, Store
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
@@ -250,7 +250,7 @@ def test_a_failed_upgrade_leaves_the_old_database_as_it_was(
         )
     conn.close()
     with (
-        closing_opened_connections(monkeypatch),
+        asserting_connections_closed(monkeypatch),
         pytest.raises(sqlite3.IntegrityError, match="interrupted"),
     ):
         _store(path)

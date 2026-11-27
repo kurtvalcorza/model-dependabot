@@ -13,7 +13,7 @@ import shutil
 import socket
 import sqlite3
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -46,7 +46,10 @@ _connect = sqlite3.connect
 
 def _connect_unsynced(*args: Any, **kwargs: Any) -> sqlite3.Connection:
     connection = _connect(*args, **kwargs)
-    connection.execute("PRAGMA synchronous = OFF")
+    # A file that is not a database: hand the connection back as production would get it, so
+    # the store's own first statement raises and the store must close it.
+    with suppress(sqlite3.DatabaseError):
+        connection.execute("PRAGMA synchronous = OFF")
     return connection
 
 
@@ -74,11 +77,12 @@ def _collect_unclosed_connections() -> Iterator[None]:
 
 
 @contextmanager
-def closing_opened_connections(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Close every SQLite connection opened inside the block when it ends (RFC #38 item 10).
+def asserting_connections_closed(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Fail if a SQLite connection opened inside the block is still open when it ends.
 
-    A ``Store(...)`` that fails during an upgrade raises before it returns, so the test never
-    holds the store and cannot close the connection it opened; wrap such an open in this.
+    A ``Store(...)`` that fails during an upgrade raises before the caller holds the store, so
+    the store must close its own connection (RFC #38). Wrap such a failing open in this: any
+    connection left open is closed here, and the test fails.
     """
     connect = sqlite3.connect
     opened: list[sqlite3.Connection] = []
@@ -88,13 +92,25 @@ def closing_opened_connections(monkeypatch: pytest.MonkeyPatch) -> Iterator[None
         opened.append(connection)
         return connection
 
+    def is_open(connection: sqlite3.Connection) -> bool:
+        try:
+            connection.total_changes  # noqa: B018 - raises once the connection is closed
+        except sqlite3.ProgrammingError:
+            return False
+        return True
+
     monkeypatch.setattr(sqlite3, "connect", tracking)
     try:
         yield
     finally:
         monkeypatch.setattr(sqlite3, "connect", connect)
-        for connection in opened:
+        left_open = [connection for connection in opened if is_open(connection)]
+        for connection in left_open:
             connection.close()
+    if not opened:
+        pytest.fail("no SQLite connection was opened inside the block")
+    if left_open:
+        pytest.fail(f"{len(left_open)} of {len(opened)} SQLite connection(s) left open")
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
